@@ -11,6 +11,7 @@ import {
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { IOrder } from '../../../types';
+import { ITimelineEvent } from '../../../shared/domain/orders/types';
 import { formatPrice } from '../../../utils/format';
 import toast from 'react-hot-toast';
 import { 
@@ -33,25 +34,51 @@ import {
 
 /**
  * Status Categorization:
- * Completed/Terminal statuses: COMPLETED, PAID, CLOSED, ARCHIVED, CANCELLED, PAYMENT_COMPLETED.
- * Active statuses: NEW, PLACED, ACCEPTED, CHEF_ASSIGNED, PREPARING, PAUSED, READY, PICKED_UP, DELIVERING, DELIVERED, SERVED, DINING, BILL_REQUESTED.
+ * Completed/Terminal statuses:
+ * - Cancelled, refunded, archived, closed.
+ * - Explicit COMPLETED, PAID, PAYMENT_COMPLETED.
+ * - SERVED / DELIVERED / DINING_COMPLETED when payment is completed (paymentStatus === 'paid').
+ * 
+ * Active statuses:
+ * - NEW, PLACED, ACCEPTED, CHEF_ASSIGNED, PREPARING, PAUSED (Kitchen preparation)
+ * - READY, PICKED_UP (Awaiting waiter service)
+ * - SERVED, DELIVERED, DINING, DINING_COMPLETED, BILL_REQUESTED (Served to table, payment still pending)
  */
-export const isCompletedOrderStatus = (status?: string): boolean => {
+export const isCompletedOrderStatus = (status?: string, paymentStatus?: string): boolean => {
   if (!status) return false;
-  const s = status.toUpperCase();
-  return (
-    s === 'COMPLETED' || 
-    s === 'PAID' || 
-    s === 'CLOSED' || 
-    s === 'ARCHIVED' || 
-    s === 'CANCELLED' || 
-    s === 'PAYMENT_COMPLETED'
-  );
+  const s = status.toUpperCase().trim();
+  const p = (paymentStatus || '').toLowerCase().trim();
+
+  // Cancelled or refunded orders are completed/terminal
+  if (s === 'CANCELLED' || p === 'refunded' || p === 'cancelled') {
+    return true;
+  }
+
+  // Archived or Closed orders
+  if (s === 'ARCHIVED' || s === 'CLOSED') {
+    return true;
+  }
+
+  // Explicit terminal status with paid
+  if (s === 'PAID' || s === 'PAYMENT_COMPLETED') {
+    return true;
+  }
+
+  // Food served / dining finished AND paid = Completed
+  if (p === 'paid' && (s === 'SERVED' || s === 'DELIVERED' || s === 'DINING_COMPLETED' || s === 'COMPLETED')) {
+    return true;
+  }
+
+  // Completed status fallback if not explicitly pending
+  if (s === 'COMPLETED' && p !== 'pending') {
+    return true;
+  }
+
+  return false;
 };
 
-export const isActiveOrderStatus = (status?: string): boolean => {
-  if (!status) return false;
-  return !isCompletedOrderStatus(status);
+export const isActiveOrderStatus = (status?: string, paymentStatus?: string): boolean => {
+  return !isCompletedOrderStatus(status, paymentStatus);
 };
 
 export const WaiterLiveOrdersPage: React.FC = () => {
@@ -60,6 +87,7 @@ export const WaiterLiveOrdersPage: React.FC = () => {
   const [orders, setOrders] = useState<IOrder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState<IOrder | null>(null);
+  const [servingOrderId, setServingOrderId] = useState<string | null>(null);
 
   // Tab State: 'active' | 'completed' (default: 'active')
   const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
@@ -105,22 +133,29 @@ export const WaiterLiveOrdersPage: React.FC = () => {
     return () => unsubscribe();
   }, [user?.tenantId]);
 
-  // Handle Mark Served / Deliver to Table
+  // Handle Mark Served / Deliver to Table (Manual Waiter Action)
   const handleDeliverOrder = async (order: IOrder) => {
-    if (!user?.tenantId) return;
+    if (!user?.tenantId || servingOrderId) return;
+    setServingOrderId(order.orderId);
     try {
       const docRef = doc(db, 'restaurants', user.tenantId, 'orders', order.orderId);
-      const timelineEvent = {
-        type: 'DELIVERED',
+      const timestamp = new Date().toISOString();
+      const serverName = user.displayName || user.email || 'Waiter';
+
+      const timelineEvent: ITimelineEvent = {
+        type: 'SERVED',
         title: 'Food Served to Table',
-        description: `Delivered by Server ${user.displayName || user.email || 'Waiter'}`,
-        timestamp: new Date().toISOString(),
-        performedBy: user.displayName || user.email || 'Waiter'
+        description: `Delivered and served to Table ${order.tableNumber} by Server ${serverName}`,
+        timestamp,
+        performedBy: serverName
       };
 
       await updateDoc(docRef, { 
-        status: 'DELIVERED', 
-        deliveredAt: new Date().toISOString(),
+        status: 'SERVED', 
+        servedAt: timestamp,
+        deliveredAt: timestamp,
+        waiterId: user.uid,
+        waiterName: serverName,
         timeline: arrayUnion(timelineEvent)
       });
 
@@ -128,13 +163,15 @@ export const WaiterLiveOrdersPage: React.FC = () => {
     } catch (e) {
       console.error('handleDeliverOrder error:', e);
       toast.error('Failed to update order status.');
+    } finally {
+      setServingOrderId(null);
     }
   };
 
   // 1. Separate Active vs Completed Datasets
   const activeOrders = useMemo(() => {
     return orders
-      .filter(o => isActiveOrderStatus(o.status))
+      .filter(o => isActiveOrderStatus(o.status, o.paymentStatus))
       .sort((a, b) => {
         // Priority sort for active: READY first, then PREPARING, then newest
         const aReady = a.status === 'READY';
@@ -147,15 +184,16 @@ export const WaiterLiveOrdersPage: React.FC = () => {
         if (aPrep && !bPrep) return -1;
         if (!aPrep && bPrep) return 1;
 
-        return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+        const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+        const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+        return timeB - timeA;
       });
   }, [orders]);
 
   const completedOrders = useMemo(() => {
     return orders
-      .filter(o => isCompletedOrderStatus(o.status))
+      .filter(o => isCompletedOrderStatus(o.status, o.paymentStatus))
       .sort((a, b) => {
-        // Newest completed orders first
         const timeA = new Date((a as any).completedAt || a.updatedAt || a.createdAt || 0).getTime();
         const timeB = new Date((b as any).completedAt || b.updatedAt || b.createdAt || 0).getTime();
         return timeB - timeA;
@@ -513,7 +551,7 @@ export const WaiterLiveOrdersPage: React.FC = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
             {filteredOrders.map(order => {
-              const isCompleted = isCompletedOrderStatus(order.status);
+              const isCompleted = isCompletedOrderStatus(order.status, order.paymentStatus);
               const isReady = order.status === 'READY';
               const isPreparing = order.status === 'PREPARING';
               const isDelivered = order.status === 'DELIVERED' || order.status === 'SERVED';
@@ -560,17 +598,19 @@ export const WaiterLiveOrdersPage: React.FC = () => {
                           : isCompleted
                           ? 'bg-[#E8F3ED] text-[#287A55] border-[#287A55]/30 font-bold'
                           : isDelivered
-                          ? 'bg-[#F7F4EE] text-[#5F6762] border-[#E3DED5]'
+                          ? 'bg-[#F0FDF4] text-[#166534] border-[#BBF7D0] font-bold'
                           : isNew
                           ? 'bg-[#E8F0FE] text-[#1A73E8] border-[#1A73E8]/30 font-bold'
                           : 'bg-[#F7F4EE] text-[#5F6762] border-[#E3DED5]'
                       }`}>
                         {isReady 
-                          ? '🟢 Ready for Table' 
+                          ? '🟢 Ready to Serve' 
                           : isPreparing 
                           ? '🔥 Cooking' 
                           : isCompleted 
                           ? '✓ COMPLETED' 
+                          : isDelivered
+                          ? ((order.paymentStatus || '').toLowerCase() === 'paid' ? '✓ Served & Paid' : '🍽️ Served · Payment Pending')
                           : order.status}
                       </span>
                     </div>
@@ -647,10 +687,20 @@ export const WaiterLiveOrdersPage: React.FC = () => {
                       <>
                         <button
                           onClick={() => handleDeliverOrder(order)}
-                          className="flex-1 py-2.5 bg-[#287A55] hover:bg-[#1E6B47] text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center justify-center space-x-1.5 cursor-pointer"
+                          disabled={servingOrderId === order.orderId}
+                          className="flex-1 py-2.5 bg-[#287A55] hover:bg-[#1E6B47] text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-50"
                         >
-                          <Check className="w-4 h-4 stroke-[3]" />
-                          <span>Deliver to Table {order.tableNumber}</span>
+                          {servingOrderId === order.orderId ? (
+                            <>
+                              <Clock className="w-3.5 h-3.5 animate-spin" />
+                              <span>Serving Food...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-4 h-4 stroke-[3]" />
+                              <span>Serve Food (Table {order.tableNumber})</span>
+                            </>
+                          )}
                         </button>
                         <button
                           onClick={() => setSelectedOrder(order)}
@@ -663,7 +713,11 @@ export const WaiterLiveOrdersPage: React.FC = () => {
                     ) : (
                       <>
                         <div className="flex-1 py-2 bg-[#F7F4EE] border border-[#E3DED5] rounded-xl text-center text-xs font-semibold text-[#5F6762]">
-                          {isDelivered ? '✅ Served to Table' : isPreparing ? '🍳 Cooking in Kitchen' : `Status: ${order.status}`}
+                          {isDelivered 
+                            ? ((order.paymentStatus || '').toLowerCase() === 'paid' ? '✅ Served & Paid' : '✅ Served · 💳 Payment Pending')
+                            : isPreparing 
+                            ? '🍳 Cooking in Kitchen' 
+                            : `Status: ${order.status}`}
                         </div>
                         <button
                           onClick={() => setSelectedOrder(order)}
@@ -757,16 +811,17 @@ export const WaiterLiveOrdersPage: React.FC = () => {
             </div>
 
             <div className="pt-2 border-t border-[#E3DED5] flex space-x-2">
-              {selectedOrder.status === 'READY' && isActiveOrderStatus(selectedOrder.status) && (
+              {selectedOrder.status === 'READY' && isActiveOrderStatus(selectedOrder.status, selectedOrder.paymentStatus) && (
                 <button
-                  onClick={() => {
-                    handleDeliverOrder(selectedOrder);
+                  disabled={servingOrderId === selectedOrder.orderId}
+                  onClick={async () => {
+                    await handleDeliverOrder(selectedOrder);
                     setSelectedOrder(null);
                   }}
-                  className="flex-1 py-2.5 bg-[#287A55] hover:bg-[#1E6B47] text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center justify-center space-x-1.5 cursor-pointer"
+                  className="flex-1 py-2.5 bg-[#287A55] hover:bg-[#1E6B47] text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-50"
                 >
                   <Check className="w-4 h-4 stroke-[3]" />
-                  <span>Deliver Food to Table {selectedOrder.tableNumber}</span>
+                  <span>Serve Food to Table {selectedOrder.tableNumber}</span>
                 </button>
               )}
               <button

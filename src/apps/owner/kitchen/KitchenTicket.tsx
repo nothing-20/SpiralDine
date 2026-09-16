@@ -48,10 +48,10 @@ export const NEXT_STATUS: Record<string, { label: string; next: string; bg: stri
   ACCEPTED:      { label: '▶ Start Cooking',  next: 'PREPARING', bg: 'bg-[#C84A38]', hover: 'hover:bg-[#B23F2F]', text: 'text-white' },
   CHEF_ASSIGNED: { label: '▶ Start Cooking',  next: 'PREPARING', bg: 'bg-[#C84A38]', hover: 'hover:bg-[#B23F2F]', text: 'text-white' },
   PREPARING:     { label: '✓ Mark Ready',   next: 'READY',     bg: 'bg-[#D79A24]', hover: 'hover:bg-[#BF881F]', text: 'text-white' },
-  READY:         { label: '✓ Hand to Waiter', next: 'PICKED_UP', bg: 'bg-[#287A55]', hover: 'hover:bg-[#206345]', text: 'text-white' },
-  PICKED_UP:     { label: 'Mark Delivered', next: 'SERVED',    bg: 'bg-[#13241F]', hover: 'hover:bg-[#1A312B]', text: 'text-white' },
-  SERVED:        { label: 'Complete Order', next: 'COMPLETED', bg: 'bg-[#287A55]', hover: 'hover:bg-[#206345]', text: 'text-white' },
-  DELIVERED:     { label: 'Complete Order', next: 'COMPLETED', bg: 'bg-[#287A55]', hover: 'hover:bg-[#206345]', text: 'text-white' },
+  READY:         null, // Kitchen preparation ends at READY. Food serving is handled by Waiter.
+  PICKED_UP:     null,
+  SERVED:        null,
+  DELIVERED:     null,
   PAUSED:        null,
   COMPLETED:     null,
   ARCHIVED:      null,
@@ -455,23 +455,27 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
                   const reason = prompt('Enter reason to Pause cooking this order:', 'Waiting for ingredients');
                   if (reason !== null) onPauseOrder(order.orderId, reason || 'General Pause');
                 }}
-                className="w-full py-2 rounded-lg text-[11px] font-semibold text-[#18201D] bg-white hover:bg-[#F7F4EE] border border-[#E3DED5] transition-all"
+                className="w-full py-2 rounded-lg text-[11px] font-semibold text-[#18201D] bg-white hover:bg-[#F7F4EE] border border-[#E3DED5] transition-all cursor-pointer"
               >
                 Ⅱ Pause Cooking
               </button>
             )}
-
-            {(order.status === 'READY' || order.status === 'PICKED_UP') && (
-              <button
-                onClick={() => {
-                  const reason = prompt('Enter return reason to recall order:', 'Needs Garnish');
-                  if (reason !== null) onRecallOrder(order.orderId, reason || 'Needs Attention');
-                }}
-                className="w-full py-2 rounded-lg text-[11px] font-bold text-[#C7463A] bg-[#F9E8E4] hover:bg-[#F2D7D2] border border-[#E3DED5] transition-all tracking-wider flex items-center justify-center space-x-1"
-              >
-                <span>⚠ Recall to Preparing</span>
-              </button>
-            )}
+          </div>
+        ) : order.status === 'READY' ? (
+          <div className="flex flex-col gap-2">
+            <div className="w-full py-2.5 bg-[#E8F3ED] border border-[#287A55]/30 rounded-lg text-center text-xs font-bold text-[#287A55] flex items-center justify-center space-x-1.5 select-none">
+              <Check className="w-3.5 h-3.5" strokeWidth={3} />
+              <span>Ready · Awaiting Waiter Service</span>
+            </div>
+            <button
+              onClick={() => {
+                const reason = prompt('Enter return reason to recall order:', 'Needs Garnish');
+                if (reason !== null) onRecallOrder(order.orderId, reason || 'Needs Attention');
+              }}
+              className="w-full py-2 rounded-lg text-[11px] font-bold text-[#C7463A] bg-[#F9E8E4] hover:bg-[#F2D7D2] border border-[#E3DED5] transition-all tracking-wider flex items-center justify-center space-x-1 cursor-pointer"
+            >
+              <span>⚠ Recall to Preparing</span>
+            </button>
           </div>
 
         ) : (

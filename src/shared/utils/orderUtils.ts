@@ -29,21 +29,43 @@ export const TERMINAL_ORDER_STATUSES = [
 /**
  * Canonical check to determine if an order is in a terminal / finalized state.
  * Returns true if:
- * 1. Order status is in TERMINAL_ORDER_STATUSES (e.g. COMPLETED, PAID, CLOSED, ARCHIVED, CANCELLED)
- * 2. Payment status is 'paid' (or 'refunded' / 'cancelled')
+ * 1. Order is cancelled, refunded, or archived.
+ * 2. Order is closed.
+ * 3. Both food/service lifecycle is completed (COMPLETED, PAID, PAYMENT_COMPLETED, DINING_COMPLETED, SERVED)
+ *    AND payment is settled (paymentStatus === 'paid').
+ * 
+ * An order whose food was served/prepared but whose payment is still pending
+ * is NOT terminal — it must remain active so the customer can pay.
  */
 export const isOrderTerminal = (order?: { status?: string; paymentStatus?: string } | null): boolean => {
   if (!order) return false;
   const status = (order.status || '').toUpperCase().trim();
   const paymentStatus = (order.paymentStatus || '').toLowerCase().trim();
 
-  // Terminal lifecycle status
-  if (TERMINAL_ORDER_STATUSES.includes(status as any)) {
+  // Cancelled or refunded orders are always terminal
+  if (status === 'CANCELLED' || paymentStatus === 'refunded' || paymentStatus === 'cancelled') {
     return true;
   }
 
-  // Terminal payment state: paid, refunded, cancelled
-  if (paymentStatus === 'paid' || paymentStatus === 'refunded' || paymentStatus === 'cancelled') {
+  // Archived or Closed orders are terminal
+  if (status === 'ARCHIVED' || status === 'CLOSED') {
+    return true;
+  }
+
+  const isPaid = paymentStatus === 'paid';
+
+  // Explicit terminal status with paid payment
+  if ((status === 'PAID' || status === 'PAYMENT_COMPLETED') && isPaid) {
+    return true;
+  }
+
+  // Completed or served dining only moves to past history once payment is settled
+  if (isPaid && (status === 'COMPLETED' || status === 'DINING_COMPLETED' || status === 'SERVED' || status === 'DELIVERED')) {
+    return true;
+  }
+
+  // Legacy fallback: if status is explicitly COMPLETED and paymentStatus is empty/undefined, consider terminal
+  if (status === 'COMPLETED' && !paymentStatus) {
     return true;
   }
 

@@ -353,88 +353,75 @@ export const CustomerOrdersPage: React.FC = () => {
     const p = (paymentStatus || 'pending').toLowerCase();
     const isPaid = p === 'paid';
 
-    if (isPaid || s === 'COMPLETED' || s === 'PAID' || s === 'PAYMENT_COMPLETED' || s === 'CLOSED') {
-      return {
-        label: s === 'COMPLETED' ? 'Completed' : isPaid ? 'Paid' : 'Completed',
-        paymentLabel: isPaid ? '✓ Paid' : 'Completed',
-        bg: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-        dot: 'bg-[#2E8B57]',
-        paymentBadge: 'bg-emerald-50 text-[#2E8B57] border-emerald-200',
-        pulse: false
-      };
+    // 1. Determine Order / Food Lifecycle Label & Styling
+    let label = 'Order Received';
+    let bg = 'bg-blue-50 text-blue-800 border-blue-200';
+    let dot = 'bg-blue-500';
+    let pulse = false;
+
+    if (s === 'CANCELLED') {
+      label = 'Cancelled';
+      bg = 'bg-rose-50 text-rose-800 border-rose-200';
+      dot = 'bg-rose-500';
+    } else if (s === 'COMPLETED' || s === 'CLOSED' || s === 'ARCHIVED') {
+      label = '✓ Completed';
+      bg = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+      dot = 'bg-[#2E8B57]';
+    } else if (s === 'DINING_COMPLETED') {
+      label = 'Dining Finished';
+      bg = 'bg-amber-50 text-amber-900 border-amber-200';
+      dot = 'bg-amber-500';
+    } else if (s === 'BILL_REQUESTED') {
+      label = 'Bill Requested';
+      bg = 'bg-amber-50 text-amber-900 border-amber-200';
+      dot = 'bg-amber-500';
+      pulse = true;
+    } else if (s === 'SERVED' || s === 'DELIVERED') {
+      label = '✓ Served';
+      bg = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+      dot = 'bg-[#2E8B57]';
+    } else if (s === 'READY' || s === 'PICKED_UP') {
+      label = '🟢 Ready to Serve';
+      bg = 'bg-teal-50 text-teal-800 border-teal-200';
+      dot = 'bg-teal-500';
+      pulse = true;
+    } else if (s === 'PREPARING' || s === 'CHEF_ASSIGNED' || s === 'COOKING') {
+      label = '🍳 In Kitchen';
+      bg = 'bg-[#F3E8DF] text-[#C85A3F] border-[#E5DCD5]';
+      dot = 'bg-[#C85A3F]';
+      pulse = true;
+    } else if (s === 'ACCEPTED' || s === 'CONFIRMED') {
+      label = 'Confirmed';
+      bg = 'bg-blue-50 text-blue-800 border-blue-200';
+      dot = 'bg-blue-500';
+    } else {
+      label = 'Order Received';
+      bg = 'bg-blue-50 text-blue-800 border-blue-200';
+      dot = 'bg-blue-500';
+      pulse = true;
     }
 
-    if (s === 'DINING_COMPLETED' || s === 'BILL_REQUESTED' || s === 'SERVED' || s === 'DELIVERED') {
-      return {
-        label: s === 'BILL_REQUESTED' ? 'Bill Requested' : 'Dining Completed',
-        paymentLabel: 'Payment Pending',
-        bg: 'bg-amber-50 text-amber-900 border-amber-200',
-        dot: 'bg-amber-500',
-        paymentBadge: 'bg-amber-50 text-amber-800 border-amber-200',
-        pulse: s === 'BILL_REQUESTED'
-      };
-    }
+    // 2. Determine Payment Lifecycle Label & Styling (Never display ambiguous "Completed")
+    const paymentLabel = isPaid 
+      ? '✓ Paid' 
+      : p === 'refunded' 
+      ? 'Refunded' 
+      : '⚠ Payment Pending';
 
-    switch (s) {
-      case 'NEW':
-      case 'PLACED':
-        return {
-          label: 'Order Received',
-          paymentLabel: 'Payment Pending',
-          bg: 'bg-blue-50 text-blue-800 border-blue-200',
-          dot: 'bg-blue-500',
-          paymentBadge: 'bg-slate-50 text-slate-700 border-slate-200',
-          pulse: true
-        };
-      case 'ACCEPTED':
-      case 'CONFIRMED':
-        return {
-          label: 'Confirmed',
-          paymentLabel: 'Payment Pending',
-          bg: 'bg-blue-50 text-blue-800 border-blue-200',
-          dot: 'bg-blue-500',
-          paymentBadge: 'bg-slate-50 text-slate-700 border-slate-200',
-          pulse: false
-        };
-      case 'PREPARING':
-      case 'KITCHEN':
-        return {
-          label: 'In Kitchen Preparing',
-          paymentLabel: 'Payment Pending',
-          bg: 'bg-[#F3E8DF] text-[#C85A3F] border-[#E5DCD5]',
-          dot: 'bg-[#C85A3F]',
-          paymentBadge: 'bg-slate-50 text-slate-700 border-slate-200',
-          pulse: true
-        };
-      case 'READY':
-      case 'READY_TO_SERVE':
-        return {
-          label: 'Ready to Serve',
-          paymentLabel: 'Payment Pending',
-          bg: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-          dot: 'bg-emerald-500',
-          paymentBadge: 'bg-slate-50 text-slate-700 border-slate-200',
-          pulse: true
-        };
-      case 'CANCELLED':
-        return {
-          label: 'Cancelled',
-          paymentLabel: 'Cancelled',
-          bg: 'bg-rose-50 text-rose-800 border-rose-200',
-          dot: 'bg-rose-500',
-          paymentBadge: 'bg-rose-50 text-rose-800 border-rose-200',
-          pulse: false
-        };
-      default:
-        return {
-          label: status || 'Processing',
-          paymentLabel: isPaid ? '✓ Paid' : 'Payment Pending',
-          bg: 'bg-stone-50 text-stone-800 border-stone-200',
-          dot: 'bg-stone-500',
-          paymentBadge: 'bg-stone-50 text-stone-800 border-stone-200',
-          pulse: false
-        };
-    }
+    const paymentBadge = isPaid
+      ? 'bg-emerald-50 text-[#2E8B57] border-emerald-200'
+      : p === 'refunded'
+      ? 'bg-slate-50 text-slate-700 border-slate-200'
+      : 'bg-amber-50 text-amber-800 border-amber-200';
+
+    return {
+      label,
+      paymentLabel,
+      bg,
+      dot,
+      paymentBadge,
+      pulse
+    };
   };
 
   if (isLoading && allOrdersList.length === 0) {
@@ -634,7 +621,7 @@ export const CustomerOrdersPage: React.FC = () => {
                       className="px-5 py-2.5 bg-[#C85A3F] hover:bg-[#A94332] text-white text-xs font-extrabold rounded-xl transition-all shadow-md shadow-[#C85A3F]/20 flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <Receipt className="w-3.5 h-3.5" />
-                      <span>{['SERVED', 'DINING_COMPLETED', 'BILL_REQUESTED'].includes((order.status || '').toUpperCase()) ? 'View Bill' : 'Track Live Status'}</span>
+                      <span>{((order.paymentStatus || '').toLowerCase() !== 'paid' && ['SERVED', 'DELIVERED', 'DINING_COMPLETED', 'BILL_REQUESTED', 'COMPLETED'].includes((order.status || '').toUpperCase())) ? 'Pay Now' : ['SERVED', 'DINING_COMPLETED', 'BILL_REQUESTED'].includes((order.status || '').toUpperCase()) ? 'View Bill' : 'Track Live Status'}</span>
                       <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                     </button>
                   </div>
@@ -781,7 +768,7 @@ export const CustomerOrdersPage: React.FC = () => {
                           }}
                           className="px-3 py-1.5 bg-[#C85A3F] hover:bg-[#A94332] text-white text-[11px] font-extrabold rounded-xl transition-all shadow-xs cursor-pointer flex items-center gap-1"
                         >
-                          <span>{['SERVED', 'DINING_COMPLETED'].includes((order.status || '').toUpperCase()) ? 'View Bill' : 'Track Live'}</span>
+                          <span>{((order.paymentStatus || '').toLowerCase() !== 'paid' && ['SERVED', 'DELIVERED', 'DINING_COMPLETED', 'BILL_REQUESTED', 'COMPLETED'].includes((order.status || '').toUpperCase())) ? 'Pay Now' : ['SERVED', 'DINING_COMPLETED'].includes((order.status || '').toUpperCase()) ? 'View Bill' : 'Track Live'}</span>
                           <ChevronRight className="w-3.5 h-3.5" />
                         </button>
                       ) : orderIsTerminal && !isCancelled ? (

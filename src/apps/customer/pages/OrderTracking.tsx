@@ -994,8 +994,9 @@ export const OrderTracking: React.FC = () => {
     );
   }
 
-  // If order status is COMPLETED or receipt was explicitly requested, render CustomerReceiptView
-  const isCompleted = (order.status || '').toUpperCase() === 'COMPLETED';
+  // If order status is COMPLETED and payment is settled, or receipt was explicitly requested, render CustomerReceiptView
+  const isOrderPaid = (order.paymentStatus || '').toLowerCase() === 'paid';
+  const isCompleted = (order.status || '').toUpperCase() === 'COMPLETED' && isOrderPaid;
   if (isCompleted || isReceiptRequested) {
     return (
       <CustomerReceiptView

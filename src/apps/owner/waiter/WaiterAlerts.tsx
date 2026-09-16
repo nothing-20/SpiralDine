@@ -208,19 +208,24 @@ export const WaiterAlerts: React.FC = () => {
     if (!user?.tenantId) return;
     try {
       const docRef = doc(db, 'restaurants', user.tenantId, 'orders', order.orderId);
+      const timestamp = new Date().toISOString();
+      const serverName = user.displayName || user.email || 'Waiter';
       const timelineEvent = {
-        type: 'DELIVERED',
+        type: 'SERVED',
         title: 'Food Served to Table',
-        description: `Delivered by Server ${user.displayName || user.email}`,
-        timestamp: new Date().toISOString(),
-        performedBy: user.displayName || user.email || 'Waiter'
+        description: `Delivered by Server ${serverName}`,
+        timestamp,
+        performedBy: serverName
       };
       await updateDoc(docRef, { 
-        status: 'DELIVERED', 
-        deliveredAt: new Date().toISOString(),
+        status: 'SERVED', 
+        servedAt: timestamp,
+        deliveredAt: timestamp,
+        waiterId: user.uid,
+        waiterName: serverName,
         timeline: arrayUnion(timelineEvent)
       });
-      toast.success(`🍽️ Order #${order.orderId.substring(0, 8)} delivered to Table ${order.tableNumber}!`);
+      toast.success(`🍽️ Order #${order.orderId.substring(0, 8)} served to Table ${order.tableNumber}!`);
     } catch (e) {
       console.error(e);
       toast.error('Failed to update order delivery status.');
