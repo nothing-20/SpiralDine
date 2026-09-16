@@ -762,15 +762,40 @@ export const WaiterAssignedTablesPage: React.FC = () => {
                 key={table.id}
                 className={`p-5 border ${colors.border} ${colors.bg} rounded-2xl flex flex-col justify-between hover:brightness-110 transition-all text-left space-y-3 relative`}
               >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-extrabold text-base text-textPearl">Table {table.number}</h3>
-                    <span className="text-[10px] text-slate-500 font-bold uppercase">{table.section || 'Main Room'}</span>
-                  </div>
-                  <Badge variant="muted" className={`uppercase text-[9px] font-extrabold border ${colors.text} border-current/20`}>
-                    {table.mappedStatus}
-                  </Badge>
-                </div>
+                {(() => {
+                  const activeAssistance = waiterRequests.find(r => 
+                    (String(r.tableNumber) === String(table.number) || (r.orderId && r.orderId === table.activeOrderId)) && 
+                    r.status !== 'Completed' && r.status !== 'Cancelled'
+                  );
+
+                  return (
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h3 className="font-extrabold text-base text-[#18201D]">Table {table.number}</h3>
+                          <span className="text-[10px] text-[#5F6875] font-bold uppercase">{table.section || 'Main Room'}</span>
+                        </div>
+                        <Badge variant="muted" className={`uppercase text-[9px] font-extrabold border ${colors.text} border-current/20`}>
+                          {table.mappedStatus}
+                        </Badge>
+                      </div>
+
+                      {/* Separate Table Indicators: Order Status & Assistance Request */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                        {table.activeOrder?.status === 'READY' && (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-extrabold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full animate-pulse">
+                            🍽️ Order Ready
+                          </span>
+                        )}
+                        {activeAssistance && (
+                          <span className="inline-flex items-center gap-1 text-[9px] font-extrabold text-amber-900 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full">
+                            🙋 Assistance: {activeAssistance.requestType || 'Help'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 <div className="space-y-1.5 text-[11px] text-slate-400">
                   <div className="flex justify-between items-center">

@@ -482,12 +482,14 @@ export const OrderTracking: React.FC = () => {
       const requestId = `REQ-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
       const requestRef = doc(db, 'restaurants', tenantId, 'waiterRequests', requestId);
 
+      const priority = requestType === 'Bill Request' ? 'high' : 'normal';
       const requestPayload = {
         id: requestId,
         orderId: orderId || null,
         tableNumber: order.tableNumber || 'Walk-in',
         requestType,
         status: 'Pending',
+        priority,
         createdAt: new Date().toISOString(),
         deviceId: localStorage.getItem('restaurantos_device_id') || 'unknown',
         sessionId: session?.sessionId || 'ANON-SESSION',
@@ -501,7 +503,8 @@ export const OrderTracking: React.FC = () => {
       // Trigger Audit event logs
       await customerService.logCustomerEvent(tenantId, 'Waiter Alert', `Diner requested assistance: ${requestType} from Table ${order.tableNumber}`, {
         tableNumber: order.tableNumber,
-        requestType
+        requestType,
+        priority
       });
 
       toast.success(`Request for "${requestType}" sent to staff!`);
@@ -543,6 +546,7 @@ export const OrderTracking: React.FC = () => {
         tableNumber: order.tableNumber || 'Walk-in',
         requestType: 'Bill Request',
         status: 'Pending',
+        priority: 'high',
         createdAt: new Date().toISOString(),
         customerId: user?.uid || session?.customerId || 'anonymous',
         sessionId: session?.sessionId || 'ANON-SESSION',
@@ -1752,20 +1756,30 @@ export const OrderTracking: React.FC = () => {
               Select an alert below. A notification will route to the server commands desk.
             </p>
 
-            <div className="grid grid-cols-2 gap-2.5 pt-1">
+            <div className="grid grid-cols-2 gap-2.5 pt-1 max-h-[60vh] overflow-y-auto pr-1">
               {[
-                { label: 'Call Waiter', desc: 'General assistance' },
-                { label: 'Need Water', desc: 'Fresh drinking water' },
-                { label: 'Extra Plates', desc: 'Clean plates' },
-                { label: 'Extra Spoons', desc: 'Silverware / cutlery' },
+                { label: 'Water', desc: 'Fresh drinking water' },
+                { label: 'Extra Plates', desc: 'Clean dining plates' },
+                { label: 'Cutlery', desc: 'Forks, spoons & knives' },
                 { label: 'Tissues', desc: 'Paper napkins' },
-                { label: 'Cleaning', desc: 'Wipe table' },
-                { label: 'Other Request', desc: 'Custom assistance' }
+                { label: 'Condiments', desc: 'Salt, pepper, sauces' },
+                { label: 'Call Waiter', desc: 'Staff assistance' },
+                { label: 'Request Bill', desc: 'Prepare final check', isBill: true },
+                { label: 'Table Cleaning', desc: 'Wipe & sanitize table' },
+                { label: 'Change Table', desc: 'Request seat change' },
+                { label: 'Other Assistance', desc: 'Special requests' }
               ].map(opt => (
                 <button
                   key={opt.label}
                   disabled={isSubmittingRequest}
-                  onClick={() => handleCallWaiter(opt.label)}
+                  onClick={() => {
+                    if (opt.isBill) {
+                      setIsRequestAlertOpen(false);
+                      handleRequestBill();
+                    } else {
+                      handleCallWaiter(opt.label);
+                    }
+                  }}
                   className="p-3 bg-[#FCFAF7] hover:bg-[#F3E8DF] border border-[#E5DCD5] hover:border-[#C85A3F]/50 rounded-xl flex flex-col items-center justify-center text-center gap-1.5 transition-all cursor-pointer group"
                 >
                   <span className="font-bold text-xs text-[#202124] group-hover:text-[#C85A3F]">

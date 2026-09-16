@@ -1700,36 +1700,113 @@ export const WaiterMatrix: React.FC = () => {
     );
   };
 
+  // ─── Render Task Card Helper ───
+  const renderTaskCard = (task: IWaiterTask) => {
+    const elapsedMins = Math.floor((Date.now() - new Date(task.createdAt).getTime()) / 60000);
+    const elapsedText = elapsedMins < 1 ? 'Just now' : `${elapsedMins}m ago`;
+    const isOrder = task.source === 'order';
+
+    return (
+      <Card
+        key={task.id}
+        className={`p-4 border text-left rounded-2xl transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+          task.status === 'Accepted'
+            ? 'border-indigo-500/20 bg-indigo-955/5'
+            : isOrder
+            ? 'border-amber-500/20 bg-amber-500/5'
+            : 'border-slate-850 bg-slate-900/20'
+        }`}
+      >
+        <div className="space-y-1.5 flex-1 pr-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-extrabold uppercase text-slate-500 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+              Table {task.tableNumber} ({task.section})
+            </span>
+            <Badge
+              variant={
+                task.priority === 'critical'
+                  ? 'danger'
+                  : task.priority === 'high'
+                  ? 'warning'
+                  : 'muted'
+              }
+              className="uppercase text-[9px] py-0 px-1.5 font-extrabold"
+            >
+              {task.priority}
+            </Badge>
+            {task.status === 'Accepted' && (
+              <span className="text-[9px] font-extrabold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
+                Claimed By Me
+              </span>
+            )}
+          </div>
+          <h4 className="text-sm font-extrabold text-textPearl flex items-center gap-1.5">
+            {isOrder ? '🍽️ ' : '🙋 '}
+            <span>{task.type}</span>
+          </h4>
+          <p className="text-xs text-slate-400 leading-relaxed">{task.description}</p>
+          {task.notes && (
+            <p className="text-[10px] text-amber-400 italic">Notes: "{task.notes}"</p>
+          )}
+          <div className="flex items-center space-x-1.5 text-[10px] text-slate-500 font-semibold pt-1">
+            <Clock className="w-3 h-3" />
+            <span>Active: {elapsedText}</span>
+          </div>
+        </div>
+        
+        <div className="flex sm:flex-col gap-2 min-w-[120px]">
+          {task.status === 'Pending' ? (
+            <Button
+              onClick={() => handleAcceptTask(task)}
+              className="w-full py-2 bg-indigo-500 hover:bg-indigo-650 text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center gap-1"
+            >
+              <Play className="w-3 h-3" />
+              <span>Claim Task</span>
+            </Button>
+          ) : (
+            <Button
+              onClick={() => handleResolveTask(task)}
+              className="w-full py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center gap-1"
+            >
+              <Check className="w-3 h-3" />
+              <span>{isOrder ? 'Delivered' : 'Resolve'}</span>
+            </Button>
+          )}
+        </div>
+      </Card>
+    );
+  };
+
   // ─── Render Unified Task Queue ───
   const renderUnifiedTaskQueue = () => {
-    const filteredTasks = optimizedTasks.filter(t => {
-      if (queueFilter === 'all') return true;
-      if (queueFilter === 'delivery') return t.source === 'order';
-      if (queueFilter === 'request') return t.source === 'request' || t.source === 'managerReview';
-      if (queueFilter === 'bill') return t.type === 'Bill Request' || t.type === 'Generate Bill';
-      if (queueFilter === 'cleaning') return t.type === 'Cleaning' || t.type === 'Clean Table';
-      return true;
-    });
+    const orderTasks = optimizedTasks.filter(t => t.source === 'order');
+    const assistanceTasks = optimizedTasks.filter(t => t.source !== 'order');
     
     return (
-      <div className="space-y-4">
+      <div className="space-y-6">
+        {/* Controls Toolbar */}
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-extrabold text-textPearl uppercase tracking-wider flex items-center gap-1.5">
-            <ListTodo className="w-4 h-4 text-primary" />
-            <span>Active Task Feed ({filteredTasks.length})</span>
-          </h3>
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-extrabold text-textPearl uppercase tracking-wider flex items-center gap-1.5">
+              <ListTodo className="w-4 h-4 text-primary" />
+              <span>Live Service Feed</span>
+            </h3>
+            <span className="text-[11px] font-bold text-slate-500">
+              Orders: <strong className="text-amber-400">{orderTasks.length}</strong> · Assistance: <strong className="text-emerald-400">{assistanceTasks.length}</strong>
+            </span>
+          </div>
           <div className="bg-slate-900 border border-slate-800 p-0.5 rounded-lg flex items-center space-x-0.5 text-[10px] font-bold">
             {[
-              { id: 'all', label: 'All' },
-              { id: 'delivery', label: 'Deliveries' },
-              { id: 'request', label: 'Requests' },
+              { id: 'all', label: 'All Queues' },
+              { id: 'delivery', label: `Orders (${orderTasks.length})` },
+              { id: 'request', label: `Assistance (${assistanceTasks.length})` },
               { id: 'bill', label: 'Bills' },
               { id: 'cleaning', label: 'Cleaning' }
             ].map(opt => (
               <button
                 key={opt.id}
                 onClick={() => setQueueFilter(opt.id as any)}
-                className={`px-2.5 py-1 rounded-md transition-all font-bold ${
+                className={`px-2.5 py-1 rounded-md transition-all font-bold cursor-pointer ${
                   queueFilter === opt.id
                     ? 'bg-primary text-white shadow-xs'
                     : 'text-[#5F6875] hover:text-[#18201D]'
@@ -1740,83 +1817,64 @@ export const WaiterMatrix: React.FC = () => {
             ))}
           </div>
         </div>
-        
-        {filteredTasks.length === 0 ? (
-          <Card className="p-8 text-center border border-dashed border-[#E3DED5] bg-white rounded-2xl shadow-xs">
-            <CheckCircle className="w-8 h-8 text-[#8D9B95] mx-auto mb-2" />
-            <p className="text-xs font-bold text-[#5F6875]">No active tasks in this category.</p>
-          </Card>
-        ) : (
+
+        {/* ── QUEUE 1: FOOD ORDERS QUEUE ── */}
+        {(queueFilter === 'all' || queueFilter === 'delivery') && (
           <div className="space-y-3">
-            {filteredTasks.map(task => {
-              const elapsedMins = Math.floor((Date.now() - new Date(task.createdAt).getTime()) / 60000);
-              const elapsedText = elapsedMins < 1 ? 'Just now' : `${elapsedMins}m ago`;
-              
-              return (
-                <Card
-                  key={task.id}
-                  className={`p-4 border text-left rounded-2xl transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
-                    task.status === 'Accepted'
-                      ? 'border-indigo-500/20 bg-indigo-955/5'
-                      : 'border-slate-850 bg-slate-900/20'
-                  }`}
-                >
-                  <div className="space-y-1.5 flex-1 pr-4">
-                     <div className="flex flex-wrap items-center gap-2">
-                       <span className="text-[10px] font-extrabold uppercase text-slate-500 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
-                         Table {task.tableNumber} ({task.section})
-                       </span>
-                       <Badge
-                         variant={
-                           task.priority === 'critical'
-                             ? 'danger'
-                             : task.priority === 'high'
-                             ? 'warning'
-                             : 'muted'
-                         }
-                         className="uppercase text-[9px] py-0 px-1.5 font-extrabold"
-                       >
-                         {task.priority}
-                       </Badge>
-                       {task.status === 'Accepted' && (
-                         <span className="text-[9px] font-extrabold text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
-                           Claimed By Me
-                         </span>
-                       )}
-                     </div>
-                     <h4 className="text-sm font-extrabold text-textPearl">{task.type}</h4>
-                     <p className="text-xs text-slate-400 leading-relaxed">{task.description}</p>
-                     {task.notes && (
-                       <p className="text-[10px] text-amber-400 italic">Notes: "{task.notes}"</p>
-                     )}
-                     <div className="flex items-center space-x-1.5 text-[10px] text-slate-500 font-semibold pt-1">
-                       <Clock className="w-3 h-3" />
-                       <span>Active: {elapsedText}</span>
-                     </div>
-                  </div>
-                  
-                  <div className="flex sm:flex-col gap-2 min-w-[120px]">
-                    {task.status === 'Pending' ? (
-                      <Button
-                        onClick={() => handleAcceptTask(task)}
-                        className="w-full py-2 bg-indigo-500 hover:bg-indigo-650 text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center gap-1"
-                      >
-                        <Play className="w-3 h-3" />
-                        <span>Claim Task</span>
-                      </Button>
-                    ) : (
-                      <Button
-                        onClick={() => handleResolveTask(task)}
-                        className="w-full py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs rounded-xl flex items-center justify-center gap-1"
-                      >
-                        <Check className="w-3 h-3" />
-                        <span>Resolve</span>
-                      </Button>
-                    )}
-                  </div>
-                </Card>
-              );
-            })}
+            <div className="flex items-center justify-between pb-1 border-b border-slate-850">
+              <span className="text-xs font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                🍽️ Customer Food Orders Queue ({orderTasks.length})
+              </span>
+              <span className="text-[10px] text-slate-500 font-bold">
+                Food & Drink Dispatch
+              </span>
+            </div>
+            {orderTasks.length === 0 ? (
+              <Card className="p-6 text-center border border-dashed border-slate-850 bg-slate-950/20 rounded-2xl">
+                <CheckCircle className="w-6 h-6 text-slate-600 mx-auto mb-1.5" />
+                <p className="text-xs font-semibold text-slate-500">No food delivery tasks pending.</p>
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {orderTasks.map(task => renderTaskCard(task))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── QUEUE 2: ASSISTANCE REQUESTS QUEUE ── */}
+        {(queueFilter === 'all' || queueFilter === 'request' || queueFilter === 'bill' || queueFilter === 'cleaning') && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between pb-1 border-b border-slate-850">
+              <span className="text-xs font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                🙋 Customer Assistance Queue ({
+                  queueFilter === 'bill'
+                    ? assistanceTasks.filter(t => t.type === 'Bill Request' || t.type === 'Generate Bill').length
+                    : queueFilter === 'cleaning'
+                    ? assistanceTasks.filter(t => t.type === 'Cleaning' || t.type === 'Clean Table').length
+                    : assistanceTasks.length
+                })
+              </span>
+              <span className="text-[10px] text-slate-500 font-bold">
+                Water, Plates, Cutlery, Tissues, Bills & Help
+              </span>
+            </div>
+            {assistanceTasks.length === 0 ? (
+              <Card className="p-6 text-center border border-dashed border-slate-850 bg-slate-950/20 rounded-2xl">
+                <CheckCircle className="w-6 h-6 text-slate-600 mx-auto mb-1.5" />
+                <p className="text-xs font-semibold text-slate-500">No active customer assistance requests.</p>
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {assistanceTasks
+                  .filter(t => {
+                    if (queueFilter === 'bill') return t.type === 'Bill Request' || t.type === 'Generate Bill';
+                    if (queueFilter === 'cleaning') return t.type === 'Cleaning' || t.type === 'Clean Table';
+                    return true;
+                  })
+                  .map(task => renderTaskCard(task))}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -2210,11 +2268,13 @@ export const WaiterMatrix: React.FC = () => {
                   const assignedToMe = table.assignedWaiterId === user?.uid;
                   const isOccupied = table.status === 'occupied' || table.status === 'service_requested' || table.status === 'bill_requested';
                   const isCleaning = table.status === 'cleaning';
+                  const activeOrderForTable = orders.find(o => String(o.tableNumber) === String(table.number) && o.status !== 'ARCHIVED' && o.status !== 'CANCELLED' && o.status !== 'COMPLETED');
+                  const activeAssistanceForTable = waiterRequests.find(r => String(r.tableNumber) === String(table.number) && r.status !== 'Completed' && r.status !== 'Cancelled');
                   
                   return (
                     <Card
                       key={table.id}
-                      className={`p-4 border bg-slate-900/40 rounded-2xl text-left flex flex-col justify-between h-40 hover:border-slate-755 transition-all ${
+                      className={`p-3.5 border bg-slate-900/40 rounded-2xl text-left flex flex-col justify-between min-h-[170px] h-auto hover:border-slate-755 transition-all ${
                         assignedToMe 
                           ? 'border-primary/45 bg-primary/5 ring-1 ring-primary/10' 
                           : 'border-slate-850'
@@ -2240,18 +2300,32 @@ export const WaiterMatrix: React.FC = () => {
                         </Badge>
                       </div>
 
-                      <div className="text-left space-y-1">
+                      <div className="text-left space-y-1 my-1">
                         <span className="text-[10px] text-slate-500 font-extrabold uppercase">{table.section || 'Main Room'}</span>
                         <div className="text-[10px] text-slate-400 truncate">
                           {isOccupied ? `Guests: ${table.guestsCount || 2}` : 'Available'}
                         </div>
                         {table.tableNotes && (
-                          <div className="text-[9px] text-amber-400 mt-1 truncate">
+                          <div className="text-[9px] text-amber-400 mt-0.5 truncate">
                             ⚠️ {table.tableNotes}
                           </div>
                         )}
                         <div className="text-[9px] text-slate-500 font-medium truncate">
                           Server: {table.assignedWaiterName || 'Unassigned'}
+                        </div>
+
+                        {/* Separate Table Attention Indicators: Order Status & Assistance Request */}
+                        <div className="flex flex-col gap-1 pt-1">
+                          {activeOrderForTable?.status === 'READY' && (
+                            <span className="inline-flex items-center gap-1 text-[8.5px] font-extrabold text-emerald-400 bg-emerald-500/15 border border-emerald-500/25 px-1.5 py-0.5 rounded truncate">
+                              🍽️ Order Ready
+                            </span>
+                          )}
+                          {activeAssistanceForTable && (
+                            <span className="inline-flex items-center gap-1 text-[8.5px] font-extrabold text-amber-400 bg-amber-500/15 border border-amber-500/25 px-1.5 py-0.5 rounded truncate">
+                              🙋 Assistance: {activeAssistanceForTable.requestType || 'Help'}
+                            </span>
+                          )}
                         </div>
                       </div>
 
