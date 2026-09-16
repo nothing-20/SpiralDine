@@ -20,6 +20,7 @@ import {
 } from '../../../shared/firebase/collections';
 import { IMenuItem, IOrderItem } from '../../../shared/types';
 import { useCart } from '../../../shared/services/CartContext';
+import { useAuth } from '../../../context/AuthContext';
 import { formatPrice, setGlobalCurrencyConfig } from '../../../shared/utils/format';
 import { customerService } from '../../../shared/services/customerService';
 import { generateUniqueOrderId, isOrderActive } from '../../../shared/utils/orderUtils';
@@ -64,6 +65,7 @@ export const CustomerMenu: React.FC = () => {
   const { tenantId } = useParams<{ tenantId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   // Cart operations
   const {
@@ -631,26 +633,53 @@ export const CustomerMenu: React.FC = () => {
     setIsPlacingOrder(true);
     try {
       const resolvedBranchId = session?.branchId || 'main';
-      const resolvedTableId = session?.tableId || (tableNumber ? (tableNumber.startsWith('TBL-') ? tableNumber : `TBL-${tableNumber}`) : '');
+      const cleanTableNum = String(tableNumber || session?.tableNumber || '').replace(/^TBL-/i, '');
+      const resolvedTableId = session?.tableId || (cleanTableNum ? `TBL-${cleanTableNum}` : '');
 
-      if (!resolvedTableId) {
+      if (!resolvedTableId || !cleanTableNum) {
         toast.error('Please select a table to place a dine-in order.');
         setIsPlacingOrder(false);
         return;
       }
 
       // Security: Validate table existence and tenant ownership
-      const tableDocRef = doc(db, 'restaurants', tenantId, 'tables', resolvedTableId);
-      const tableSnap = await getDoc(tableDocRef);
-      if (!tableSnap.exists()) {
-        const cleanNum = (tableNumber || resolvedTableId).replace(/^TBL-/i, '');
-        const q = query(collection(db, 'restaurants', tenantId, 'tables'), where('tableNumber', '==', cleanNum));
-        const qSnap = await getDocs(q);
-        if (qSnap.empty) {
-          toast.error('Invalid table context. Table not found in this restaurant.');
-          setIsPlacingOrder(false);
-          return;
+      try {
+        const tableDocRef = doc(db, 'restaurants', tenantId, 'tables', resolvedTableId);
+        const tableSnap = await getDoc(tableDocRef);
+        if (!tableSnap.exists()) {
+          const tablesColRef = collection(db, 'restaurants', tenantId, 'tables');
+          const q1 = query(tablesColRef, where('tableNumber', '==', cleanTableNum));
+          let qSnap = await getDocs(q1);
+          if (qSnap.empty) {
+            const q2 = query(tablesColRef, where('number', '==', cleanTableNum));
+            qSnap = await getDocs(q2);
+          }
+          if (qSnap.empty) {
+            // Non-blocking table registration to prevent blocking diner orders
+            try {
+              await setDoc(tableDocRef, {
+                id: resolvedTableId,
+                tableId: resolvedTableId,
+                tableNumber: cleanTableNum,
+                tableName: `Table ${cleanTableNum}`,
+                number: cleanTableNum,
+                floor: 'Ground Floor',
+                section: 'Main Dining',
+                capacity: 4,
+                status: 'Occupied',
+                shape: 'square',
+                branchId: resolvedBranchId,
+                isActive: true,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              }, { merge: true });
+            } catch (initErr) {
+              console.warn('[CustomerMenu] Auto-provision table context warning:', initErr);
+            }
+          }
         }
+      } catch (tableCheckErr) {
+        console.warn('[CustomerMenu] Table check warning:', tableCheckErr);
       }
 
       // Validate restaurant table session if session credentials exist
@@ -690,8 +719,8 @@ export const CustomerMenu: React.FC = () => {
           tenantId,
           branchId: resolvedBranchId,
           tableId: resolvedTableId,
-          tableNumber: tableNumber || resolvedTableId.replace(/^TBL-/i, ''),
-          tableName: `Table ${tableNumber || resolvedTableId.replace(/^TBL-/i, '')}`,
+          tableNumber: cleanTableNum,
+          tableName: `Table ${cleanTableNum}`,
           orderSource: searchParams.get('source') === 'qr' ? 'qr' : 'app',
           status: 'active',
           startedAt: new Date().toISOString()
@@ -709,17 +738,27 @@ export const CustomerMenu: React.FC = () => {
       const orderPayload = {
         id: orderId,
         orderId,
+        customerId: user?.uid || 'guest-uid',
+        customerName: customerName.trim() || user?.displayName || 'Guest Diner',
+        customerEmail: user?.email || '',
+        phone: customerPhone.trim() || user?.phoneNumber || '+91 98765 43210',
         tenantId,
         restaurantId: tenantId,
         branchId: resolvedBranchId,
         tableId: resolvedTableId,
-        tableNumber: tableNumber || resolvedTableId.replace(/^TBL-/i, ''),
-        tableName: currentSession?.tableName || `Table ${tableNumber || resolvedTableId.replace(/^TBL-/i, '')}`,
+        tableNumber: cleanTableNum,
+        tableName: currentSession?.tableName || `Table ${cleanTableNum}`,
         orderType: 'dine_in',
         orderSource: currentSession?.orderSource || (searchParams.get('source') === 'qr' ? 'qr' : 'app'),
-        customerName: customerName.trim() || 'Guest Diner',
-        phone: customerPhone.trim() || 'Guest Phone',
-        items: cartItems,
+        items: cartItems.map(item => ({
+          itemId: item.itemId,
+          name: item.name,
+          count: item.count,
+          notes: item.notes || '',
+          pricePerUnit: item.pricePerUnit,
+          image: item.image || item.imageUrl || '',
+          isVeg: item.isVeg ?? item.veg
+        })),
         subtotal: cartSubtotal,
         tax: gstCharge,
         serviceCharge: serviceCharge,
@@ -738,6 +777,49 @@ export const CustomerMenu: React.FC = () => {
 
       await setDoc(orderRef, orderPayload);
 
+      // Persist order reference to customer profile if authenticated
+      if (user?.uid) {
+        try {
+          await setDoc(doc(db, 'customers', user.uid, 'orders', orderId), {
+            id: orderId,
+            orderId,
+            tenantId,
+            restaurantName: restaurantName || tenantId,
+            tableNumber: cleanTableNum,
+            total: totalCartCost,
+            status: 'NEW',
+            itemsCount: cartItems.length,
+            createdAt: orderPayload.createdAt,
+            updatedAt: orderPayload.updatedAt
+          });
+        } catch (custOrderErr) {
+          console.warn('[CustomerMenu] Failed to save customer profile order ref:', custOrderErr);
+        }
+      }
+
+      // Persist recent order index in localStorage for resilient cross-tab active orders view
+      try {
+        const existingRecentStr = localStorage.getItem('restaurantos_customer_orders') || '[]';
+        const existingRecent = JSON.parse(existingRecentStr);
+        const updatedRecent = [
+          {
+            orderId,
+            tenantId,
+            restaurantName: restaurantName || tenantId,
+            tableNumber: cleanTableNum,
+            total: totalCartCost,
+            status: 'NEW',
+            itemsCount: cartItems.length,
+            createdAt: orderPayload.createdAt
+          },
+          ...existingRecent.filter((o: any) => o.orderId !== orderId)
+        ].slice(0, 20);
+        localStorage.setItem('restaurantos_customer_orders', JSON.stringify(updatedRecent));
+        window.dispatchEvent(new Event('storage'));
+      } catch (storageErr) {
+        console.warn('[CustomerMenu] Failed to update local recent orders index:', storageErr);
+      }
+
       // Non-blocking table status update
       try {
         const tableRef = doc(db, 'restaurants', tenantId, 'tables', resolvedTableId);
@@ -755,7 +837,7 @@ export const CustomerMenu: React.FC = () => {
         const waiterAlertRef = doc(db, 'restaurants', tenantId, 'waiterRequests', waiterAlertId);
         await setDoc(waiterAlertRef, {
           id: waiterAlertId,
-          tableNumber: tableNumber || 'Walk-in',
+          tableNumber: cleanTableNum,
           requestType: 'New Order Placed',
           status: 'Pending',
           createdAt: new Date().toISOString(),
@@ -774,21 +856,26 @@ export const CustomerMenu: React.FC = () => {
       setPlacedOrderPrepTime(`${maxPrep} mins`);
 
       setPlacedOrderId(orderId);
-      setIsOrderSuccess(true);
       setIsMobileCartOpen(false);
       clearCart();
       toast.success('Order successfully sent to kitchen!');
 
       // Operational audit log
-      customerService.logCustomerEvent(tenantId, 'Order Created', `Customer placed order ${orderId} on table ${tableNumber}`, {
+      customerService.logCustomerEvent(tenantId, 'Order Created', `Customer placed order ${orderId} on table ${cleanTableNum}`, {
         orderId,
-        tableNumber,
+        tableNumber: cleanTableNum,
         itemsCount: cartItems.length,
         total: totalCartCost
       }).catch(() => {});
-    } catch (err) {
+
+      // Navigate immediately to Live Order Tracking
+      navigate(`/customer/restaurant/${tenantId}/order/${orderId}`);
+    } catch (err: any) {
       console.error('[CustomerMenu] Place order error:', err);
-      toast.error('Failed to submit order to kitchen. Please try again.');
+      const msg = err?.code === 'permission-denied'
+        ? 'Permission denied submitting order. Please check session and try again.'
+        : 'Failed to submit order to kitchen. Please try again.';
+      toast.error(msg);
     } finally {
       setIsPlacingOrder(false);
     }

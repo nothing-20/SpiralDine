@@ -400,7 +400,7 @@ export const CustomerPortal: React.FC = () => {
         totalAmount: cartTotalVal,
         total: cartTotalVal,
         status: 'NEW',
-        paymentStatus: 'PENDING',
+        paymentStatus: 'pending',
         specialInstructions,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()

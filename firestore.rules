@@ -253,7 +253,8 @@ service cloud.firestore {
         allow read: if true;
         allow create: if (
           request.resource.data.get('tenantId', '') == tenantId &&
-          request.resource.data.get('paymentStatus', 'pending') == 'pending' &&
+          (request.resource.data.get('paymentStatus', 'pending') == 'pending' ||
+           request.resource.data.get('paymentStatus', 'pending') == 'PENDING') &&
           !('paidAt' in request.resource.data) &&
           (isTenantStaff(tenantId) || 
            !isAuth() || 
