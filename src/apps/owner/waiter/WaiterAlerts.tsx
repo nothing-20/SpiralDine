@@ -45,7 +45,7 @@ type TAlertsTab = 'orders' | 'assistance' | 'history';
 export const WaiterAlerts: React.FC = () => {
   const { user } = useAuth();
   
-  const [activeTab, setActiveTab] = useState<TAlertsTab>('orders');
+  const [activeTab, setActiveTab] = useState<TAlertsTab>('assistance');
   const [orders, setOrders] = useState<IOrder[]>([]);
   const [activeAssistance, setActiveAssistance] = useState<any[]>([]);
   const [historyAssistance, setHistoryAssistance] = useState<any[]>([]);
@@ -121,6 +121,11 @@ export const WaiterAlerts: React.FC = () => {
 
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
+          // Strict separation: Exclude food orders from customer assistance requests
+          if (data.requestType === 'New Order Placed' || data.type === 'New Order Placed') {
+            return;
+          }
+
           const item = { id: docSnap.id, ...data };
           const status = (data.status || 'Pending').toLowerCase();
 
@@ -176,6 +181,7 @@ export const WaiterAlerts: React.FC = () => {
     const list: any[] = [...activeAssistance];
 
     legacyRequests.forEach((r: any) => {
+      if (r.type === 'New Order Placed' || r.requestType === 'New Order Placed') return;
       // Don't duplicate if already in waiterRequests
       const exists = list.some(a => a.id === r.id || (a.tableNumber === r.tableNumber && a.requestType === r.type));
       if (!exists) {

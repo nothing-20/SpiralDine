@@ -90,7 +90,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     const unsubRequests = onSnapshot(qRequests, (snap) => {
       let count = 0;
       snap.forEach(d => {
-        const s = (d.data().status || '').toLowerCase();
+        const data = d.data();
+        if (data.requestType === 'New Order Placed' || data.type === 'New Order Placed') return;
+        const s = (data.status || '').toLowerCase();
         if (s !== 'completed' && s !== 'cancelled' && s !== 'rejected') {
           count++;
         }
@@ -164,8 +166,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
           icon: ClipboardList, 
           badge: activeWaiterAlertsCount > 0 ? activeWaiterAlertsCount : undefined 
         },
-        { to: 'divider-waiter-1', label: '', icon: () => null },
         { to: '/dashboard/waiter/assigned-tables', label: 'My Assigned Tables', icon: QrCode },
+        { 
+          to: '/dashboard/waiter/live-orders', 
+          label: 'Live Orders', 
+          icon: Utensils, 
+          badge: activeCookingCount > 0 ? activeCookingCount : undefined 
+        },
+        { to: 'divider-waiter-1', label: '', icon: () => null },
         { to: '/dashboard/waiter/billing', label: 'Billing', icon: DollarSign },
         { to: '/dashboard/waiter/order-history', label: 'Order History', icon: History },
         { to: '/dashboard/waiter/item-history', label: 'Item History', icon: ListOrdered },

@@ -831,22 +831,6 @@ export const CustomerMenu: React.FC = () => {
         console.warn('[CustomerMenu] Table status update ignored:', err);
       }
 
-      // Non-blocking waiter alert notification
-      try {
-        const waiterAlertId = `REQ-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-        const waiterAlertRef = doc(db, 'restaurants', tenantId, 'waiterRequests', waiterAlertId);
-        await setDoc(waiterAlertRef, {
-          id: waiterAlertId,
-          tableNumber: cleanTableNum,
-          requestType: 'New Order Placed',
-          status: 'Pending',
-          createdAt: new Date().toISOString(),
-          orderId
-        });
-      } catch (err) {
-        console.warn('[CustomerMenu] Waiter alert write ignored:', err);
-      }
-
       // Calculate estimated prep time
       const prepTimes = cartItems.map(ci => {
         const item = menuItems.find(m => m.id === ci.itemId);

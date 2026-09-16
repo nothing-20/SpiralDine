@@ -268,7 +268,7 @@ export const WaiterMatrix: React.FC = () => {
       const list: any[] = [];
       snap.forEach(docSnap => {
         const data = docSnap.data();
-        if (data.status !== 'Completed') {
+        if (data.status !== 'Completed' && data.requestType !== 'New Order Placed' && data.type !== 'New Order Placed') {
           list.push({ id: docSnap.id, ...data });
         }
       });

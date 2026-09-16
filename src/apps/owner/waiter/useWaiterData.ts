@@ -76,7 +76,12 @@ export function useWaiterData() {
       (snapshot) => {
         const list: any[] = [];
         snapshot.forEach((docSnap) => {
-          list.push({ id: docSnap.id, ...docSnap.data() });
+          const data = docSnap.data();
+          // Exclude food order events from customer assistance requests
+          if (data.requestType === 'New Order Placed' || data.type === 'New Order Placed') {
+            return;
+          }
+          list.push({ id: docSnap.id, ...data });
         });
         list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setWaiterRequests(list);

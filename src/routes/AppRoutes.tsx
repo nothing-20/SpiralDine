@@ -60,6 +60,7 @@ const KitchenSettingsPage = React.lazy(() => import('../apps/owner/kitchen/Kitch
 // Waiter
 const WaiterMatrix = React.lazy(() => import('../apps/owner/waiter/WaiterMatrix'));
 const WaiterAlerts = React.lazy(() => import('../apps/owner/waiter/WaiterAlerts'));
+const WaiterLiveOrdersPage = React.lazy(() => import('../apps/owner/waiter/WaiterLiveOrdersPage'));
 const WaiterAssignedTablesPage = React.lazy(() => import('../apps/owner/waiter/WaiterAssignedTablesPage'));
 const WaiterOrderHistoryPage = React.lazy(() => import('../apps/owner/waiter/WaiterOrderHistoryPage'));
 const WaiterItemHistoryPage = React.lazy(() => import('../apps/owner/waiter/WaiterItemHistoryPage'));
@@ -360,6 +361,8 @@ export const AppRoutes: React.FC = () => {
               <Route element={<RoleGuard allowedRoles={['owner', 'admin', 'manager', 'waiter']} />}>
                 <Route path="/dashboard/waiter" element={<WaiterMatrix />} />
                 <Route path="/dashboard/waiter/alerts" element={<WaiterAlerts />} />
+                <Route path="/dashboard/waiter/live-orders" element={<WaiterLiveOrdersPage />} />
+                <Route path="/dashboard/waiter/orders" element={<Navigate to="/dashboard/waiter/live-orders" replace />} />
                 <Route path="/dashboard/waiter/assigned-tables" element={<WaiterAssignedTablesPage />} />
                 <Route path="/dashboard/waiter/order-history" element={<WaiterOrderHistoryPage />} />
                 <Route path="/dashboard/waiter/item-history" element={<WaiterItemHistoryPage />} />
