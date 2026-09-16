@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { IKdsOrder } from '../../../features/kitchen-dashboard/types';
+import { filterKitchenStaff } from '../../../shared/services/kitchenService';
 
 export function useKitchenData() {
   const { user } = useAuth();
@@ -88,5 +89,7 @@ export function useKitchenData() {
     return () => unsubscribe();
   }, [user?.tenantId]);
 
-  return { allOrders, employees, menuItems, isLoading };
+  const kitchenStaff = useMemo(() => filterKitchenStaff(employees), [employees]);
+
+  return { allOrders, employees, kitchenStaff, menuItems, isLoading };
 }

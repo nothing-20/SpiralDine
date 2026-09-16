@@ -110,15 +110,35 @@ async function validateRecipeIngredients(
   return results;
 }
 
+// ── Kitchen Staff Role Utilities ─────────────────────────────────────────────
+
+export const KITCHEN_ELIGIBLE_ROLES = [
+  'kitchen',
+  'chef',
+  'kitchen_staff',
+  'cook',
+  'head_chef',
+  'line_cook',
+] as const;
+
+export function isKitchenStaffRole(role?: string | null): boolean {
+  if (!role) return false;
+  const normalized = role.toLowerCase().trim().replace(/[-\s]/g, '_');
+  return (KITCHEN_ELIGIBLE_ROLES as readonly string[]).includes(normalized);
+}
+
+export function filterKitchenStaff<T extends { role?: string; status?: string }>(employees: T[]): T[] {
+  if (!Array.isArray(employees)) return [];
+  return employees.filter(e => (!e.status || e.status === 'active') && isKitchenStaffRole(e.role));
+}
+
 // ── Chef Availability ────────────────────────────────────────────────────────
 
 function deriveChefAvailability(
   employees: any[],
   orders: IKdsOrder[]
 ): IChefAvailability[] {
-  const kitchenStaff = employees.filter(
-    e => e.role === 'chef' || e.role === 'kitchen_staff' || e.role === 'kitchen'
-  );
+  const kitchenStaff = filterKitchenStaff(employees);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -427,6 +447,11 @@ function calculateHeatMapData(orders: IKdsOrder[]): {
 // ── Export ────────────────────────────────────────────────────────────────────
 
 export const kitchenService = {
+  // Role & Eligibility
+  isKitchenStaffRole,
+  filterKitchenStaff,
+  KITCHEN_ELIGIBLE_ROLES,
+
   // Recipe Validation
   validateRecipeIngredients,
 

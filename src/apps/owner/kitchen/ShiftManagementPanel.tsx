@@ -3,7 +3,7 @@ import Card from '../../../components/ui/Card/Card';
 import { Clock, Play, Square, Coffee, User, TrendingUp } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { IShiftRecord } from '../../../shared/domain/orders/types';
-import { kitchenService } from '../../../shared/services/kitchenService';
+import { kitchenService, filterKitchenStaff } from '../../../shared/services/kitchenService';
 import { toast } from 'react-hot-toast';
 
 interface IShiftManagementPanelProps {
@@ -21,7 +21,7 @@ const ShiftManagementPanel: React.FC<IShiftManagementPanelProps> = ({ employees 
   }, [user?.tenantId]);
 
   const kitchenStaff = useMemo(
-    () => employees.filter(e => e.role === 'chef' || e.role === 'kitchen_staff' || e.role === 'kitchen'),
+    () => filterKitchenStaff(employees),
     [employees]
   );
 

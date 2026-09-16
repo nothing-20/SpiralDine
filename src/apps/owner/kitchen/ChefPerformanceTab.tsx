@@ -4,6 +4,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '../../../context/AuthContext';
 import Card from '../../../components/ui/Card/Card';
 import { ChefHat, Star, TrendingUp, Clock, AlertCircle } from 'lucide-react';
+import { filterKitchenStaff } from '../../../shared/services/kitchenService';
 
 interface IChefPerformanceTabProps {
   orders: any[];
@@ -32,11 +33,9 @@ export const ChefPerformanceTab: React.FC<IChefPerformanceTabProps> = ({ orders,
     return () => unsub();
   }, [user?.tenantId]);
 
-  // Derive chef list (employees with role chef/kitchen_staff)
+  // Derive chef list (employees with kitchen-authorized role)
   const chefs = useMemo(() => {
-    const list = employees.filter(
-      emp => emp.role === 'chef' || emp.role === 'kitchen_staff' || emp.role === 'kitchen'
-    );
+    const list = filterKitchenStaff(employees);
     // Fallback: collect from assigned chef names in orders if employees is empty
     if (list.length === 0) {
       const names = new Set<string>();

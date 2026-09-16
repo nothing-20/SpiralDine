@@ -4,6 +4,7 @@ import {
   getElapsedSeconds,
   formatElapsedSeconds,
 } from '../../../features/kitchen-dashboard/utils/kitchenMetrics';
+import { isKitchenStaffRole, filterKitchenStaff } from '../../../shared/services/kitchenService';
 import OrderTimeline from './OrderTimeline';
 import { 
   Check, 
@@ -148,6 +149,23 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
   // Needs chef assignment before cooking
   const needsChefAssignment = (order.status === 'ACCEPTED' || order.status === 'CHEF_ASSIGNED') && !order.assignedChefName;
 
+  // Kitchen-eligible staff members (role filtered)
+  const kitchenStaff = React.useMemo(
+    () => filterKitchenStaff(employees),
+    [employees]
+  );
+
+  // Safe validation check for existing historical assignments
+  const assignedStaffMember = React.useMemo(() => {
+    if (!order.assignedChefId) return null;
+    return employees.find(e => e.id === order.assignedChefId);
+  }, [order.assignedChefId, employees]);
+
+  const isAssignedValidKitchenStaff = React.useMemo(() => {
+    if (!order.assignedChefId || !assignedStaffMember) return true;
+    return isKitchenStaffRole(assignedStaffMember.role);
+  }, [order.assignedChefId, assignedStaffMember]);
+
   return (
     <div
       className={`bg-white border border-[#E3DED5] rounded-xl shadow-[0_2px_10px_rgba(30,30,20,0.06)] overflow-hidden flex flex-col justify-between transition-all text-left font-sans hover:border-[#D1C9BC] ${
@@ -239,10 +257,19 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
         {/* Assigned Chef Indicator / Selector */}
         <div className="mt-2 text-[11px]">
           {order.assignedChefName ? (
-            <div className="flex items-center justify-between bg-[#F7F4EE] px-2 py-1 rounded-md border border-[#E3DED5]">
+            <div className={`flex items-center justify-between px-2 py-1 rounded-md border ${
+              isAssignedValidKitchenStaff
+                ? 'bg-[#F7F4EE] border-[#E3DED5]'
+                : 'bg-[#FEF5E7] border-[#D79A24]/50'
+            }`}>
               <div className="flex items-center space-x-1 text-[#18201D] font-medium truncate">
-                <User className="w-3 h-3 text-[#6F746F]" />
+                <User className={`w-3 h-3 ${isAssignedValidKitchenStaff ? 'text-[#6F746F]' : 'text-[#D79A24]'}`} />
                 <span>Chef {order.assignedChefName}</span>
+                {!isAssignedValidKitchenStaff && (
+                  <span className="ml-1 text-[9px] font-bold text-[#D79A24] bg-[#FEF7EC] px-1 py-0.5 rounded border border-[#D79A24]/30" title="Assigned staff member is not configured as kitchen staff">
+                    Reassign (Non-Kitchen)
+                  </span>
+                )}
               </div>
               <button
                 onClick={(e) => { e.stopPropagation(); onUnassignChef(order.orderId); }}
@@ -255,13 +282,13 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
             <select
               value=""
               onChange={(e) => {
-                const chef = employees.find(emp => emp.id === e.target.value);
+                const chef = kitchenStaff.find(emp => emp.id === e.target.value);
                 if (chef) onAssignChef(order.orderId, chef.id, chef.fullName);
               }}
               className="w-full text-[11px] bg-[#F7F4EE] border border-[#E3DED5] rounded px-2 py-1 text-[#6F746F] outline-none cursor-pointer"
             >
               <option value="" disabled>Assign Chef...</option>
-              {employees.map(emp => (
+              {kitchenStaff.map(emp => (
                 <option key={emp.id} value={emp.id}>{emp.fullName}</option>
               ))}
             </select>
@@ -392,17 +419,15 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
             <select
               value=""
               onChange={(e) => {
-                const chef = employees.find(emp => emp.id === e.target.value);
+                const chef = kitchenStaff.find(emp => emp.id === e.target.value);
                 if (chef) onAssignChef(order.orderId, chef.id, chef.fullName);
               }}
               className="w-full h-10 rounded-lg text-xs font-bold bg-[#FEF7EC] border border-[#D79A24]/40 text-[#D79A24] px-3 outline-none cursor-pointer"
             >
               <option value="" disabled>Select Chef to Assign...</option>
-              {employees
-                .filter(emp => emp.role === 'chef' || emp.role === 'kitchen_staff' || emp.role === 'kitchen')
-                .map(emp => (
-                  <option key={emp.id} value={emp.id}>{emp.fullName}</option>
-                ))}
+              {kitchenStaff.map(emp => (
+                <option key={emp.id} value={emp.id}>{emp.fullName}</option>
+              ))}
             </select>
             <button
               onClick={() => onStatusUpdate(order.orderId, 'PREPARING')}

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import Card from '../../../components/ui/Card/Card';
 import Select from '../../../components/ui/Select/Select';
 import { Search, Calendar, User, LayoutGrid, CheckCircle } from 'lucide-react';
+import { filterKitchenStaff } from '../../../shared/services/kitchenService';
 
 interface IOrderHistoryTabProps {
   orders: any[];
@@ -121,7 +122,7 @@ export const OrderHistoryTab: React.FC<IOrderHistoryTabProps> = ({ orders, emplo
             onChange={e => { setSelectedChef(e.target.value); setCurrentPage(1); }}
             options={[
               { value: 'all', label: 'All Chefs' },
-              ...employees.filter(emp => emp.role === 'chef' || emp.role === 'kitchen_staff').map(emp => ({ value: emp.fullName, label: emp.fullName }))
+              ...filterKitchenStaff(employees).map(emp => ({ value: emp.fullName, label: emp.fullName }))
             ]}
           />
 

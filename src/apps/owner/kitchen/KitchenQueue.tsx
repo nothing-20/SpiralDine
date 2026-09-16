@@ -38,6 +38,7 @@ import BulkActionsToolbar from './BulkActionsToolbar';
 import KitchenTicket from './KitchenTicket';
 import OrderTimeline from './OrderTimeline';
 import { inventoryService } from '../../../shared/services/inventoryService';
+import { isKitchenStaffRole, filterKitchenStaff } from '../../../shared/services/kitchenService';
 import LivePreparedInventory from './LivePreparedInventory';
 
 // Enterprise Panels
@@ -604,6 +605,14 @@ export const KitchenQueue: React.FC = () => {
   const handleAssignChef = useCallback(
     async (orderId: string, chefId: string, chefName: string) => {
       if (!user?.tenantId) return;
+
+      // Backend role guard: verify target staff is authorized for kitchen operations
+      const targetStaff = employees.find(emp => emp.id === chefId);
+      if (targetStaff && !isKitchenStaffRole(targetStaff.role)) {
+        toast.error(`Cannot assign order: ${targetStaff.fullName || 'Selected staff member'} is not authorized for kitchen work.`);
+        return;
+      }
+
       try {
         const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
         const timelineEvent: ITimelineEvent = {
@@ -636,7 +645,7 @@ export const KitchenQueue: React.FC = () => {
         toast.error('Failed to assign chef.');
       }
     },
-    [user?.tenantId, user?.displayName, user?.role]
+    [user?.tenantId, user?.displayName, user?.role, employees]
   );
 
   const handleUnassignChef = useCallback(
