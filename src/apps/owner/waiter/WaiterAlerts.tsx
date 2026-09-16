@@ -51,7 +51,7 @@ export const WaiterAlerts: React.FC = () => {
   const [historyAssistance, setHistoryAssistance] = useState<any[]>([]);
   const [legacyRequests, setLegacyRequests] = useState<IServiceRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedBillOrder, setSelectedBillOrder] = useState<{ orderId: string; tableNumber: string } | null>(null);
+  const [selectedBillOrder, setSelectedBillOrder] = useState<{ orderId: string; tableNumber: string; requestId?: string } | null>(null);
   const [isBillModalOpen, setIsBillModalOpen] = useState(false);
   const [isConfirmingCashId, setIsConfirmingCashId] = useState<string | null>(null);
 
@@ -285,7 +285,10 @@ export const WaiterAlerts: React.FC = () => {
   };
 
   const handleConfirmCashReceived = async (item: any) => {
-    if (!user?.tenantId) return;
+    if (!user?.tenantId) {
+      toast.error('Restaurant context missing. Please re-login.');
+      return;
+    }
     const orderId = item.orderId || item.id.replace(/^CASH-/, '');
     const billId = item.billId || billingService.getCanonicalBillId(orderId);
 
@@ -294,6 +297,7 @@ export const WaiterAlerts: React.FC = () => {
       await billingService.settleBillPayment(user.tenantId, billId, {
         method: 'cash',
         transactionRef: `CASH-WAITER-${Date.now().toString(36).toUpperCase()}`,
+        requestId: item.id,
         actor: {
           uid: user.uid || 'waiter',
           displayName: user.displayName || user.email || 'Staff Waiter',
@@ -303,12 +307,23 @@ export const WaiterAlerts: React.FC = () => {
       });
 
       // Update waiterRequest doc to Completed
-      const docRef = doc(db, 'restaurants', user.tenantId, 'waiterRequests', item.id);
-      await updateDoc(docRef, {
+      try {
+        const docRef = doc(db, 'restaurants', user.tenantId, 'waiterRequests', item.id);
+        await updateDoc(docRef, {
+          status: 'Completed',
+          resolvedBy: user.displayName || user.email || 'Waiter',
+          resolvedAt: new Date().toISOString()
+        });
+      } catch (_) {}
+
+      // Immediately update local state without needing manual reload
+      setActiveAssistance(prev => prev.filter(a => a.id !== item.id));
+      setHistoryAssistance(prev => [{
+        ...item,
         status: 'Completed',
         resolvedBy: user.displayName || user.email || 'Waiter',
         resolvedAt: new Date().toISOString()
-      });
+      }, ...prev]);
 
       toast.success(`Cash payment confirmed for Table ${item.tableNumber}! Bill settled.`, { icon: '✅' });
     } catch (err: any) {
@@ -941,7 +956,11 @@ export const WaiterAlerts: React.FC = () => {
                           </button>
                           <button
                             onClick={() => {
-                              setSelectedBillOrder({ orderId: item.orderId || item.id.replace(/^CASH-/, ''), tableNumber: item.tableNumber });
+                              setSelectedBillOrder({ 
+                                orderId: item.orderId || item.id.replace(/^CASH-/, ''), 
+                                tableNumber: item.tableNumber,
+                                requestId: item.id
+                              });
                               setIsBillModalOpen(true);
                             }}
                             className="py-2.5 px-3 bg-white hover:bg-[#F3E8DF] border border-[#E5DCD5] text-[#202124] text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1"
@@ -1095,8 +1114,27 @@ export const WaiterAlerts: React.FC = () => {
           }}
           tenantId={user.tenantId}
           orderId={selectedBillOrder.orderId}
+          requestId={selectedBillOrder.requestId}
           mode="waiter"
           restaurantName="Spiral Dine"
+          onPaymentSettled={(_settledBill) => {
+            // Immediate real-time update: remove from active assistance and add to history
+            setActiveAssistance(prev => prev.filter(a => 
+              a.id !== selectedBillOrder.requestId &&
+              a.orderId !== selectedBillOrder.orderId &&
+              a.id !== `CASH-${selectedBillOrder.orderId}`
+            ));
+            setHistoryAssistance(prev => [{
+              id: selectedBillOrder.requestId || `CASH-${selectedBillOrder.orderId}`,
+              orderId: selectedBillOrder.orderId,
+              tableNumber: selectedBillOrder.tableNumber,
+              requestType: 'Cash Payment',
+              status: 'Completed',
+              resolvedBy: user?.displayName || user?.email || 'Waiter',
+              resolvedAt: new Date().toISOString(),
+              createdAt: new Date().toISOString()
+            }, ...prev]);
+          }}
         />
       )}
 

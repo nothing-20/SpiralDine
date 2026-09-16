@@ -39,6 +39,7 @@ export interface ICanonicalBillModalProps {
   restaurantName?: string;
   restaurantLogo?: string;
   merchantVpa?: string;
+  requestId?: string;
   onPaymentSettled?: (bill: IBill) => void;
   onOpenReceipt?: (orderId: string) => void;
 }
@@ -53,6 +54,7 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
   restaurantName,
   restaurantLogo,
   merchantVpa = 'spiraldine@upi',
+  requestId,
   onPaymentSettled,
   onOpenReceipt
 }) => {
@@ -199,16 +201,15 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
 
   // Staff/Owner Manual Payment Settlement Confirmation (Never accessible to customer)
   const handleConfirmSettlement = async (method: 'cash' | 'upi') => {
-    if (isCustomer) {
+    const isAuthorizedStaff = mode === 'waiter' || mode === 'owner' || ['owner', 'admin', 'manager', 'cashier', 'waiter', 'staff'].includes(user?.role || '');
+    if (!isAuthorizedStaff || isCustomer) {
       toast.error('Payment confirmation is restricted to authorized restaurant staff.');
       return;
     }
 
-    if (!tenantId || !bill) return;
-
-    // Idempotency check: prevent duplicate settlement
-    if (bill.paymentStatus === 'paid') {
-      toast.error('Payment already completed');
+    const effectiveTenantId = tenantId || user?.tenantId || bill?.tenantId || (user as any)?.restaurantId;
+    if (!effectiveTenantId) {
+      toast.error('Restaurant context missing. Please re-login.');
       return;
     }
 
@@ -216,13 +217,35 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
 
     setIsSettling(true);
     try {
+      let activeBill = bill;
+      // If bill is not yet loaded in state, fetch or create canonical bill from orderId
+      if (!activeBill) {
+        try {
+          const orderSnap = await getDoc(doc(db, 'restaurants', effectiveTenantId, 'orders', orderId));
+          if (orderSnap.exists()) {
+            activeBill = await billingService.getOrCreateCanonicalBill(effectiveTenantId, { orderId, ...orderSnap.data() } as IOrder);
+            setBill(activeBill);
+          }
+        } catch (_fetchErr) {
+          console.warn('[CanonicalBillModal] Bill prefetch warning:', _fetchErr);
+        }
+      }
+
+      // Idempotency check: prevent duplicate settlement
+      if (activeBill && activeBill.paymentStatus === 'paid') {
+        toast('Payment has already been confirmed and settled.', { icon: 'ℹ️' });
+        setIsSettling(false);
+        return;
+      }
+
       const actorName = user?.displayName || user?.email || (mode === 'waiter' ? 'Staff Waiter' : 'Restaurant Owner');
-      const actorRole = user?.role || mode;
+      const actorRole = (user?.role as any) || (mode === 'waiter' ? 'waiter' : 'owner');
       const actorUid = user?.uid || 'staff-uid';
 
-      const res = await billingService.settleBillPayment(tenantId, bill.billId || orderId, {
+      const res = await billingService.settleBillPayment(effectiveTenantId, activeBill?.billId || orderId, {
         method,
         transactionRef: method === 'upi' ? `DEMO-MANUAL-UPI-${Date.now().toString(36).toUpperCase()}` : `MANUAL-CASH-${Date.now().toString(36).toUpperCase()}`,
+        requestId,
         actor: {
           uid: actorUid,
           displayName: actorName,
@@ -231,25 +254,15 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
         }
       });
 
-      // Also resolve active CASH request in waiterRequests
-      if (method === 'cash') {
-        try {
-          const cashReqRef = doc(db, 'restaurants', tenantId, 'waiterRequests', `CASH-${orderId}`);
-          await updateDoc(cashReqRef, {
-            status: 'Completed',
-            resolvedBy: actorName,
-            resolvedAt: new Date().toISOString()
-          });
-        } catch (_) {}
-      }
-
       setBill(res.bill);
+      setIsCashRequested(false);
+      setCashRequestStatus('Completed');
       toast.success(method === 'cash' ? 'Cash payment confirmed & bill settled!' : 'UPI Demo payment confirmed & bill settled!', { icon: '✅' });
       if (onPaymentSettled) onPaymentSettled(res.bill);
     } catch (err: any) {
       console.error('[CanonicalBillModal] Settlement error:', err);
       const errMsg = err?.message || '';
-      if (errMsg.includes('already completed')) {
+      if (errMsg.includes('already completed') || errMsg.includes('already paid')) {
         toast.error('Payment already completed');
       } else if (errMsg.includes('permission') || errMsg.includes('PERMISSION_DENIED') || err?.code === 'permission-denied') {
         toast.error('Notice: In accordance with restaurant security rules, payment confirmation requires authorized staff verification.');

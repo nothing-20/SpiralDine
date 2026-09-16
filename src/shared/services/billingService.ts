@@ -34,6 +34,7 @@ export interface ISettlePaymentParams {
   invoiceNumber?: string;
   roundOff?: number;
   tip?: number;
+  requestId?: string;
 }
 
 export interface IUpiUriParams {
@@ -342,7 +343,26 @@ export const billingService = {
   ): Promise<{ bill: IBill; invoiceNumber: string }> => {
     const billId = billingService.getCanonicalBillId(billIdOrOrderId);
     const billRef = doc(db, 'restaurants', tenantId, 'bills', billId);
-    const billSnap = await getDoc(billRef);
+    let billSnap = await getDoc(billRef);
+
+    // Resilient fallback: If canonical bill document has not been persisted yet, create it from the order
+    if (!billSnap.exists()) {
+      const cleanOrderId = billIdOrOrderId.replace(/^BILL-/i, '').trim();
+      let orderSnap = await getDoc(doc(db, 'restaurants', tenantId, 'orders', cleanOrderId));
+      if (!orderSnap.exists()) {
+        const qOrder = query(collection(db, 'restaurants', tenantId, 'orders'), where('orderId', '==', cleanOrderId), limit(1));
+        const qSnap = await getDocs(qOrder);
+        if (!qSnap.empty) {
+          orderSnap = qSnap.docs[0];
+        }
+      }
+
+      if (orderSnap.exists()) {
+        const orderData = { orderId: orderSnap.id, ...orderSnap.data() } as IOrder;
+        await billingService.getOrCreateCanonicalBill(tenantId, orderData, params.actor);
+        billSnap = await getDoc(billRef);
+      }
+    }
 
     if (!billSnap.exists()) {
       throw new Error(`Bill ${billId} does not exist for tenant ${tenantId}.`);
@@ -408,13 +428,29 @@ export const billingService = {
     };
     await updateDoc(billRef, updatedBill);
 
-    // 7. Update Order document
+    // 7. Update Order document while strictly honoring kitchen lifecycle
     try {
       const orderRef = doc(db, 'restaurants', tenantId, 'orders', bill.orderId);
+      const currentOrderSnap = await getDoc(orderRef);
+      
+      let targetStatus = 'COMPLETED';
+      if (currentOrderSnap.exists()) {
+        const currData = currentOrderSnap.data();
+        const activeKitchenStatuses = ['NEW', 'PLACED', 'ACCEPTED', 'CHEF_ASSIGNED', 'PREPARING', 'READY'];
+        // If the food is still in the kitchen preparation cycle, do not prematurely overwrite food lifecycle
+        if (activeKitchenStatuses.includes(currData.status)) {
+          targetStatus = currData.status;
+        } else if (['SERVED', 'DELIVERED', 'DINING_COMPLETED', 'BILL_REQUESTED'].includes(currData.status)) {
+          targetStatus = 'COMPLETED';
+        } else {
+          targetStatus = currData.status || 'COMPLETED';
+        }
+      }
+
       await updateDoc(orderRef, {
         paymentStatus: 'paid',
         paidAt: nowIso,
-        status: 'COMPLETED',
+        status: targetStatus,
         paymentMethods: paymentBreakdown,
         transactionRef: generatedTxRef,
         processedBy: actorUid,
@@ -447,7 +483,64 @@ export const billingService = {
       }
     }
 
-    // 9. Append transaction ledger document (idempotent: prevent duplicate records)
+    // 9. Atomically resolve all active waiter assistance requests for this cash payment/bill
+    try {
+      const waiterReqCol = collection(db, 'restaurants', tenantId, 'waiterRequests');
+      const qCash = query(waiterReqCol, where('orderId', '==', bill.orderId));
+      const reqSnap = await getDocs(qCash);
+      
+      const resolvePromises: Promise<any>[] = [];
+      reqSnap.forEach((dSnap) => {
+        const rData = dSnap.data();
+        const rStatus = (rData.status || '').toLowerCase();
+        if (rStatus !== 'completed' && rStatus !== 'cancelled') {
+          resolvePromises.push(
+            updateDoc(dSnap.ref, {
+              status: 'Completed',
+              resolvedBy: actorName,
+              resolvedAt: nowIso
+            })
+          );
+        }
+      });
+
+      // Also explicitly check deterministic CASH-${orderId} and BILL-${orderId} doc refs
+      const directCashRef = doc(db, 'restaurants', tenantId, 'waiterRequests', `CASH-${bill.orderId}`);
+      resolvePromises.push(
+        getDoc(directCashRef).then(snap => {
+          if (snap.exists() && (snap.data().status || '').toLowerCase() !== 'completed') {
+            return updateDoc(directCashRef, { status: 'Completed', resolvedBy: actorName, resolvedAt: nowIso });
+          }
+        }).catch(() => {})
+      );
+
+      const directBillReqRef = doc(db, 'restaurants', tenantId, 'waiterRequests', `BILL-${bill.orderId}`);
+      resolvePromises.push(
+        getDoc(directBillReqRef).then(snap => {
+          if (snap.exists() && (snap.data().status || '').toLowerCase() !== 'completed') {
+            return updateDoc(directBillReqRef, { status: 'Completed', resolvedBy: actorName, resolvedAt: nowIso });
+          }
+        }).catch(() => {})
+      );
+
+      // If specific requestId was passed, resolve it directly
+      if (params.requestId) {
+        const specificReqRef = doc(db, 'restaurants', tenantId, 'waiterRequests', params.requestId);
+        resolvePromises.push(
+          getDoc(specificReqRef).then(snap => {
+            if (snap.exists() && (snap.data().status || '').toLowerCase() !== 'completed') {
+              return updateDoc(specificReqRef, { status: 'Completed', resolvedBy: actorName, resolvedAt: nowIso });
+            }
+          }).catch(() => {})
+        );
+      }
+
+      await Promise.allSettled(resolvePromises);
+    } catch (reqErr) {
+      console.warn('[billingService] Could not resolve waiterRequests:', reqErr);
+    }
+
+    // 10. Append transaction ledger document (idempotent: prevent duplicate records)
     try {
       const transCol = collection(db, 'restaurants', tenantId, 'transactions');
       const existingTransQuery = query(transCol, where('billId', '==', billId), limit(1));
