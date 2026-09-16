@@ -130,6 +130,7 @@ export const paymentService = {
       amountInCents: data.amount,
       currency: data.currency || 'INR',
       status: 'PENDING',
+      keyId: data.keyId,
       rawResponse: data
     };
   },

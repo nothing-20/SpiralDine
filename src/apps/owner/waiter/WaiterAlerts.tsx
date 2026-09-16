@@ -16,6 +16,8 @@ import { useAuth } from '../../../context/AuthContext';
 import { IServiceRequest, IOrder } from '../../../types';
 import { formatPrice } from '../../../utils/format';
 import toast from 'react-hot-toast';
+import { billingService } from '../../../shared/services/billingService';
+import CanonicalBillModal from '../../../shared/ui/billing/CanonicalBillModal';
 import { 
   Coffee, 
   DollarSign, 
@@ -49,6 +51,9 @@ export const WaiterAlerts: React.FC = () => {
   const [historyAssistance, setHistoryAssistance] = useState<any[]>([]);
   const [legacyRequests, setLegacyRequests] = useState<IServiceRequest[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [selectedBillOrder, setSelectedBillOrder] = useState<{ orderId: string; tableNumber: string } | null>(null);
+  const [isBillModalOpen, setIsBillModalOpen] = useState(false);
+  const [isConfirmingCashId, setIsConfirmingCashId] = useState<string | null>(null);
 
   // Live ticking clock for Front of House service status
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -279,6 +284,41 @@ export const WaiterAlerts: React.FC = () => {
     }
   };
 
+  const handleConfirmCashReceived = async (item: any) => {
+    if (!user?.tenantId) return;
+    const orderId = item.orderId || item.id.replace(/^CASH-/, '');
+    const billId = item.billId || billingService.getCanonicalBillId(orderId);
+
+    setIsConfirmingCashId(item.id);
+    try {
+      await billingService.settleBillPayment(user.tenantId, billId, {
+        method: 'cash',
+        transactionRef: `CASH-WAITER-${Date.now().toString(36).toUpperCase()}`,
+        actor: {
+          uid: user.uid || 'waiter',
+          displayName: user.displayName || user.email || 'Staff Waiter',
+          email: user.email || '',
+          role: 'waiter'
+        }
+      });
+
+      // Update waiterRequest doc to Completed
+      const docRef = doc(db, 'restaurants', user.tenantId, 'waiterRequests', item.id);
+      await updateDoc(docRef, {
+        status: 'Completed',
+        resolvedBy: user.displayName || user.email || 'Waiter',
+        resolvedAt: new Date().toISOString()
+      });
+
+      toast.success(`Cash payment confirmed for Table ${item.tableNumber}! Bill settled.`, { icon: '✅' });
+    } catch (err: any) {
+      console.error('[WaiterAlerts] Cash confirmation error:', err);
+      toast.error(err.message || 'Failed to confirm cash payment.');
+    } finally {
+      setIsConfirmingCashId(null);
+    }
+  };
+
   const handleEscalateAssistance = async (item: any) => {
     if (!user?.tenantId) return;
     try {
@@ -354,6 +394,7 @@ export const WaiterAlerts: React.FC = () => {
 
   const getAssistanceIcon = (type: string) => {
     const t = (type || '').toLowerCase();
+    if (t.includes('cash')) return <DollarSign className="w-4 h-4 text-[#2E8B57]" />;
     if (t.includes('water')) return <Coffee className="w-4 h-4 text-[#287A55]" />;
     if (t.includes('bill')) return <DollarSign className="w-4 h-4 text-[#287A55]" />;
     if (t.includes('plate') || t.includes('cutlery') || t.includes('spoon')) return <UtensilsCrossed className="w-4 h-4 text-[#D79A24]" />;
@@ -886,28 +927,53 @@ export const WaiterAlerts: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Assistance Lifecycle Action Controls: [Accept] [Resolve] [Cancel] */}
+                    {/* Assistance Lifecycle Action Controls */}
                     <div className="flex items-center gap-2 pt-4 mt-3 border-t border-[#E3DED5]">
-                      {!isAccepted ? (
-                        <button
-                          onClick={() => handleAcceptAssistance(item)}
-                          className="flex-1 py-2 bg-[#287A55] hover:bg-[#206345] text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center justify-center space-x-1 cursor-pointer"
-                        >
-                          <Check className="w-3.5 h-3.5 stroke-[3]" />
-                          <span>Accept</span>
-                        </button>
-                      ) : null}
+                      {reqType.toLowerCase().includes('cash') ? (
+                        <>
+                          <button
+                            onClick={() => handleConfirmCashReceived(item)}
+                            disabled={isConfirmingCashId === item.id}
+                            className="flex-1 py-2.5 bg-[#2E8B57] hover:bg-[#246B43] text-white text-xs font-extrabold rounded-xl transition-all shadow-sm flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>{isConfirmingCashId === item.id ? 'Settling...' : 'Confirm Cash Received'}</span>
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelectedBillOrder({ orderId: item.orderId || item.id.replace(/^CASH-/, ''), tableNumber: item.tableNumber });
+                              setIsBillModalOpen(true);
+                            }}
+                            className="py-2.5 px-3 bg-white hover:bg-[#F3E8DF] border border-[#E5DCD5] text-[#202124] text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1"
+                            title="Open Bill"
+                          >
+                            <span>View Bill</span>
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          {!isAccepted ? (
+                            <button
+                              onClick={() => handleAcceptAssistance(item)}
+                              className="flex-1 py-2 bg-[#287A55] hover:bg-[#206345] text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center justify-center space-x-1 cursor-pointer"
+                            >
+                              <Check className="w-3.5 h-3.5 stroke-[3]" />
+                              <span>Accept</span>
+                            </button>
+                          ) : null}
 
-                      <button
-                        onClick={() => handleResolveAssistance(item)}
-                        className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all text-center cursor-pointer ${
-                          isAccepted
-                            ? 'bg-[#287A55] hover:bg-[#206345] text-white shadow-sm'
-                            : 'bg-white hover:bg-[#E8F3ED] text-[#287A55] border border-[#287A55]'
-                        }`}
-                      >
-                        Resolve
-                      </button>
+                          <button
+                            onClick={() => handleResolveAssistance(item)}
+                            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all text-center cursor-pointer ${
+                              isAccepted
+                                ? 'bg-[#287A55] hover:bg-[#206345] text-white shadow-sm'
+                                : 'bg-white hover:bg-[#E8F3ED] text-[#287A55] border border-[#287A55]'
+                            }`}
+                          >
+                            Resolve
+                          </button>
+                        </>
+                      )}
 
                       <button
                         onClick={() => handleEscalateAssistance(item)}
@@ -1017,6 +1083,21 @@ export const WaiterAlerts: React.FC = () => {
             </div>
           )}
         </div>
+      )}
+
+      {/* Canonical Bill Modal for Waiter */}
+      {selectedBillOrder && isBillModalOpen && user?.tenantId && (
+        <CanonicalBillModal
+          isOpen={isBillModalOpen}
+          onClose={() => {
+            setIsBillModalOpen(false);
+            setSelectedBillOrder(null);
+          }}
+          tenantId={user.tenantId}
+          orderId={selectedBillOrder.orderId}
+          mode="waiter"
+          restaurantName="Spiral Dine"
+        />
       )}
 
     </div>

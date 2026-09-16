@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { IBill } from '../../domain/billing/types';
 import { IOrder } from '../../../types';
@@ -67,6 +67,39 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
   const [isSettling, setIsSettling] = useState(false);
   const [isOnlinePaying, setIsOnlinePaying] = useState(false);
   const [onlineStatusText, setOnlineStatusText] = useState<string | null>(null);
+  const [isCashRequested, setIsCashRequested] = useState(false);
+  const [cashRequestStatus, setCashRequestStatus] = useState<string | null>(null);
+  const [isSubmittingCashRequest, setIsSubmittingCashRequest] = useState(false);
+
+  // 0. Real-time Cash Request listener for this order
+  useEffect(() => {
+    if (!isOpen || !tenantId || !orderId) return;
+
+    const cashReqRef = doc(db, 'restaurants', tenantId, 'waiterRequests', `CASH-${orderId}`);
+    const unsub = onSnapshot(cashReqRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        const st = (data.status || '').toLowerCase();
+        if (st === 'pending' || st === 'accepted') {
+          setIsCashRequested(true);
+          setCashRequestStatus(data.status);
+        } else if (st === 'completed') {
+          setIsCashRequested(false);
+          setCashRequestStatus('Completed');
+        } else {
+          setIsCashRequested(false);
+          setCashRequestStatus(null);
+        }
+      } else {
+        setIsCashRequested(false);
+        setCashRequestStatus(null);
+      }
+    }, (err) => {
+      console.warn('[CanonicalBillModal] Cash request listener warning:', err);
+    });
+
+    return () => unsub();
+  }, [isOpen, tenantId, orderId]);
 
   // 1. Real-time authoritative bill subscription with resilient Order fallback
   useEffect(() => {
@@ -198,6 +231,18 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
         }
       });
 
+      // Also resolve active CASH request in waiterRequests
+      if (method === 'cash') {
+        try {
+          const cashReqRef = doc(db, 'restaurants', tenantId, 'waiterRequests', `CASH-${orderId}`);
+          await updateDoc(cashReqRef, {
+            status: 'Completed',
+            resolvedBy: actorName,
+            resolvedAt: new Date().toISOString()
+          });
+        } catch (_) {}
+      }
+
       setBill(res.bill);
       toast.success(method === 'cash' ? 'Cash payment confirmed & bill settled!' : 'UPI Demo payment confirmed & bill settled!', { icon: '✅' });
       if (onPaymentSettled) onPaymentSettled(res.bill);
@@ -213,6 +258,65 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
       }
     } finally {
       setIsSettling(false);
+    }
+  };
+
+  // Customer Cash Payment Request (queues waiter alert with high priority)
+  const handleRequestCashPayment = async () => {
+    if (!tenantId || !orderId || !bill) return;
+
+    if (bill.paymentStatus === 'paid') {
+      toast.error('Payment already completed');
+      return;
+    }
+
+    if (isSubmittingCashRequest || isCashRequested) {
+      toast('Cash payment already requested. Staff has been notified.', { icon: 'ℹ️' });
+      return;
+    }
+
+    setIsSubmittingCashRequest(true);
+    try {
+      const requestId = `CASH-${orderId}`;
+      const cashReqRef = doc(db, 'restaurants', tenantId, 'waiterRequests', requestId);
+
+      await setDoc(cashReqRef, {
+        id: requestId,
+        orderId,
+        billId: bill.billId || billingService.getCanonicalBillId(orderId),
+        tableNumber: bill.tableNumber || 'Walk-in',
+        tableId: bill.tableId || (bill.tableNumber ? `TBL-${bill.tableNumber}` : ''),
+        requestType: 'Cash Payment',
+        status: 'Pending',
+        priority: 'high',
+        amount: totalInCents,
+        currency: bill.currency || currency || 'INR',
+        customerName: user?.displayName || bill.customerName || 'Guest Diner',
+        customerId: user?.uid || (bill as any)?.customerId || 'guest_diner',
+        notes: `Customer requested cash payment for Table ${bill.tableNumber || 'Walk-in'} (${formatPrice(totalInCents)})`,
+        createdAt: new Date().toISOString(),
+        acceptedBy: null,
+        acceptedAt: null,
+        resolvedBy: null,
+        resolvedAt: null
+      }, { merge: true });
+
+      try {
+        const orderRef = doc(db, 'restaurants', tenantId, 'orders', orderId);
+        await updateDoc(orderRef, {
+          cashRequestedAt: new Date().toISOString(),
+          paymentRequestedMethod: 'cash'
+        });
+      } catch (_) {}
+
+      setIsCashRequested(true);
+      setCashRequestStatus('Pending');
+      toast.success(`Cash payment requested! Please pay ${formatPrice(totalInCents)} to your server.`, { icon: '💵' });
+    } catch (err: any) {
+      console.error('[CanonicalBillModal] Cash request error:', err);
+      toast.error('Unable to submit cash request. Please try again.');
+    } finally {
+      setIsSubmittingCashRequest(false);
     }
   };
 
@@ -247,7 +351,12 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
 
       // 2. Open Razorpay Checkout modal
       setOnlineStatusText('Opening Razorpay Test Checkout...');
-      const razorpayKey = (orderRes.rawResponse as any)?.keyId || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || '';
+      const razorpayKey = orderRes.keyId || (orderRes.rawResponse as any)?.keyId || (import.meta as any).env?.VITE_RAZORPAY_KEY_ID || '';
+
+      if (!razorpayKey) {
+        toast.error('Payment gateway key is not configured. Please contact staff.');
+        return;
+      }
 
       const checkoutResult = await paymentService.openRazorpayCheckout({
         key: razorpayKey,
@@ -292,13 +401,17 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
 
       if (verifyRes.success) {
         toast.success('Payment verified & bill settled successfully!', { icon: '🎉' });
-        if (onPaymentSettled && bill) {
-          onPaymentSettled({
-            ...bill,
-            paymentStatus: 'paid',
-            paidAt: verifyRes.verifiedAt,
-            transactionRef: verifyRes.paymentReference
-          });
+        const settledBill: IBill = {
+          ...(bill || {}),
+          orderId,
+          tenantId,
+          paymentStatus: 'paid',
+          paidAt: verifyRes.verifiedAt || new Date().toISOString(),
+          transactionRef: verifyRes.paymentReference
+        } as IBill;
+        setBill(settledBill);
+        if (onPaymentSettled) {
+          onPaymentSettled(settledBill);
         }
       } else if (verifyRes.status === 'PENDING') {
         toast('Payment is processing. Updates will sync automatically.', { icon: '⏳' });
@@ -644,13 +757,61 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
               </div>
 
               {isCustomer ? (
-                /* Customer Guidance Notice */
-                <div className="p-3.5 bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl flex items-start gap-2.5 text-xs text-[#756B64]">
-                  <Info className="w-4 h-4 text-[#C85A3F] shrink-0 mt-0.5" />
-                  <p className="text-[11px] leading-relaxed text-[#52606D]">
-                    Cash payment will be confirmed by restaurant staff. Please hand physical cash of <strong>{formatPrice(totalInCents)}</strong> to your server or at the cashier desk. Once recorded, your official tax receipt will be available immediately.
-                  </p>
-                </div>
+                /* Customer View */
+                isCashRequested ? (
+                  /* Cash Payment Requested state */
+                  <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-extrabold text-amber-950 uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-amber-700 animate-pulse" />
+                        <span>Cash Payment Requested</span>
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-200/80 text-amber-900">
+                        Waiting for Staff Confirmation
+                      </span>
+                    </div>
+                    <p className="text-[11.5px] font-medium text-amber-900 leading-relaxed">
+                      Please pay <strong>{formatPrice(totalInCents)}</strong> to your server. Your waiter has been notified and will collect the cash at your table.
+                    </p>
+                    <button
+                      type="button"
+                      disabled
+                      className="w-full mt-2 py-3 bg-amber-200/60 text-amber-900 text-xs font-bold rounded-xl cursor-not-allowed flex items-center justify-center gap-1.5"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Request Sent to Staff</span>
+                    </button>
+                  </div>
+                ) : (
+                  /* Request Cash Payment action */
+                  <div className="space-y-3">
+                    <div className="p-3.5 bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl flex items-start gap-2.5 text-xs text-[#756B64]">
+                      <Info className="w-4 h-4 text-[#C85A3F] shrink-0 mt-0.5" />
+                      <p className="text-[11px] leading-relaxed text-[#52606D]">
+                        Cash payment will be confirmed by restaurant staff. Click <strong>Request Cash Payment</strong> below to notify your server to collect <strong>{formatPrice(totalInCents)}</strong> at your table.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isSubmittingCashRequest}
+                      onClick={handleRequestCashPayment}
+                      className="w-full py-3.5 bg-[#2E8B57] hover:bg-[#246B43] text-white text-xs font-extrabold rounded-xl shadow-md shadow-[#2E8B57]/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                    >
+                      {isSubmittingCashRequest ? (
+                        <>
+                          <Clock className="w-4 h-4 animate-spin" />
+                          <span>Notifying Staff...</span>
+                        </>
+                      ) : (
+                        <>
+                          <DollarSign className="w-4 h-4" />
+                          <span>Request Cash Payment</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )
               ) : (
                 /* Staff Confirmation Control */
                 <div className="pt-2">
@@ -831,26 +992,91 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
                 <span>View Receipt</span>
               </button>
             ) : isCustomer ? (
-              <button
-                type="button"
-                disabled={isOnlinePaying}
-                onClick={handlePayOnline}
-                className="px-5 py-2.5 bg-[#C85A3F] hover:bg-[#A94332] text-white text-xs font-extrabold rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
-              >
-                {isOnlinePaying ? (
-                  <>
-                    <Clock className="w-3.5 h-3.5 animate-spin" />
-                    <span>Processing...</span>
-                  </>
+              activeTab === 'cash' ? (
+                /* Cash Tab Customer Action (NEVER show Pay Online here!) */
+                isCashRequested ? (
+                  <button
+                    type="button"
+                    disabled
+                    className="px-5 py-2.5 bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold rounded-xl flex items-center gap-2 cursor-not-allowed opacity-80"
+                  >
+                    <Clock className="w-3.5 h-3.5 animate-pulse" />
+                    <span>Cash Requested (Pending Confirmation)</span>
+                  </button>
                 ) : (
-                  <>
-                    <CreditCard className="w-3.5 h-3.5" />
-                    <span>Pay Online</span>
-                  </>
-                )}
-              </button>
+                  <button
+                    type="button"
+                    disabled={isSubmittingCashRequest}
+                    onClick={handleRequestCashPayment}
+                    className="px-5 py-2.5 bg-[#2E8B57] hover:bg-[#246B43] text-white text-xs font-extrabold rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {isSubmittingCashRequest ? (
+                      <>
+                        <Clock className="w-3.5 h-3.5 animate-spin" />
+                        <span>Requesting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <DollarSign className="w-3.5 h-3.5" />
+                        <span>Request Cash Payment</span>
+                      </>
+                    )}
+                  </button>
+                )
+              ) : activeTab === 'upi' ? (
+                /* UPI / Online Tab Customer Action */
+                <button
+                  type="button"
+                  disabled={isOnlinePaying}
+                  onClick={handlePayOnline}
+                  className="px-5 py-2.5 bg-[#C85A3F] hover:bg-[#A94332] text-white text-xs font-extrabold rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isOnlinePaying ? (
+                    <>
+                      <Clock className="w-3.5 h-3.5 animate-spin" />
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="w-3.5 h-3.5" />
+                      <span>Pay Online</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                /* Bill Breakdown Details Tab: Guide to Online Payment */
+                <button
+                  type="button"
+                  disabled={isOnlinePaying}
+                  onClick={handlePayOnline}
+                  className="px-5 py-2.5 bg-[#C85A3F] hover:bg-[#A94332] text-white text-xs font-extrabold rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isOnlinePaying ? (
+                    <>
+                      <Clock className="w-3.5 h-3.5 animate-spin" />
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="w-3.5 h-3.5" />
+                      <span>Pay Online</span>
+                    </>
+                  )}
+                </button>
+              )
             ) : (
-              activeTab !== 'cash' && (
+              /* Staff / Waiter Mode Actions */
+              activeTab === 'cash' ? (
+                <button
+                  type="button"
+                  disabled={isSettling}
+                  onClick={() => handleConfirmSettlement('cash')}
+                  className="px-5 py-2.5 bg-[#2E8B57] hover:bg-[#246B43] text-white text-xs font-extrabold rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>{isSettling ? 'Recording...' : 'Confirm Cash Received'}</span>
+                </button>
+              ) : (
                 <button
                   type="button"
                   onClick={() => setActiveTab('cash')}
