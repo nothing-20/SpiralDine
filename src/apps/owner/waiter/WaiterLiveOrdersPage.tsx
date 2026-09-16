@@ -22,12 +22,37 @@ import {
   AlertCircle, 
   ChefHat, 
   Eye, 
-  X,
-  Sparkles,
-  Flame,
-  CheckCircle2,
-  Table as TableIcon
+  X, 
+  Sparkles, 
+  Flame, 
+  CheckCircle2, 
+  Table as TableIcon,
+  Archive,
+  History
 } from 'lucide-react';
+
+/**
+ * Status Categorization:
+ * Completed/Terminal statuses: COMPLETED, PAID, CLOSED, ARCHIVED, CANCELLED, PAYMENT_COMPLETED.
+ * Active statuses: NEW, PLACED, ACCEPTED, CHEF_ASSIGNED, PREPARING, PAUSED, READY, PICKED_UP, DELIVERING, DELIVERED, SERVED, DINING, BILL_REQUESTED.
+ */
+export const isCompletedOrderStatus = (status?: string): boolean => {
+  if (!status) return false;
+  const s = status.toUpperCase();
+  return (
+    s === 'COMPLETED' || 
+    s === 'PAID' || 
+    s === 'CLOSED' || 
+    s === 'ARCHIVED' || 
+    s === 'CANCELLED' || 
+    s === 'PAYMENT_COMPLETED'
+  );
+};
+
+export const isActiveOrderStatus = (status?: string): boolean => {
+  if (!status) return false;
+  return !isCompletedOrderStatus(status);
+};
 
 export const WaiterLiveOrdersPage: React.FC = () => {
   const { user } = useAuth();
@@ -35,6 +60,9 @@ export const WaiterLiveOrdersPage: React.FC = () => {
   const [orders, setOrders] = useState<IOrder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState<IOrder | null>(null);
+
+  // Tab State: 'active' | 'completed' (default: 'active')
+  const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
 
   // Live ticking clock for Front of House service status
   const [currentTime, setCurrentTime] = useState(new Date());
@@ -53,7 +81,7 @@ export const WaiterLiveOrdersPage: React.FC = () => {
     if (!user?.tenantId) return;
 
     const colRef = collection(db, 'restaurants', user.tenantId, 'orders');
-    const qOrders = query(colRef, limit(60));
+    const qOrders = query(colRef, limit(100));
 
     const unsubscribe = onSnapshot(
       qOrders,
@@ -61,20 +89,7 @@ export const WaiterLiveOrdersPage: React.FC = () => {
         const list: IOrder[] = [];
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
-          const st = (data.status || '').toUpperCase();
-          // Keep active orders: NEW, PLACED, ACCEPTED, PREPARING, READY, PICKED_UP, DELIVERED, SERVED
-          if (st !== 'ARCHIVED' && st !== 'CANCELLED') {
-            list.push({ ...data, orderId: data.orderId || docSnap.id } as IOrder);
-          }
-        });
-
-        // Priority sort: READY first, then newest
-        list.sort((a, b) => {
-          const aReady = a.status === 'READY';
-          const bReady = b.status === 'READY';
-          if (aReady && !bReady) return -1;
-          if (!aReady && bReady) return 1;
-          return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+          list.push({ ...data, orderId: data.orderId || docSnap.id } as IOrder);
         });
 
         setOrders(list);
@@ -116,36 +131,81 @@ export const WaiterLiveOrdersPage: React.FC = () => {
     }
   };
 
-  // Derive unique tables for filter
-  const uniqueTables = useMemo(() => {
-    const set = new Set<string>();
-    orders.forEach(o => o.tableNumber && set.add(String(o.tableNumber)));
-    return Array.from(set).sort((a, b) => Number(a) - Number(b));
+  // 1. Separate Active vs Completed Datasets
+  const activeOrders = useMemo(() => {
+    return orders
+      .filter(o => isActiveOrderStatus(o.status))
+      .sort((a, b) => {
+        // Priority sort for active: READY first, then PREPARING, then newest
+        const aReady = a.status === 'READY';
+        const bReady = b.status === 'READY';
+        if (aReady && !bReady) return -1;
+        if (!aReady && bReady) return 1;
+
+        const aPrep = a.status === 'PREPARING';
+        const bPrep = b.status === 'PREPARING';
+        if (aPrep && !bPrep) return -1;
+        if (!aPrep && bPrep) return 1;
+
+        return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      });
   }, [orders]);
 
-  // Filtered orders list
+  const completedOrders = useMemo(() => {
+    return orders
+      .filter(o => isCompletedOrderStatus(o.status))
+      .sort((a, b) => {
+        // Newest completed orders first
+        const timeA = new Date((a as any).completedAt || a.updatedAt || a.createdAt || 0).getTime();
+        const timeB = new Date((b as any).completedAt || b.updatedAt || b.createdAt || 0).getTime();
+        return timeB - timeA;
+      });
+  }, [orders]);
+
+  // Current dataset according to selected tab
+  const currentTabOrders = activeTab === 'active' ? activeOrders : completedOrders;
+
+  // Derive unique tables for current tab
+  const uniqueTables = useMemo(() => {
+    const set = new Set<string>();
+    currentTabOrders.forEach(o => o.tableNumber && set.add(String(o.tableNumber)));
+    return Array.from(set).sort((a, b) => Number(a) - Number(b));
+  }, [currentTabOrders]);
+
+  // Filtered orders list for the current tab
   const filteredOrders = useMemo(() => {
-    return orders.filter(o => {
+    return currentTabOrders.filter(o => {
       const matchesTable = filterTable === 'all' || String(o.tableNumber) === filterTable;
       const matchesStatus = filterStatus === 'all' || o.status === filterStatus;
       
       const q = searchQuery.toLowerCase().trim();
       const matchesQuery = !q || 
-        o.orderId.toLowerCase().includes(q) ||
-        String(o.tableNumber).includes(q) ||
+        (o.orderId || '').toLowerCase().includes(q) ||
+        String(o.tableNumber || '').includes(q) ||
         (o.customerName || '').toLowerCase().includes(q) ||
         o.items?.some((i: any) => (i.name || i.itemName || '').toLowerCase().includes(q));
 
       return matchesTable && matchesStatus && matchesQuery;
     });
-  }, [orders, filterTable, filterStatus, searchQuery]);
+  }, [currentTabOrders, filterTable, filterStatus, searchQuery]);
 
-  // Metrics
-  const readyOrdersCount = useMemo(() => orders.filter(o => o.status === 'READY').length, [orders]);
-  const preparingOrdersCount = useMemo(() => orders.filter(o => o.status === 'PREPARING').length, [orders]);
-  const activeTablesCount = uniqueTables.length;
+  // Dynamic KPI Metrics
+  const readyOrdersCount = useMemo(() => activeOrders.filter(o => o.status === 'READY').length, [activeOrders]);
+  const preparingOrdersCount = useMemo(() => activeOrders.filter(o => o.status === 'PREPARING').length, [activeOrders]);
 
-  const getMinutesElapsed = (isoStr: string) => {
+  const formatElapsedOrCompleted = (order: IOrder, isCompletedTab: boolean) => {
+    if (isCompletedTab) {
+      const timestamp = (order as any).completedAt || order.updatedAt || order.createdAt;
+      if (!timestamp) return 'Completed';
+      try {
+        const d = new Date(timestamp);
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+      } catch {
+        return 'Completed';
+      }
+    }
+
+    const isoStr = order.updatedAt || order.createdAt;
     if (!isoStr) return 'Just now';
     const diff = (Date.now() - new Date(isoStr).getTime()) / 60000;
     if (diff < 1) return 'Just now';
@@ -166,7 +226,7 @@ export const WaiterLiveOrdersPage: React.FC = () => {
               Live Orders
             </h1>
             <p className="text-xs md:text-sm text-[#5F6762] mt-1 font-normal font-sans">
-              Real-time food order tracking, kitchen status updates, and table delivery service.
+              Real-time food order tracking, kitchen preparation statuses, and completed table service records.
             </p>
           </div>
 
@@ -192,10 +252,13 @@ export const WaiterLiveOrdersPage: React.FC = () => {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 select-none font-sans">
         {/* Ready For Table Delivery */}
         <div 
-          onClick={() => setFilterStatus(filterStatus === 'READY' ? 'all' : 'READY')}
+          onClick={() => {
+            setActiveTab('active');
+            setFilterStatus(activeTab === 'active' && filterStatus === 'READY' ? 'all' : 'READY');
+          }}
           className={`bg-white border rounded-xl p-4 shadow-[0_2px_10px_rgba(30,30,20,0.06)] flex flex-col justify-between transition-all cursor-pointer ${
-            filterStatus === 'READY' 
-              ? 'border-[#C84A38] ring-2 ring-[#C84A38]/20 bg-[#FCFAF7]' 
+            activeTab === 'active' && filterStatus === 'READY'
+              ? 'border-[#287A55] ring-2 ring-[#287A55]/20 bg-[#FCFAF7]' 
               : 'border-[#E3DED5] hover:border-[#D1C9BC]'
           }`}
         >
@@ -203,12 +266,12 @@ export const WaiterLiveOrdersPage: React.FC = () => {
             <span className="text-[11px] font-semibold text-[#5F6762] tracking-wide uppercase">
               Ready for Delivery
             </span>
-            <div className="w-6 h-6 rounded-md bg-[#F9E8E4] flex items-center justify-center text-[#C84A38]">
-              <UtensilsCrossed className="w-3.5 h-3.5 text-[#C84A38]" />
+            <div className="w-6 h-6 rounded-md bg-[#E8F3ED] flex items-center justify-center text-[#287A55]">
+              <UtensilsCrossed className="w-3.5 h-3.5 text-[#287A55]" />
             </div>
           </div>
           <div>
-            <div className="text-3xl font-bold text-[#C84A38] tabular-nums tracking-tight font-sans">
+            <div className="text-3xl font-bold text-[#287A55] tabular-nums tracking-tight font-sans">
               {readyOrdersCount}
             </div>
             <p className="text-xs text-[#5F6762] mt-1 font-medium">Food ready in kitchen</p>
@@ -217,9 +280,12 @@ export const WaiterLiveOrdersPage: React.FC = () => {
 
         {/* Cooking in Kitchen */}
         <div 
-          onClick={() => setFilterStatus(filterStatus === 'PREPARING' ? 'all' : 'PREPARING')}
+          onClick={() => {
+            setActiveTab('active');
+            setFilterStatus(activeTab === 'active' && filterStatus === 'PREPARING' ? 'all' : 'PREPARING');
+          }}
           className={`bg-white border rounded-xl p-4 shadow-[0_2px_10px_rgba(30,30,20,0.06)] flex flex-col justify-between transition-all cursor-pointer ${
-            filterStatus === 'PREPARING' 
+            activeTab === 'active' && filterStatus === 'PREPARING'
               ? 'border-[#D79A24] ring-2 ring-[#D79A24]/20 bg-[#FEFAF2]' 
               : 'border-[#E3DED5] hover:border-[#D1C9BC]'
           }`}
@@ -240,59 +306,131 @@ export const WaiterLiveOrdersPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Total Active Tickets */}
+        {/* Active Orders (Accurate Active Count) */}
         <div 
-          onClick={() => setFilterStatus('all')}
-          className="bg-white border border-[#E3DED5] rounded-xl p-4 shadow-[0_2px_10px_rgba(30,30,20,0.06)] flex flex-col justify-between hover:border-[#D1C9BC] transition-all cursor-pointer"
+          onClick={() => {
+            setActiveTab('active');
+            setFilterStatus('all');
+          }}
+          className={`bg-white border rounded-xl p-4 shadow-[0_2px_10px_rgba(30,30,20,0.06)] flex flex-col justify-between transition-all cursor-pointer ${
+            activeTab === 'active' && filterStatus === 'all'
+              ? 'border-[#18201D] ring-2 ring-[#18201D]/15 bg-[#FCFAF7]' 
+              : 'border-[#E3DED5] hover:border-[#D1C9BC]'
+          }`}
         >
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-semibold text-[#5F6762] tracking-wide uppercase">
-              Active Tickets
+              Active Orders
             </span>
             <div className="w-6 h-6 rounded-md bg-[#F7F4EE] flex items-center justify-center text-[#18201D]">
               <Clock className="w-3.5 h-3.5 text-[#18201D]" />
             </div>
           </div>
           <div>
-            <div className="text-3xl font-bold text-[#18201D] tabular-nums tracking-tight font-sans">
-              {orders.length}
+            <div className="text-3xl font-bold text-[#C84A38] tabular-nums tracking-tight font-sans">
+              {activeOrders.length}
             </div>
-            <p className="text-xs text-[#5F6762] mt-1 font-medium">Orders in workflow</p>
+            <p className="text-xs text-[#5F6762] mt-1 font-medium">Requires table attention</p>
           </div>
         </div>
 
-        {/* Active Dining Tables */}
-        <div className="bg-white border border-[#E3DED5] rounded-xl p-4 shadow-[0_2px_10px_rgba(30,30,20,0.06)] flex flex-col justify-between hover:border-[#D1C9BC] transition-all">
+        {/* Completed Orders */}
+        <div 
+          onClick={() => {
+            setActiveTab('completed');
+            setFilterStatus('all');
+          }}
+          className={`bg-white border rounded-xl p-4 shadow-[0_2px_10px_rgba(30,30,20,0.06)] flex flex-col justify-between transition-all cursor-pointer ${
+            activeTab === 'completed'
+              ? 'border-[#287A55] ring-2 ring-[#287A55]/15 bg-[#FCFAF7]' 
+              : 'border-[#E3DED5] hover:border-[#D1C9BC]'
+          }`}
+        >
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-semibold text-[#5F6762] tracking-wide uppercase">
-              Dining Tables
+              Completed Orders
             </span>
             <div className="w-6 h-6 rounded-md bg-[#E8F3ED] flex items-center justify-center text-[#287A55]">
-              <TableIcon className="w-3.5 h-3.5 text-[#287A55]" />
+              <CheckCircle2 className="w-3.5 h-3.5 text-[#287A55]" />
             </div>
           </div>
           <div>
             <div className="text-3xl font-bold text-[#18201D] tabular-nums tracking-tight font-sans">
-              {activeTablesCount}
+              {completedOrders.length}
             </div>
-            <p className="text-xs text-[#5F6762] mt-1 font-medium">Tables with food</p>
+            <p className="text-xs text-[#5F6762] mt-1 font-medium">Historical settled orders</p>
           </div>
         </div>
       </div>
 
-      {/* ── 3. Filters Toolbar ─────────────────────────────────────────── */}
+      {/* ── 3. Quick Tabs: Active Orders vs Completed Orders ───────────── */}
+      <div className="flex items-center justify-between flex-wrap gap-3 bg-white border border-[#E3DED5] rounded-2xl p-2 shadow-[0_1px_3px_rgba(30,30,20,0.04)]">
+        <div className="flex items-center space-x-2">
+          {/* Active Orders Tab */}
+          <button
+            onClick={() => {
+              setActiveTab('active');
+              setFilterStatus('all');
+            }}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 ${
+              activeTab === 'active'
+                ? 'bg-[#18201D] text-white shadow-sm'
+                : 'bg-[#F7F4EE] text-[#5F6762] hover:text-[#18201D] hover:bg-[#EAE5DC]'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>Active Orders</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold transition-all ${
+              activeTab === 'active' ? 'bg-[#C84A38] text-white' : 'bg-[#E3DED5] text-[#5F6762]'
+            }`}>
+              {activeOrders.length}
+            </span>
+          </button>
+
+          {/* Completed Orders Tab */}
+          <button
+            onClick={() => {
+              setActiveTab('completed');
+              setFilterStatus('all');
+            }}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center space-x-2 ${
+              activeTab === 'completed'
+                ? 'bg-[#18201D] text-white shadow-sm'
+                : 'bg-[#F7F4EE] text-[#5F6762] hover:text-[#18201D] hover:bg-[#EAE5DC]'
+            }`}
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>Completed Orders</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold transition-all ${
+              activeTab === 'completed' ? 'bg-[#287A55] text-white' : 'bg-[#E3DED5] text-[#5F6762]'
+            }`}>
+              {completedOrders.length}
+            </span>
+          </button>
+        </div>
+
+        <div className="text-xs text-[#5F6762] px-2 font-medium hidden sm:block">
+          {activeTab === 'active' 
+            ? '🔥 Live kitchen & service tickets' 
+            : '✓ Historical completed table records'}
+        </div>
+      </div>
+
+      {/* ── 4. Filters Toolbar ─────────────────────────────────────────── */}
       <div className="bg-white border border-[#E3DED5] rounded-xl p-4 shadow-[0_1px_3px_rgba(30,30,20,0.04)] grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Search */}
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#5F6762] pointer-events-none" />
           <input
             type="text"
-            placeholder="Search order ID, dish, table..."
+            placeholder={activeTab === 'active' ? "Search active order ID, dish, table..." : "Search completed order ID, dish, table..."}
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full pl-9 pr-3 py-2 bg-[#F7F4EE] border border-[#E3DED5] rounded-lg text-xs font-medium text-[#18201D] placeholder:text-[#5F6762]/60 outline-none focus:border-[#13241F]"
           />
         </div>
 
+        {/* Table Filter */}
         <div>
           <select
             value={filterTable}
@@ -306,27 +444,42 @@ export const WaiterLiveOrdersPage: React.FC = () => {
           </select>
         </div>
 
+        {/* Status Filter (Context-Aware for Tab) */}
         <div>
-          <select
-            value={filterStatus}
-            onChange={e => setFilterStatus(e.target.value)}
-            className="w-full bg-[#F7F4EE] border border-[#E3DED5] rounded-lg px-3 py-2 text-xs font-semibold text-[#18201D] outline-none cursor-pointer focus:border-[#13241F]"
-          >
-            <option value="all">All Statuses ({orders.length})</option>
-            <option value="READY">🍳 READY (Ready to Serve)</option>
-            <option value="PREPARING">🔥 PREPARING (Cooking)</option>
-            <option value="ACCEPTED">✅ ACCEPTED</option>
-            <option value="NEW">🔔 NEW / PLACED</option>
-            <option value="DELIVERED">🍽️ DELIVERED / SERVED</option>
-          </select>
+          {activeTab === 'active' ? (
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value)}
+              className="w-full bg-[#F7F4EE] border border-[#E3DED5] rounded-lg px-3 py-2 text-xs font-semibold text-[#18201D] outline-none cursor-pointer focus:border-[#13241F]"
+            >
+              <option value="all">All Active Statuses ({activeOrders.length})</option>
+              <option value="READY">🍳 READY (Ready for Delivery)</option>
+              <option value="PREPARING">🔥 PREPARING (Cooking)</option>
+              <option value="ACCEPTED">✅ ACCEPTED</option>
+              <option value="NEW">🔔 NEW / PLACED</option>
+              <option value="DELIVERED">🍽️ DELIVERED / SERVED</option>
+            </select>
+          ) : (
+            <select
+              value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value)}
+              className="w-full bg-[#F7F4EE] border border-[#E3DED5] rounded-lg px-3 py-2 text-xs font-semibold text-[#18201D] outline-none cursor-pointer focus:border-[#13241F]"
+            >
+              <option value="all">All Completed Statuses ({completedOrders.length})</option>
+              <option value="COMPLETED">✓ COMPLETED</option>
+              <option value="PAID">💳 PAID</option>
+              <option value="CLOSED">🔒 CLOSED</option>
+              <option value="CANCELLED">❌ CANCELLED</option>
+            </select>
+          )}
         </div>
       </div>
 
-      {/* ── 4. Orders Cards Grid ───────────────────────────────────────── */}
+      {/* ── 5. Orders Cards Grid ───────────────────────────────────────── */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-[#5F6762]">
-            Showing <strong className="text-[#18201D]">{filteredOrders.length}</strong> active food orders
+            Showing <strong className="text-[#18201D]">{filteredOrders.length}</strong> {activeTab === 'active' ? 'active' : 'completed'} food orders
           </span>
           {filterStatus !== 'all' && (
             <button 
@@ -346,21 +499,26 @@ export const WaiterLiveOrdersPage: React.FC = () => {
         ) : filteredOrders.length === 0 ? (
           <div className="bg-white border border-[#E3DED5] rounded-2xl p-12 text-center shadow-[0_1px_3px_rgba(30,30,20,0.04)]">
             <UtensilsCrossed className="w-8 h-8 text-[#5F6762] mx-auto mb-2.5 opacity-60" />
-            <h3 className="font-serif text-base font-bold text-[#18201D]">No Live Orders</h3>
+            <h3 className="font-serif text-base font-bold text-[#18201D]">
+              {activeTab === 'active' ? 'No Active Orders' : 'No Completed Orders'}
+            </h3>
             <p className="text-xs text-[#5F6762] mt-0.5">
               {searchQuery || filterTable !== 'all' || filterStatus !== 'all' 
                 ? 'No orders match your filter criteria.'
-                : 'There are currently no active food orders in the kitchen workflow.'}
+                : activeTab === 'active'
+                ? 'There are currently no active food orders requiring table service.'
+                : 'There are no completed orders in this session yet.'}
             </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
             {filteredOrders.map(order => {
+              const isCompleted = isCompletedOrderStatus(order.status);
               const isReady = order.status === 'READY';
               const isPreparing = order.status === 'PREPARING';
               const isDelivered = order.status === 'DELIVERED' || order.status === 'SERVED';
               const isNew = order.status === 'NEW' || order.status === 'PLACED';
-              const elapsed = getMinutesElapsed(order.updatedAt || order.createdAt);
+              const timeDisplay = formatElapsedOrCompleted(order, isCompleted);
 
               return (
                 <div
@@ -370,6 +528,8 @@ export const WaiterLiveOrdersPage: React.FC = () => {
                       ? 'border-[#287A55] border-t-4 ring-2 ring-[#287A55]/15 bg-[#FCFAF7]' 
                       : isPreparing
                       ? 'border-[#D79A24] border-t-4'
+                      : isCompleted
+                      ? 'border-[#E3DED5] bg-white opacity-95 hover:border-[#287A55]/40'
                       : 'border-[#E3DED5] hover:border-[#D1C9BC]'
                   }`}
                 >
@@ -397,18 +557,26 @@ export const WaiterLiveOrdersPage: React.FC = () => {
                           ? 'bg-[#E8F3ED] text-[#287A55] border-[#287A55]/30 font-extrabold animate-pulse'
                           : isPreparing
                           ? 'bg-[#FEF5E7] text-[#D79A24] border-[#D79A24]/30 font-bold'
+                          : isCompleted
+                          ? 'bg-[#E8F3ED] text-[#287A55] border-[#287A55]/30 font-bold'
                           : isDelivered
                           ? 'bg-[#F7F4EE] text-[#5F6762] border-[#E3DED5]'
                           : isNew
                           ? 'bg-[#E8F0FE] text-[#1A73E8] border-[#1A73E8]/30 font-bold'
                           : 'bg-[#F7F4EE] text-[#5F6762] border-[#E3DED5]'
                       }`}>
-                        {isReady ? '🟢 Ready for Table' : isPreparing ? '🔥 Cooking' : order.status}
+                        {isReady 
+                          ? '🟢 Ready for Table' 
+                          : isPreparing 
+                          ? '🔥 Cooking' 
+                          : isCompleted 
+                          ? '✓ COMPLETED' 
+                          : order.status}
                       </span>
                     </div>
 
-                    {/* Ready Banner Announcement */}
-                    {isReady && (
+                    {/* Ready Banner Announcement for Active Orders */}
+                    {isReady && !isCompleted && (
                       <div className="bg-[#E8F3ED] border border-[#287A55]/30 rounded-xl p-2.5 flex items-center space-x-2 text-[#287A55]">
                         <CheckCircle2 className="w-4 h-4 shrink-0" />
                         <span className="text-xs font-bold leading-tight">
@@ -445,7 +613,7 @@ export const WaiterLiveOrdersPage: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Financial Summary & Elapsed Time */}
+                    {/* Financial Summary & Timestamp */}
                     <div className="flex justify-between items-center text-xs border-t border-[#F7F4EE] pt-2">
                       <div className="space-y-0.5">
                         <span className="text-[10px] text-[#5F6762] uppercase font-bold block">Bill Total</span>
@@ -454,10 +622,12 @@ export const WaiterLiveOrdersPage: React.FC = () => {
                         </span>
                       </div>
                       <div className="text-right space-y-0.5">
-                        <span className="text-[10px] text-[#5F6762] uppercase font-bold block">Elapsed</span>
+                        <span className="text-[10px] text-[#5F6762] uppercase font-bold block">
+                          {isCompleted ? 'Completed At' : 'Elapsed'}
+                        </span>
                         <span className="font-semibold text-xs text-[#5F6762] flex items-center justify-end gap-1">
                           <Clock className="w-3 h-3" />
-                          {elapsed}
+                          {timeDisplay}
                         </span>
                       </div>
                     </div>
@@ -465,27 +635,45 @@ export const WaiterLiveOrdersPage: React.FC = () => {
 
                   {/* Operational Actions */}
                   <div className="pt-4 mt-3 border-t border-[#E3DED5] flex items-center gap-2">
-                    {isReady ? (
+                    {isCompleted ? (
                       <button
-                        onClick={() => handleDeliverOrder(order)}
-                        className="flex-1 py-2.5 bg-[#287A55] hover:bg-[#1E6B47] text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center justify-center space-x-1.5 cursor-pointer"
+                        onClick={() => setSelectedOrder(order)}
+                        className="w-full py-2.5 bg-[#F7F4EE] hover:bg-[#EAE5DC] border border-[#E3DED5] text-[#18201D] text-xs font-bold rounded-xl transition-all flex items-center justify-center space-x-1.5 cursor-pointer shadow-2xs"
                       >
-                        <Check className="w-4 h-4 stroke-[3]" />
-                        <span>Deliver to Table {order.tableNumber}</span>
+                        <Eye className="w-3.5 h-3.5 text-[#5F6762]" />
+                        <span>View Details</span>
                       </button>
+                    ) : isReady ? (
+                      <>
+                        <button
+                          onClick={() => handleDeliverOrder(order)}
+                          className="flex-1 py-2.5 bg-[#287A55] hover:bg-[#1E6B47] text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center justify-center space-x-1.5 cursor-pointer"
+                        >
+                          <Check className="w-4 h-4 stroke-[3]" />
+                          <span>Deliver to Table {order.tableNumber}</span>
+                        </button>
+                        <button
+                          onClick={() => setSelectedOrder(order)}
+                          className="p-2.5 bg-white border border-[#E3DED5] hover:bg-[#F7F4EE] text-[#18201D] rounded-xl transition-all cursor-pointer"
+                          title="View Order Details"
+                        >
+                          <Eye className="w-4 h-4 text-[#5F6762]" />
+                        </button>
+                      </>
                     ) : (
-                      <div className="flex-1 py-2 bg-[#F7F4EE] border border-[#E3DED5] rounded-xl text-center text-xs font-semibold text-[#5F6762]">
-                        {isDelivered ? '✅ Served to Table' : isPreparing ? '🍳 Cooking in Kitchen' : `Status: ${order.status}`}
-                      </div>
+                      <>
+                        <div className="flex-1 py-2 bg-[#F7F4EE] border border-[#E3DED5] rounded-xl text-center text-xs font-semibold text-[#5F6762]">
+                          {isDelivered ? '✅ Served to Table' : isPreparing ? '🍳 Cooking in Kitchen' : `Status: ${order.status}`}
+                        </div>
+                        <button
+                          onClick={() => setSelectedOrder(order)}
+                          className="p-2.5 bg-white border border-[#E3DED5] hover:bg-[#F7F4EE] text-[#18201D] rounded-xl transition-all cursor-pointer"
+                          title="View Order Details"
+                        >
+                          <Eye className="w-4 h-4 text-[#5F6762]" />
+                        </button>
+                      </>
                     )}
-
-                    <button
-                      onClick={() => setSelectedOrder(order)}
-                      className="p-2.5 bg-white border border-[#E3DED5] hover:bg-[#F7F4EE] text-[#18201D] rounded-xl transition-all"
-                      title="View Order Details"
-                    >
-                      <Eye className="w-4 h-4 text-[#5F6762]" />
-                    </button>
                   </div>
                 </div>
               );
@@ -494,7 +682,7 @@ export const WaiterLiveOrdersPage: React.FC = () => {
         )}
       </div>
 
-      {/* ── 5. Order Details Modal ─────────────────────────────────────── */}
+      {/* ── 6. Order Details Modal ─────────────────────────────────────── */}
       {selectedOrder && (
         <div className="fixed inset-0 z-50 bg-[#18201D]/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white border border-[#E3DED5] rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto text-left">
@@ -509,7 +697,7 @@ export const WaiterLiveOrdersPage: React.FC = () => {
               </div>
               <button 
                 onClick={() => setSelectedOrder(null)}
-                className="p-1 rounded-lg text-[#5F6762] hover:text-[#18201D] hover:bg-[#F7F4EE]"
+                className="p-1 rounded-lg text-[#5F6762] hover:text-[#18201D] hover:bg-[#F7F4EE] cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -523,7 +711,9 @@ export const WaiterLiveOrdersPage: React.FC = () => {
                 </div>
                 <div>
                   <span className="text-[10px] text-[#5F6762] block font-bold uppercase">Placed At</span>
-                  <span className="font-medium text-[#18201D]">{new Date(selectedOrder.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                  <span className="font-medium text-[#18201D]">
+                    {new Date(selectedOrder.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
                 </div>
                 <div>
                   <span className="text-[10px] text-[#5F6762] block font-bold uppercase">Assigned Chef</span>
@@ -567,13 +757,13 @@ export const WaiterLiveOrdersPage: React.FC = () => {
             </div>
 
             <div className="pt-2 border-t border-[#E3DED5] flex space-x-2">
-              {selectedOrder.status === 'READY' && (
+              {selectedOrder.status === 'READY' && isActiveOrderStatus(selectedOrder.status) && (
                 <button
                   onClick={() => {
                     handleDeliverOrder(selectedOrder);
                     setSelectedOrder(null);
                   }}
-                  className="flex-1 py-2.5 bg-[#287A55] hover:bg-[#1E6B47] text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center justify-center space-x-1.5"
+                  className="flex-1 py-2.5 bg-[#287A55] hover:bg-[#1E6B47] text-white text-xs font-bold rounded-xl transition-all shadow-sm flex items-center justify-center space-x-1.5 cursor-pointer"
                 >
                   <Check className="w-4 h-4 stroke-[3]" />
                   <span>Deliver Food to Table {selectedOrder.tableNumber}</span>
@@ -581,7 +771,7 @@ export const WaiterLiveOrdersPage: React.FC = () => {
               )}
               <button
                 onClick={() => setSelectedOrder(null)}
-                className="flex-1 py-2.5 bg-white border border-[#E3DED5] text-[#18201D] text-xs font-bold rounded-xl hover:bg-[#F7F4EE] transition-all"
+                className="flex-1 py-2.5 bg-white border border-[#E3DED5] text-[#18201D] text-xs font-bold rounded-xl hover:bg-[#F7F4EE] transition-all cursor-pointer"
               >
                 Close
               </button>
