@@ -65,6 +65,7 @@ export const OwnerOverview: React.FC = () => {
 
   // Real-time Firestore States
   const [orders, setOrders] = useState<IOrder[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
   const [tables, setTables] = useState<any[]>([]);
   const [satisfactionRatings, setSatisfactionRatings] = useState<any[]>([]);
@@ -220,8 +221,22 @@ export const OwnerOverview: React.FC = () => {
       }
     );
 
+    // 12. Confirmed Transactions Subscription (Canonical financial payment ledger)
+    const qTrans = query(
+      collection(db, 'restaurants', tenantId, 'transactions'),
+      limit(500)
+    );
+    const unsubTrans = onSnapshot(qTrans, (snap) => {
+      const list: any[] = [];
+      snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+      setTransactions(list);
+    }, (err) => {
+      console.warn('[OwnerOverview] Transactions subscription warning:', err);
+    });
+
     return () => {
       unsubOrders();
+      unsubTrans();
       unsubInventory();
       unsubTables();
       unsubRatings();
@@ -251,22 +266,33 @@ export const OwnerOverview: React.FC = () => {
     compileIntel();
   }, [tenantId, orders.length, inventory.length]);
 
-  // Revenue computations
+  // Canonical Paid Transactions filter (Excludes placed, preparing, ready, served unpaid, cancelled, refunded)
+  const paidTransactions = useMemo(() => {
+    return transactions.filter(t => {
+      const status = (t.paymentStatus || '').toLowerCase();
+      const isPaid = status === 'paid' || status === 'completed' || status === 'settled';
+      const isRefundedOrVoid = status === 'refunded' || status === 'voided' || status === 'failed';
+      const hasValidTotal = typeof t.total === 'number' && t.total > 0;
+      return isPaid && !isRefundedOrVoid && hasValidTotal;
+    });
+  }, [transactions]);
+
+  // Revenue computations derived strictly from confirmed transaction settlements
   const todayStr = new Date().toDateString();
   const todaySales = useMemo(() => {
-    return orders
-      .filter(o => (o.status === 'DELIVERED' || o.status === 'COMPLETED') && o.createdAt && new Date(o.createdAt).toDateString() === todayStr)
-      .reduce((sum, o) => sum + (o.total || 0), 0);
-  }, [orders, todayStr]);
+    return paidTransactions
+      .filter(t => t.createdAt && new Date(t.createdAt).toDateString() === todayStr)
+      .reduce((sum, t) => sum + (t.total || 0), 0);
+  }, [paidTransactions, todayStr]);
 
   const yesterdaySales = useMemo(() => {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     const yesterdayStr = yesterday.toDateString();
-    return orders
-      .filter(o => (o.status === 'DELIVERED' || o.status === 'COMPLETED') && o.createdAt && new Date(o.createdAt).toDateString() === yesterdayStr)
-      .reduce((sum, o) => sum + (o.total || 0), 0);
-  }, [orders]);
+    return paidTransactions
+      .filter(t => t.createdAt && new Date(t.createdAt).toDateString() === yesterdayStr)
+      .reduce((sum, t) => sum + (t.total || 0), 0);
+  }, [paidTransactions]);
 
   const revenueChangePercent = useMemo(() => {
     if (yesterdaySales === 0) return 0;
@@ -274,8 +300,8 @@ export const OwnerOverview: React.FC = () => {
   }, [todaySales, yesterdaySales]);
 
   const todayCompletedOrdersCount = useMemo(() => {
-    return orders.filter(o => (o.status === 'DELIVERED' || o.status === 'COMPLETED') && o.createdAt && new Date(o.createdAt).toDateString() === todayStr).length;
-  }, [orders, todayStr]);
+    return paidTransactions.filter(t => t.createdAt && new Date(t.createdAt).toDateString() === todayStr).length;
+  }, [paidTransactions, todayStr]);
 
   const averageOrderValue = useMemo(() => {
     if (todayCompletedOrdersCount === 0) return 0;
@@ -727,7 +753,7 @@ export const OwnerOverview: React.FC = () => {
     });
   }, [tenantId, todaySales, todayCompletedOrdersCount, averageOrderValue, staffMetrics, csatMetrics, activeOccupiedTables, inventoryMetrics]);
 
-  // Sparkline Chart points generator
+  // Sparkline Chart points generator (Derived from canonical confirmed transactions)
   const renderSparkline = () => {
     const daysArr = Array.from({ length: 7 }, (_, i) => {
       const d = new Date();
@@ -736,10 +762,11 @@ export const OwnerOverview: React.FC = () => {
     });
 
     const data = daysArr.map((date) => {
-      const total = orders
-        .filter(o => (o.status === 'DELIVERED' || o.status === 'COMPLETED') && o.createdAt && new Date(o.createdAt).toDateString() === date.toDateString())
-        .reduce((sum, o) => sum + (o.total || 0), 0);
-      return total / 100; // in dollars
+      const dayStr = date.toDateString();
+      const total = paidTransactions
+        .filter(t => t.createdAt && new Date(t.createdAt).toDateString() === dayStr)
+        .reduce((sum, t) => sum + (t.total || 0), 0);
+      return total / 100; // in currency standard unit
     });
 
     const maxAmt = Math.max(...data, 10);
@@ -793,47 +820,45 @@ export const OwnerOverview: React.FC = () => {
     const fyStart = new Date(startYear, 3, 1);
     const fyEnd = new Date(startYear + 1, 2, 31, 23, 59, 59, 999);
 
-    const fyOrders = orders.filter(o => {
-      const isPaid = o.status === 'DELIVERED' || o.status === 'COMPLETED';
-      if (!isPaid || !o.createdAt) return false;
-      const orderDate = new Date(o.createdAt);
-      return orderDate >= fyStart && orderDate <= fyEnd;
+    const fyTransactions = paidTransactions.filter(t => {
+      if (!t.createdAt) return false;
+      const tDate = new Date(t.createdAt);
+      return tDate >= fyStart && tDate <= fyEnd;
     });
 
-    const gross = fyOrders.reduce((sum, o) => sum + (o.total || 0), 0);
-    const gst = fyOrders.reduce((sum, o) => sum + (o.tax || 0), 0);
+    const gross = fyTransactions.reduce((sum, t) => sum + (t.total || 0), 0);
+    const gst = fyTransactions.reduce((sum, t) => sum + (t.tax || 0), 0);
     const net = gross - gst;
-    const count = fyOrders.length;
+    const count = fyTransactions.length;
 
-    const activeMonths = new Set(fyOrders.map(o => new Date(o.createdAt).getMonth())).size || 1;
+    const activeMonths = new Set(fyTransactions.map(t => new Date(t.createdAt).getMonth())).size || 1;
     const avgMonthly = net / Math.max(activeMonths, 1);
 
     return { net, count, avgMonthly };
-  }, [orders, currentFY]);
+  }, [paidTransactions, currentFY]);
 
   const selectedFYMetrics = useMemo(() => {
     const startYear = parseInt(selectedFY.split('-')[0]);
     const fyStart = new Date(startYear, 3, 1);
     const fyEnd = new Date(startYear + 1, 2, 31, 23, 59, 59, 999);
 
-    const fyOrders = orders.filter(o => {
-      const isPaid = o.status === 'DELIVERED' || o.status === 'COMPLETED';
-      if (!isPaid || !o.createdAt) return false;
-      const orderDate = new Date(o.createdAt);
-      return orderDate >= fyStart && orderDate <= fyEnd;
+    const fyTransactions = paidTransactions.filter(t => {
+      if (!t.createdAt) return false;
+      const tDate = new Date(t.createdAt);
+      return tDate >= fyStart && tDate <= fyEnd;
     });
 
-    const gross = fyOrders.reduce((sum, o) => sum + (o.total || 0), 0);
-    const gst = fyOrders.reduce((sum, o) => sum + (o.tax || 0), 0);
+    const gross = fyTransactions.reduce((sum, t) => sum + (t.total || 0), 0);
+    const gst = fyTransactions.reduce((sum, t) => sum + (t.tax || 0), 0);
     const net = gross - gst;
-    const count = fyOrders.length;
+    const count = fyTransactions.length;
     const aov = count > 0 ? gross / count : 0;
 
-    const activeMonths = new Set(fyOrders.map(o => new Date(o.createdAt).getMonth())).size || 1;
+    const activeMonths = new Set(fyTransactions.map(t => new Date(t.createdAt).getMonth())).size || 1;
     const avgMonthly = net / Math.max(activeMonths, 1);
 
     return { gross, gst, net, count, aov, avgMonthly };
-  }, [orders, selectedFY]);
+  }, [paidTransactions, selectedFY]);
 
   const monthsData = useMemo(() => {
     const startYear = parseInt(selectedFY.split('-')[0]);
@@ -844,27 +869,25 @@ export const OwnerOverview: React.FC = () => {
       const monthName = new Date(year, calendarMonth).toLocaleString('default', { month: 'long' });
       const label = `${monthName} ${year}`;
 
-      const mOrders = orders.filter(o => {
-        const isPaid = o.status === 'DELIVERED' || o.status === 'COMPLETED';
-        if (!isPaid || !o.createdAt) return false;
-        const d = new Date(o.createdAt);
+      const mTransactions = paidTransactions.filter(t => {
+        if (!t.createdAt) return false;
+        const d = new Date(t.createdAt);
         return d.getFullYear() === year && d.getMonth() === calendarMonth;
       });
 
-      const gross = mOrders.reduce((sum, o) => sum + (o.total || 0), 0);
-      const gst = mOrders.reduce((sum, o) => sum + (o.tax || 0), 0);
+      const gross = mTransactions.reduce((sum, t) => sum + (t.total || 0), 0);
+      const gst = mTransactions.reduce((sum, t) => sum + (t.tax || 0), 0);
       const net = gross - gst;
 
       const prevCalendarMonth = (calendarMonth - 1 + 12) % 12;
       const prevYear = calendarMonth === 0 ? year - 1 : (calendarMonth < 3 && prevCalendarMonth >= 3 ? year - 1 : year);
-      const prevOrders = orders.filter(o => {
-        const isPaid = o.status === 'DELIVERED' || o.status === 'COMPLETED';
-        if (!isPaid || !o.createdAt) return false;
-        const d = new Date(o.createdAt);
+      const prevTransactions = paidTransactions.filter(t => {
+        if (!t.createdAt) return false;
+        const d = new Date(t.createdAt);
         return d.getFullYear() === prevYear && d.getMonth() === prevCalendarMonth;
       });
-      const prevGross = prevOrders.reduce((sum, o) => sum + (o.total || 0), 0);
-      const prevGst = prevOrders.reduce((sum, o) => sum + (o.tax || 0), 0);
+      const prevGross = prevTransactions.reduce((sum, t) => sum + (t.total || 0), 0);
+      const prevGst = prevTransactions.reduce((sum, t) => sum + (t.tax || 0), 0);
       const prevNet = prevGross - prevGst;
 
       let trendPercent = 0;
@@ -878,15 +901,15 @@ export const OwnerOverview: React.FC = () => {
         year,
         monthName,
         label,
-        ordersCount: mOrders.length,
+        ordersCount: mTransactions.length,
         gross,
         gst,
         net,
         trendPercent,
-        orders: mOrders
+        orders: mTransactions
       };
     });
-  }, [orders, selectedFY]);
+  }, [paidTransactions, selectedFY]);
 
   const selectedMonthData = useMemo(() => {
     return monthsData[selectedMonthIndex] || monthsData[0];
@@ -1006,7 +1029,7 @@ export const OwnerOverview: React.FC = () => {
   if (isLoading) {
     return (
       <div className="h-64 flex flex-col items-center justify-center space-y-4">
-        <LoadingSpinner label="Compiling RestaurantOS Executive Dashboard..." />
+        <LoadingSpinner label="Compiling Spiral Dine Executive Dashboard..." />
       </div>
     );
   }
@@ -2217,10 +2240,10 @@ export const OwnerOverview: React.FC = () => {
                               return matchSearch && matchPayment;
                             })
                             .map((o) => (
-                              <tr key={o.orderId} className="hover:bg-slate-900/10">
-                                <td className="py-3 font-mono text-[11px]">#{o.orderId.split('-')[1] || o.orderId}</td>
+                              <tr key={o.id || o.orderId} className="hover:bg-slate-900/10">
+                                <td className="py-3 font-mono text-[11px]">#{o.invoiceNumber || (o.orderId && o.orderId.includes('-') ? o.orderId.split('-')[1] : o.orderId || o.id)}</td>
                                 <td className="py-3 text-textPearl">{o.customerName || 'Walk-in Client'}</td>
-                                <td className="py-3 text-primary font-bold">Table #{o.tableNumber}</td>
+                                <td className="py-3 text-primary font-bold">Table #{o.tableNumber || 'Walk-in'}</td>
                                 <td className="py-3">
                                   <Badge variant="muted" className="scale-90 origin-left uppercase">
                                     {o.paymentMethod || (o.paymentMethods?.upi ? 'UPI' : (o.paymentMethods?.card ? 'CARD' : 'CASH'))}
@@ -2250,7 +2273,7 @@ export const OwnerOverview: React.FC = () => {
                             <div className="text-xs">
                               <span className="text-[9px] text-slate-500 font-bold block">{new Date(o.createdAt).toLocaleString()}</span>
                               <p className="text-slate-355 font-semibold mt-0.5">
-                                Invoice <strong className="text-textPearl">#{o.orderId.split('-')[1] || o.orderId}</strong> was completed for Table #{o.tableNumber}. Total amount <strong className="text-emerald-500 font-mono">{formatPrice(o.total)}</strong> paid.
+                                Invoice <strong className="text-textPearl">#{o.invoiceNumber || (o.orderId && o.orderId.includes('-') ? o.orderId.split('-')[1] : o.orderId || o.id)}</strong> was completed for Table #{o.tableNumber || 'Walk-in'}. Total amount <strong className="text-emerald-500 font-mono">{formatPrice(o.total)}</strong> paid.
                               </p>
                             </div>
                           </div>

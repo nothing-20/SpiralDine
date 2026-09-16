@@ -13,7 +13,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const trimmedEmail = String(email).trim().toLowerCase();
-  const restName = incomingRestName || 'RestaurantOS';
+  const restName = incomingRestName || 'Spiral Dine';
 
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
@@ -34,7 +34,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const htmlContent = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #020617; border: 1px solid #1e293b; border-radius: 16px; overflow: hidden; color: #f8fafc;">
         <div style="background: linear-gradient(135deg, #10b981, #059669); padding: 32px; text-align: center;">
-          <h1 style="color: #ffffff; font-size: 24px; font-weight: 800; margin: 0; letter-spacing: -0.025em;">RestaurantOS</h1>
+          <h1 style="color: #ffffff; font-size: 24px; font-weight: 800; margin: 0; letter-spacing: -0.025em;">Spiral Dine</h1>
           <p style="color: #d1fae5; font-size: 14px; margin: 6px 0 0 0; font-weight: 500;">Staff Account Invitation</p>
         </div>
         <div style="padding: 32px; line-height: 1.6;">
@@ -54,9 +54,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `;
 
     const response = await resend.emails.send({
-      from: 'RestaurantOS <onboarding@resend.dev>',
+      from: 'Spiral Dine <onboarding@resend.dev>',
       to: [trimmedEmail],
-      subject: `You're invited to join ${restName} on RestaurantOS`,
+      subject: `You're invited to join ${restName} on Spiral Dine`,
       html: htmlContent,
     });
 

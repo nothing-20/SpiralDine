@@ -12,7 +12,7 @@ export const Maintenance: React.FC = () => {
       <div className="space-y-1">
         <h2 className="text-lg font-display font-bold text-textPearl font-bold">Scheduled Maintenance</h2>
         <p className="text-xs text-mutedAsh">
-          RestaurantOS is upgrading databases. We will be back online shortly. Thank you for your patience.
+          Spiral Dine is upgrading databases. We will be back online shortly. Thank you for your patience.
         </p>
       </div>
 

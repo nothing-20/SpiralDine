@@ -63,7 +63,7 @@ export const SettingsPage: React.FC = () => {
         <ShieldCheck className="w-8 h-8 text-primary shrink-0" />
         <div>
           <span className="text-[9px] text-slate-500 font-extrabold uppercase">Diner Privacy Shield</span>
-          <p className="text-[10.5px] font-semibold text-slate-350 mt-0.5">Your preferences are saved locally and fully encrypted under RestaurantOS data policies.</p>
+          <p className="text-[10.5px] font-semibold text-slate-350 mt-0.5">Your preferences are saved locally and fully encrypted under Spiral Dine data policies.</p>
         </div>
       </div>
 

@@ -12,6 +12,7 @@ import {
   Sparkles, ThumbsUp, Send, CheckCircle2, ShieldCheck, Info
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { isOrderActive } from '../../../shared/utils/orderUtils';
 
 export const LiveDining: React.FC = () => {
   const navigate = useNavigate();
@@ -38,8 +39,8 @@ export const LiveDining: React.FC = () => {
       const list: any[] = [];
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
-        // Ignore completed or archived orders for active tab tracking
-        if (data.status !== 'COMPLETED' && data.status !== 'ARCHIVED' && data.status !== 'CANCELLED') {
+        // Ignore completed, terminal or paid orders for active tab tracking
+        if (isOrderActive(data)) {
           list.push({ id: docSnap.id, ...data });
         }
       });

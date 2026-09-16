@@ -22,7 +22,7 @@ import { IMenuItem, IOrderItem } from '../../../shared/types';
 import { useCart } from '../../../shared/services/CartContext';
 import { formatPrice, setGlobalCurrencyConfig } from '../../../shared/utils/format';
 import { customerService } from '../../../shared/services/customerService';
-import { generateUniqueOrderId } from '../../../shared/utils/orderUtils';
+import { generateUniqueOrderId, isOrderActive } from '../../../shared/utils/orderUtils';
 import { 
   getActiveDiningSession, 
   saveActiveDiningSession, 
@@ -350,7 +350,7 @@ export const CustomerMenu: React.FC = () => {
       const list: any[] = [];
       snap.forEach((docSnap) => {
         const data = docSnap.data();
-        if (data.status && !['ARCHIVED', 'CANCELLED'].includes(data.status.toUpperCase())) {
+        if (isOrderActive(data)) {
           if (
             !session?.sessionId ||
             data.sessionId === session.sessionId ||

@@ -67,7 +67,7 @@ export const SuperAdminOverview: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   // System settings state
-  const [brandingTitle, setBrandingTitle] = useState('RestaurantOS');
+  const [brandingTitle, setBrandingTitle] = useState('Spiral Dine');
   const [globalTaxRate, setGlobalTaxRate] = useState<number>(8);
   const [defaultCurrency, setDefaultCurrency] = useState('USD');
   const [isSavingSettings, setIsSavingSettings] = useState(false);

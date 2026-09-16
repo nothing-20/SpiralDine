@@ -10,6 +10,7 @@ import {
   MapPin, Search, Sparkles, ExternalLink, RotateCcw,
   Receipt, ShieldCheck, Heart
 } from 'lucide-react';
+import { isOrderActive, isOrderTerminal } from '../../../shared/utils/orderUtils';
 
 interface OrderItem {
   itemId?: string;
@@ -63,22 +64,94 @@ export const CustomerOrdersPage: React.FC = () => {
   useEffect(() => {
     setIsLoading(true);
     const unsubs: Array<() => void> = [];
+    const activeDocSubs = new Set<string>();
 
     // Helper to merge newly fetched orders into state
-    const mergeOrders = (incoming: CustomerOrder[]) => {
+    const mergeOrders = (incoming: CustomerOrder[], isAuthoritative = false) => {
       setOrdersMap(prev => {
         const next = { ...prev };
         incoming.forEach(order => {
           const key = order.orderId || order.id;
-          if (key) {
+          if (!key) return;
+
+          const existing = next[key];
+          if (!existing) {
+            next[key] = order;
+          } else if (isAuthoritative) {
+            // Authoritative update from restaurants/{tenantId}/orders/{orderId}
             next[key] = {
-              ...(next[key] || {}),
+              ...existing,
               ...order
             };
+          } else {
+            // Non-authoritative snapshot (from customers/{uid}/orders or initial localStorage cache)
+            // NEVER allow a stale status (e.g. 'NEW') to overwrite an already terminal order!
+            if (isOrderTerminal(existing) && !isOrderTerminal(order)) {
+              next[key] = {
+                ...order,
+                ...existing, // preserve terminal status and paymentStatus
+                restaurantName: order.restaurantName || existing.restaurantName
+              };
+            } else {
+              next[key] = {
+                ...existing,
+                ...order
+              };
+            }
           }
         });
         return next;
       });
+    };
+
+    // Attach authoritative real-time listener to restaurant order document
+    const attachAuthoritativeOrderListener = (tenantId: string, orderId: string) => {
+      if (!tenantId || !orderId || activeDocSubs.has(orderId)) return;
+      activeDocSubs.add(orderId);
+
+      const orderDocRef = doc(db, 'restaurants', tenantId, 'orders', orderId);
+      const unsubDoc = onSnapshot(orderDocRef, (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as CustomerOrder;
+          const mergedItem: CustomerOrder = {
+            ...data,
+            id: snap.id,
+            orderId: snap.id,
+            tenantId
+          };
+          mergeOrders([mergedItem], true);
+
+          // Real-time synchronization: sync terminal status into local storage index
+          // so CustomerHome and other tabs immediately update without page reload
+          try {
+            const localOrdersStr = localStorage.getItem('restaurantos_customer_orders');
+            if (localOrdersStr) {
+              const list = JSON.parse(localOrdersStr);
+              if (Array.isArray(list)) {
+                let changed = false;
+                const updated = list.map((it: any) => {
+                  if (it.orderId === snap.id) {
+                    changed = true;
+                    return {
+                      ...it,
+                      status: data.status,
+                      paymentStatus: data.paymentStatus
+                    };
+                  }
+                  return it;
+                });
+                if (changed) {
+                  localStorage.setItem('restaurantos_customer_orders', JSON.stringify(updated));
+                  window.dispatchEvent(new Event('storage'));
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }, (err) => {
+        console.warn(`[OrdersPage] Document stream warning for ${orderId}:`, err);
+      });
+      unsubs.push(unsubDoc);
     };
 
     // Source A: Active Table Session in sessionStorage / localStorage
@@ -103,7 +176,7 @@ export const CustomerOrdersPage: React.FC = () => {
             const data = d.data() as CustomerOrder;
             fetched.push({ ...data, id: d.id, tenantId: sessionTenantId });
           });
-          mergeOrders(fetched);
+          mergeOrders(fetched, true); // Authoritative: directly from restaurants/{tenantId}/orders
           setIsLoading(false);
         }, (err) => {
           console.warn('[OrdersPage] Session tenant orders stream warning:', err);
@@ -124,8 +197,15 @@ export const CustomerOrdersPage: React.FC = () => {
           snap.forEach(d => {
             const data = d.data() as CustomerOrder;
             fetched.push({ ...data, id: d.id });
+
+            // Attach authoritative real-time listener to the actual restaurant order document!
+            const tId = data.tenantId || data.restaurantId;
+            const oId = data.orderId || d.id;
+            if (tId && oId) {
+              attachAuthoritativeOrderListener(tId, oId);
+            }
           });
-          mergeOrders(fetched);
+          mergeOrders(fetched, false);
           setIsLoading(false);
         }, (err) => {
           console.warn('[OrdersPage] User orders stream warning:', err);
@@ -153,26 +233,14 @@ export const CustomerOrdersPage: React.FC = () => {
             total: item.total,
             status: item.status || 'NEW',
             createdAt: item.createdAt
-          })));
+          })), false);
 
           // Attach individual real-time listeners to the actual restaurant orders
-          parsedList.slice(0, 10).forEach(item => {
-            if (item.tenantId && item.orderId) {
-              const orderDocRef = doc(db, 'restaurants', item.tenantId, 'orders', item.orderId);
-              const unsubDoc = onSnapshot(orderDocRef, (snap) => {
-                if (snap.exists()) {
-                  const data = snap.data() as CustomerOrder;
-                  mergeOrders([{
-                    ...data,
-                    id: snap.id,
-                    orderId: snap.id,
-                    tenantId: item.tenantId
-                  }]);
-                }
-              }, (err) => {
-                console.warn(`[OrdersPage] Document stream warning for ${item.orderId}:`, err);
-              });
-              unsubs.push(unsubDoc);
+          parsedList.slice(0, 15).forEach(item => {
+            const tId = item.tenantId || item.restaurantId;
+            const oId = item.orderId || item.id;
+            if (tId && oId) {
+              attachAuthoritativeOrderListener(tId, oId);
             }
           });
         }
@@ -234,18 +302,14 @@ export const CustomerOrdersPage: React.FC = () => {
     });
   }, [ordersMap]);
 
+  // Active Orders: Orders currently in progress (not terminal and not paid)
   const activeOrders = useMemo(() => {
-    return allOrdersList.filter(o => {
-      const statusUpper = (o.status || 'NEW').toUpperCase();
-      return !['COMPLETED', 'CANCELLED', 'DELIVERED', 'SERVED'].includes(statusUpper);
-    });
+    return allOrdersList.filter(o => isOrderActive(o));
   }, [allOrdersList]);
 
+  // Past Orders: Successfully completed, paid, or cancelled historical orders
   const pastOrders = useMemo(() => {
-    return allOrdersList.filter(o => {
-      const statusUpper = (o.status || 'NEW').toUpperCase();
-      return ['COMPLETED', 'CANCELLED', 'DELIVERED', 'SERVED'].includes(statusUpper);
-    });
+    return allOrdersList.filter(o => isOrderTerminal(o));
   }, [allOrdersList]);
 
   // Filtered list based on active tab and search filter
@@ -284,62 +348,90 @@ export const CustomerOrdersPage: React.FC = () => {
     }
   };
 
-  const getStatusDisplay = (status?: string) => {
+  const getStatusDisplay = (status?: string, paymentStatus?: string) => {
     const s = (status || 'NEW').toUpperCase();
+    const p = (paymentStatus || 'pending').toLowerCase();
+    const isPaid = p === 'paid';
+
+    if (isPaid || s === 'COMPLETED' || s === 'PAID' || s === 'PAYMENT_COMPLETED' || s === 'CLOSED') {
+      return {
+        label: s === 'COMPLETED' ? 'Completed' : isPaid ? 'Paid' : 'Completed',
+        paymentLabel: isPaid ? '✓ Paid' : 'Completed',
+        bg: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        dot: 'bg-[#2E8B57]',
+        paymentBadge: 'bg-emerald-50 text-[#2E8B57] border-emerald-200',
+        pulse: false
+      };
+    }
+
+    if (s === 'DINING_COMPLETED' || s === 'BILL_REQUESTED' || s === 'SERVED' || s === 'DELIVERED') {
+      return {
+        label: s === 'BILL_REQUESTED' ? 'Bill Requested' : 'Dining Completed',
+        paymentLabel: 'Payment Pending',
+        bg: 'bg-amber-50 text-amber-900 border-amber-200',
+        dot: 'bg-amber-500',
+        paymentBadge: 'bg-amber-50 text-amber-800 border-amber-200',
+        pulse: s === 'BILL_REQUESTED'
+      };
+    }
+
     switch (s) {
       case 'NEW':
       case 'PLACED':
         return {
           label: 'Order Received',
-          bg: 'bg-amber-50 text-amber-800 border-amber-200',
-          dot: 'bg-amber-500',
+          paymentLabel: 'Payment Pending',
+          bg: 'bg-blue-50 text-blue-800 border-blue-200',
+          dot: 'bg-blue-500',
+          paymentBadge: 'bg-slate-50 text-slate-700 border-slate-200',
           pulse: true
         };
       case 'ACCEPTED':
       case 'CONFIRMED':
         return {
           label: 'Confirmed',
+          paymentLabel: 'Payment Pending',
           bg: 'bg-blue-50 text-blue-800 border-blue-200',
           dot: 'bg-blue-500',
+          paymentBadge: 'bg-slate-50 text-slate-700 border-slate-200',
           pulse: false
         };
       case 'PREPARING':
       case 'KITCHEN':
         return {
           label: 'In Kitchen Preparing',
+          paymentLabel: 'Payment Pending',
           bg: 'bg-[#F3E8DF] text-[#C85A3F] border-[#E5DCD5]',
           dot: 'bg-[#C85A3F]',
+          paymentBadge: 'bg-slate-50 text-slate-700 border-slate-200',
           pulse: true
         };
       case 'READY':
       case 'READY_TO_SERVE':
         return {
           label: 'Ready to Serve',
+          paymentLabel: 'Payment Pending',
           bg: 'bg-emerald-50 text-emerald-800 border-emerald-200',
           dot: 'bg-emerald-500',
+          paymentBadge: 'bg-slate-50 text-slate-700 border-slate-200',
           pulse: true
-        };
-      case 'SERVED':
-      case 'DELIVERED':
-      case 'COMPLETED':
-        return {
-          label: 'Completed',
-          bg: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-          dot: 'bg-[#2E8B57]',
-          pulse: false
         };
       case 'CANCELLED':
         return {
           label: 'Cancelled',
+          paymentLabel: 'Cancelled',
           bg: 'bg-rose-50 text-rose-800 border-rose-200',
           dot: 'bg-rose-500',
+          paymentBadge: 'bg-rose-50 text-rose-800 border-rose-200',
           pulse: false
         };
       default:
         return {
           label: status || 'Processing',
+          paymentLabel: isPaid ? '✓ Paid' : 'Payment Pending',
           bg: 'bg-stone-50 text-stone-800 border-stone-200',
           dot: 'bg-stone-500',
+          paymentBadge: 'bg-stone-50 text-stone-800 border-stone-200',
           pulse: false
         };
     }
@@ -459,7 +551,7 @@ export const CustomerOrdersPage: React.FC = () => {
               const targetTenant = order.tenantId || order.restaurantId || 'bawarchi-restaurant';
               const targetOrderId = order.orderId || order.id;
               const rName = order.restaurantName || restaurantMeta[targetTenant]?.name || targetTenant.replace(/-/g, ' ');
-              const statusInfo = getStatusDisplay(order.status);
+              const statusInfo = getStatusDisplay(order.status, order.paymentStatus);
               const rawTable = order.tableNumber || (order.tableId ? order.tableId.replace(/^TBL-/i, '') : '');
               const tableNum = rawTable && !String(rawTable).toLowerCase().includes('walk') ? `Table #${rawTable}` : 'Walk-in';
 
@@ -486,10 +578,17 @@ export const CustomerOrdersPage: React.FC = () => {
                       </p>
                     </div>
 
-                    {/* Status badge */}
-                    <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold border ${statusInfo.bg} self-start sm:self-auto`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dot} ${statusInfo.pulse ? 'animate-ping' : ''}`} />
-                      <span>{statusInfo.label}</span>
+                    {/* Status badges */}
+                    <div className="flex flex-wrap items-center gap-1.5 self-start sm:self-auto">
+                      <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold border ${statusInfo.bg}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dot} ${statusInfo.pulse ? 'animate-ping' : ''}`} />
+                        <span>{statusInfo.label}</span>
+                      </div>
+                      {statusInfo.paymentLabel && (
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-bold border ${statusInfo.paymentBadge}`}>
+                          {statusInfo.paymentLabel}
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -534,8 +633,8 @@ export const CustomerOrdersPage: React.FC = () => {
                       }}
                       className="px-5 py-2.5 bg-[#C85A3F] hover:bg-[#A94332] text-white text-xs font-extrabold rounded-xl transition-all shadow-md shadow-[#C85A3F]/20 flex items-center justify-center gap-1.5 cursor-pointer"
                     >
-                      <Utensils className="w-3.5 h-3.5" />
-                      <span>Track Live Status</span>
+                      <Receipt className="w-3.5 h-3.5" />
+                      <span>{['SERVED', 'DINING_COMPLETED', 'BILL_REQUESTED'].includes((order.status || '').toUpperCase()) ? 'View Bill' : 'Track Live Status'}</span>
                       <ChevronRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
                     </button>
                   </div>
@@ -605,19 +704,24 @@ export const CustomerOrdersPage: React.FC = () => {
               const targetTenant = order.tenantId || order.restaurantId || 'bawarchi-restaurant';
               const targetOrderId = order.orderId || order.id;
               const rName = order.restaurantName || restaurantMeta[targetTenant]?.name || targetTenant.replace(/-/g, ' ');
-              const statusInfo = getStatusDisplay(order.status);
+              const statusInfo = getStatusDisplay(order.status, order.paymentStatus);
               const rawTable = order.tableNumber || (order.tableId ? order.tableId.replace(/^TBL-/i, '') : '');
               const tableNum = rawTable && !String(rawTable).toLowerCase().includes('walk') ? `Table #${rawTable}` : 'Walk-in';
-              const isOrderActive = !['COMPLETED', 'CANCELLED', 'DELIVERED', 'SERVED'].includes((order.status || 'NEW').toUpperCase());
+              const isPaid = (order.paymentStatus || '').toLowerCase() === 'paid';
+              const isCancelled = (order.status || '').toUpperCase() === 'CANCELLED';
+              const orderIsActive = isOrderActive(order);
+              const orderIsTerminal = isOrderTerminal(order);
 
               return (
                 <div
                   key={targetOrderId}
                   onClick={() => {
-                    if (isOrderActive) {
-                      navigate(`/customer/restaurant/${targetTenant}/order/${targetOrderId}`);
-                    } else {
+                    if (orderIsTerminal && !isCancelled) {
                       navigate(`/customer/restaurant/${targetTenant}/order/${targetOrderId}?view=receipt`);
+                    } else if (isCancelled) {
+                      navigate(`/customer/restaurant/${targetTenant}/menu`);
+                    } else {
+                      navigate(`/customer/restaurant/${targetTenant}/order/${targetOrderId}`);
                     }
                   }}
                   className="p-4 sm:p-5 bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs hover:shadow-sm transition-all cursor-pointer group"
@@ -635,6 +739,11 @@ export const CustomerOrdersPage: React.FC = () => {
                         <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dot}`} />
                         <span>{statusInfo.label}</span>
                       </span>
+                      {statusInfo.paymentLabel && (
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusInfo.paymentBadge}`}>
+                          {statusInfo.paymentLabel}
+                        </span>
+                      )}
                     </div>
 
                     <div className="text-[11px] text-[#756B64] font-medium flex items-center space-x-2">
@@ -664,7 +773,7 @@ export const CustomerOrdersPage: React.FC = () => {
                     </span>
 
                     <div className="flex items-center gap-2">
-                      {isOrderActive ? (
+                      {orderIsActive ? (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -672,10 +781,10 @@ export const CustomerOrdersPage: React.FC = () => {
                           }}
                           className="px-3 py-1.5 bg-[#C85A3F] hover:bg-[#A94332] text-white text-[11px] font-extrabold rounded-xl transition-all shadow-xs cursor-pointer flex items-center gap-1"
                         >
-                          <span>Track Live</span>
+                          <span>{['SERVED', 'DINING_COMPLETED'].includes((order.status || '').toUpperCase()) ? 'View Bill' : 'Track Live'}</span>
                           <ChevronRight className="w-3.5 h-3.5" />
                         </button>
-                      ) : (
+                      ) : orderIsTerminal && !isCancelled ? (
                         <>
                           <button
                             onClick={(e) => {
@@ -698,6 +807,17 @@ export const CustomerOrdersPage: React.FC = () => {
                             <span>Order Again</span>
                           </button>
                         </>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/customer/restaurant/${targetTenant}/menu`);
+                          }}
+                          className="px-3 py-1.5 bg-[#FFF8F2] border border-[#E5DCD5] hover:border-[#C85A3F]/40 text-[#C85A3F] text-[11px] font-extrabold rounded-xl transition-all cursor-pointer flex items-center gap-1"
+                        >
+                          <RotateCcw className="w-3 h-3 text-[#C85A3F]" />
+                          <span>Order Again</span>
+                        </button>
                       )}
                     </div>
                   </div>

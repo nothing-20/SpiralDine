@@ -86,15 +86,15 @@ export const getBaseTemplate = (title: string, bodyContent: string): string => {
       <body>
         <div class="wrapper">
           <div class="header">
-            <img src="https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=128&auto=format&fit=crop&q=60" alt="RestaurantOS Logo" />
-            <h1>RestaurantOS</h1>
+            <img src="https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=128&auto=format&fit=crop&q=60" alt="Spiral Dine Logo" />
+            <h1>Spiral Dine</h1>
           </div>
           <div class="content">
             ${bodyContent}
           </div>
           <div class="footer">
-            <p>Sent via <strong>RestaurantOS Enterprise</strong></p>
-            <p>&copy; ${new Date().getFullYear()} RestaurantOS. All rights reserved.</p>
+            <p>Sent via <strong>Spiral Dine Enterprise</strong></p>
+            <p>&copy; ${new Date().getFullYear()} Spiral Dine. All rights reserved.</p>
           </div>
         </div>
       </body>
@@ -113,7 +113,7 @@ export interface InviteStaffData {
 export const getInviteStaffTemplate = (data: InviteStaffData): string => {
   const bodyContent = `
     <p>Hello ${data.fullName},</p>
-    <p>You have been invited to join the restaurant team at <strong>${data.restaurantName}</strong> on <strong>RestaurantOS</strong> as a <strong>${data.role}</strong> in the <strong>${data.department}</strong> department.</p>
+    <p>You have been invited to join the restaurant team at <strong>${data.restaurantName}</strong> on <strong>Spiral Dine</strong> as a <strong>${data.role}</strong> in the <strong>${data.department}</strong> department.</p>
     <p>Click the button below to activate your staff account and set up your secure password.</p>
     <div class="btn-container">
       <a href="${data.activationLink}" class="btn">Activate Account</a>
@@ -131,12 +131,12 @@ export interface WelcomeData {
 
 export const getWelcomeTemplate = (data: WelcomeData): string => {
   const bodyContent = `
-    <p>Welcome to <strong>RestaurantOS</strong>, ${data.fullName}!</p>
+    <p>Welcome to <strong>Spiral Dine</strong>, ${data.fullName}!</p>
     <p>We are thrilled to have you onboard. Your account has been successfully created.</p>
     ${data.restaurantName ? `<p>Your restaurant workspace <strong>${data.restaurantName}</strong> is ready for setup.</p>` : ''}
     <p>Log in to your dashboard to begin managing your menu, tables, staff, and live operations.</p>
   `;
-  return getBaseTemplate('Welcome to RestaurantOS', bodyContent);
+  return getBaseTemplate('Welcome to Spiral Dine', bodyContent);
 };
 
 export interface ReservationData {

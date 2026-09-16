@@ -14,6 +14,7 @@ import {
   Check
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { isOrderActive } from '../../../shared/utils/orderUtils';
 
 
 const POPULAR_CITIES = [
@@ -214,10 +215,7 @@ export const CustomerHome: React.FC = () => {
         if (raw) {
           const list = JSON.parse(raw);
           if (Array.isArray(list) && list.length > 0) {
-            const active = list.find((o: any) => {
-              const s = (o.status || 'NEW').toUpperCase();
-              return !['COMPLETED', 'CANCELLED', 'DELIVERED', 'SERVED'].includes(s);
-            });
+            const active = list.find((o: any) => isOrderActive(o));
             if (active && active.tenantId && active.orderId) {
               setActiveOrderBanner(active);
               return;

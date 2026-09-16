@@ -27,6 +27,116 @@ service cloud.firestore {
       return tenantId != null && userExists() && getUserData().get('tenantId', '') == tenantId;
     }
 
+    // Helper to check if user is authorized staff for a tenant
+    function isTenantStaff(tenantId) {
+      return isAuth() && (
+        request.auth.token.role == 'super-admin' ||
+        (userExists() && getUserData().get('tenantId', '') == tenantId && 
+         getUserData().get('role', '') in ['super-admin', 'owner', 'admin', 'manager', 'waiter', 'cashier', 'reception', 'kitchen'])
+      );
+    }
+
+    // Helper to check if user is management staff for a tenant
+    function isTenantManager(tenantId) {
+      return isAuth() && (
+        request.auth.token.role == 'super-admin' ||
+        (userExists() && getUserData().get('tenantId', '') == tenantId && 
+         getUserData().get('role', '') in ['super-admin', 'owner', 'admin', 'manager'])
+      );
+    }
+
+    // Helper to check branch assignment for staff
+    function isBranchAllowed(branchId) {
+      return !userExists() || 
+        getUserData().get('branchId', '') == '' || 
+        branchId == null || 
+        branchId == '' || 
+        getUserData().get('branchId', '') == branchId;
+    }
+
+    // Helper to verify if customer bill creation matches the authentic order in Firestore
+    function isValidCustomerBillCreation(tenantId, billId, billData) {
+      let orderDocPath = /databases/$(database)/documents/restaurants/$(tenantId)/orders/$(billData.get('orderId', ''));
+      return isAuth() &&
+        billId == ('BILL-' + billData.get('orderId', '')) &&
+        exists(orderDocPath) &&
+        get(orderDocPath).data.get('customerId', '') == request.auth.uid &&
+        get(orderDocPath).data.get('status', '') in ['DINING_COMPLETED', 'COMPLETED'] &&
+        billData.get('customerId', '') == request.auth.uid &&
+        billData.get('tenantId', '') == tenantId &&
+        billData.get('paymentStatus', 'pending') == 'pending' &&
+        !('paidAt' in billData) &&
+        billData.get('total', 0) == get(orderDocPath).data.get('total', 0) &&
+        billData.get('subtotal', 0) == get(orderDocPath).data.get('subtotal', 0) &&
+        billData.get('tax', 0) == get(orderDocPath).data.get('tax', 0) &&
+        billData.get('serviceCharge', 0) == get(orderDocPath).data.get('serviceCharge', 0) &&
+        billData.get('discount', 0) == get(orderDocPath).data.get('discount', 0) &&
+        billData.get('items', []) == get(orderDocPath).data.get('items', []);
+    }
+
+    // Helper to verify staff settlement or order sync on a bill
+    function isValidBillUpdate(tenantId) {
+      return isTenantStaff(tenantId) &&
+        isBranchAllowed(resource.data.get('branchId', '')) &&
+        resource.data.get('paymentStatus', 'pending') != 'paid' &&
+        // Immutable root identifiers: cannot change orderId, tenantId, customerId, billId
+        request.resource.data.get('orderId', '') == resource.data.get('orderId', '') &&
+        request.resource.data.get('tenantId', '') == resource.data.get('tenantId', '') &&
+        request.resource.data.get('customerId', '') == resource.data.get('customerId', '') &&
+        request.resource.data.get('billId', '') == resource.data.get('billId', '') &&
+        (
+          // Path 1: Staff settlement (only settlement fields change, financials remain identical)
+          (
+            request.resource.data.get('total', 0) == resource.data.get('total', 0) &&
+            request.resource.data.get('subtotal', 0) == resource.data.get('subtotal', 0) &&
+            request.resource.data.get('tax', 0) == resource.data.get('tax', 0) &&
+            request.resource.data.get('serviceCharge', 0) == resource.data.get('serviceCharge', 0) &&
+            request.resource.data.get('discount', 0) == resource.data.get('discount', 0) &&
+            request.resource.data.get('items', []) == resource.data.get('items', []) &&
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'paymentStatus', 'paymentMethods', 'paymentMethod', 'paidAt',
+              'processedBy', 'processedByName', 'processedByRole', 'invoiceNumber',
+              'notes', 'transactionRef', 'updatedAt'
+            ])
+          ) ||
+          // Path 2: Synchronizing pending bill with authentic order items
+          (
+            exists(/databases/$(database)/documents/restaurants/$(tenantId)/orders/$(resource.data.get('orderId', ''))) &&
+            request.resource.data.get('total', 0) == get(/databases/$(database)/documents/restaurants/$(tenantId)/orders/$(resource.data.get('orderId', ''))).data.get('total', 0) &&
+            request.resource.data.get('items', []) == get(/databases/$(database)/documents/restaurants/$(tenantId)/orders/$(resource.data.get('orderId', ''))).data.get('items', [])
+          ) ||
+          // Path 3: Manager / Owner discount or adjustment
+          isTenantManager(tenantId)
+        );
+    }
+
+    // Helper to check valid customer order update
+    function isValidCustomerOrderUpdate() {
+      return resource.data.get('status', '') != 'COMPLETED' &&
+        resource.data.get('status', '') != 'ARCHIVED' &&
+        // Financials must remain strictly unchanged
+        request.resource.data.get('total', 0) == resource.data.get('total', 0) &&
+        request.resource.data.get('subtotal', 0) == resource.data.get('subtotal', 0) &&
+        request.resource.data.get('tax', 0) == resource.data.get('tax', 0) &&
+        request.resource.data.get('serviceCharge', 0) == resource.data.get('serviceCharge', 0) &&
+        request.resource.data.get('discount', 0) == resource.data.get('discount', 0) &&
+        request.resource.data.get('items', []) == resource.data.get('items', []) &&
+        // Payment status & attribution must remain unchanged
+        request.resource.data.get('paymentStatus', 'pending') == resource.data.get('paymentStatus', 'pending') &&
+        !('paidAt' in request.resource.data && resource.data.get('paidAt', null) == null) &&
+        // Ownership & IDs must remain unchanged
+        request.resource.data.get('orderId', '') == resource.data.get('orderId', '') &&
+        request.resource.data.get('tenantId', '') == resource.data.get('tenantId', '') &&
+        request.resource.data.get('customerId', '') == resource.data.get('customerId', '') &&
+        // Only legitimate customer fields can be modified
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'diningCompletedAt', 'billRequestedAt', 'specialInstructions', 'notes', 'updatedAt'
+        ]) &&
+        // If status changes, customer can only set DINING_COMPLETED
+        (!('status' in request.resource.data.diff(resource.data).affectedKeys()) || 
+         request.resource.data.get('status', '') == 'DINING_COMPLETED');
+    }
+
     // Global settings & system features
     match /systemSettings/{settingsId} {
       allow read: if isAuth();
@@ -138,12 +248,58 @@ service cloud.firestore {
         allow write: if isAuth();
       }
 
-      // Customer Orders - read/create by customers or tenant staff, write by authorized staff
+      // Customer Orders - customer/staff creation, customer cannot modify financials, paymentStatus, or paidAt
       match /orders/{orderId} {
         allow read: if true;
-        allow create: if true;
-        allow update: if isAuth();
-        allow delete: if isAuth();
+        allow create: if (
+          request.resource.data.get('tenantId', '') == tenantId &&
+          request.resource.data.get('paymentStatus', 'pending') == 'pending' &&
+          !('paidAt' in request.resource.data) &&
+          (isTenantStaff(tenantId) || 
+           !isAuth() || 
+           request.resource.data.get('customerId', '') == request.auth.uid ||
+           request.resource.data.get('customerId', '') == 'guest-uid')
+        );
+        allow update: if isTenantStaff(tenantId) || (
+          // Authenticated diner or table session diner modifying only allowed customer fields
+          (!isAuth() || resource.data.get('customerId', '') in ['', 'guest-uid'] || resource.data.get('customerId', '') == request.auth.uid) &&
+          isValidCustomerOrderUpdate()
+        );
+        allow delete: if isTenantManager(tenantId);
+      }
+
+      // Canonical Bills - strictly isolated by tenant, branch, staff role and authentic order verification
+      match /bills/{billId} {
+        // Diner can only get their own order's bill; Staff can get bills in their tenant/branch; listing strictly restricted to authorized tenant staff
+        allow get: if isAuth() && (
+          (isTenantStaff(tenantId) && isBranchAllowed(resource.data.get('branchId', ''))) ||
+          (resource.data.get('customerId', '') != '' && resource.data.get('customerId', '') == request.auth.uid)
+        );
+        allow list: if isTenantStaff(tenantId);
+        // Creation allowed by authorized tenant staff, or authenticated customer whose bill strictly matches their authentic order
+        allow create: if (
+          (isTenantStaff(tenantId) && isBranchAllowed(request.resource.data.get('branchId', ''))) ||
+          isValidCustomerBillCreation(tenantId, billId, request.resource.data)
+        );
+        // Updates strictly controlled: staff settlement (financials immutable), order sync, or manager adjustment. Blocked completely once PAID.
+        allow update: if isValidBillUpdate(tenantId);
+        // Bills are permanent legal financial records and cannot be deleted
+        allow delete: if false;
+      }
+
+      // Financial Transactions Ledger - append-only by authorized tenant staff, immutable once written
+      match /transactions/{transId} {
+        allow read: if isTenantStaff(tenantId);
+        allow create: if isTenantStaff(tenantId) && request.resource.data.get('tenantId', '') == tenantId;
+        allow update, delete: if false; // Strict immutable ledger protection
+      }
+
+      // Payment Gateway Attempts - server/staff managed, diner read
+      match /paymentAttempts/{attemptId} {
+        allow read: if isTenantStaff(tenantId) || 
+          (isAuth() && resource.data.get('customerId', '') == request.auth.uid) || 
+          true;
+        allow write: if isTenantStaff(tenantId);
       }
 
       // Customer Service Requests & Dining Sessions
@@ -172,7 +328,7 @@ service cloud.firestore {
       // Universal rule for other management subcollections inside tenant workspace
       match /{subcollection}/{docId} {
         allow read: if isAuth() && (isTenant(tenantId) || getUserData().get('role', '') in ['super-admin', 'owner', 'admin']);
-        allow write: if isAuth();
+        allow write: if isTenantStaff(tenantId);
       }
     }
   }

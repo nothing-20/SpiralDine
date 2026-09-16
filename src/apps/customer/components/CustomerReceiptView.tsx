@@ -93,9 +93,35 @@ export const CustomerReceiptView: React.FC<CustomerReceiptViewProps> = ({
   const { formatPrice } = useCurrency();
   const [showTimeline, setShowTimeline] = useState(false);
 
+  if (!order) {
+    return (
+      <div className="min-h-screen bg-[#FCFAF7] text-left select-none pb-16">
+        <div className="print:hidden">
+          <CustomerHeader />
+        </div>
+        <div className="max-w-md mx-auto px-4 py-16 text-center">
+          <div className="bg-white border border-[#E5DCD5] rounded-3xl p-8 space-y-4 shadow-sm">
+            <ReceiptIcon className="w-12 h-12 text-[#C85A3F] mx-auto" />
+            <h2 className="text-lg font-extrabold text-[#202124]">Receipt Data Unavailable</h2>
+            <p className="text-xs text-[#756B64]">We could not load the receipt for this order. It may still be processing.</p>
+            <button
+              type="button"
+              onClick={() => navigate('/customer/orders')}
+              className="px-5 py-2.5 bg-[#C85A3F] hover:bg-[#A94332] text-white text-xs font-bold rounded-xl transition-all cursor-pointer"
+            >
+              Back to My Orders
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Resolved metadata
   const effectiveTenantId = tenantId || order.tenantId || order.restaurantId || '';
   const orderId = order.orderId || order.id || 'N/A';
+  const billId = order.billId || (orderId !== 'N/A' ? (orderId.startsWith('BILL-') ? orderId : `BILL-${orderId}`) : 'BILL-CANONICAL');
+  const invoiceNumber = order.invoiceNumber || 'INV-OFFICIAL';
   const restaurantName =
     order.restaurantName ||
     restaurantData?.restaurantName ||
@@ -167,13 +193,22 @@ export const CustomerReceiptView: React.FC<CustomerReceiptViewProps> = ({
   
   // Method detection if present
   const paymentMethodLabel = (() => {
+    if (order.paymentMethod) {
+      if (order.paymentMethod === 'online') return 'Online Payment (Razorpay)';
+      if (order.paymentMethod === 'upi') return 'UPI';
+      if (order.paymentMethod === 'card') return 'Credit / Debit Card';
+      if (order.paymentMethod === 'netbanking') return 'Netbanking';
+      if (order.paymentMethod === 'wallet') return 'Digital Wallet';
+      if (order.paymentMethod === 'cash') return 'Cash';
+      return String(order.paymentMethod).toUpperCase();
+    }
     if (order.paymentMethods) {
       if (order.paymentMethods.cash) return 'Cash';
       if (order.paymentMethods.upi) return 'UPI';
       if (order.paymentMethods.card) return 'Card';
       if (order.paymentMethods.wallet) return 'Wallet';
     }
-    return isPaid ? 'Electronic Payment' : 'Counter Settlement';
+    return isPaid ? 'Online / Electronic Payment' : 'Counter Settlement';
   })();
 
   const handlePrint = () => {
@@ -270,7 +305,7 @@ export const CustomerReceiptView: React.FC<CustomerReceiptViewProps> = ({
           </div>
 
           {/* Receipt Meta Information Grid */}
-          <div className="p-6 border-b border-[#E5DCD5] bg-white grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+          <div className="p-6 border-b border-[#E5DCD5] bg-white grid grid-cols-2 sm:grid-cols-5 gap-4 text-xs">
             <div>
               <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider block">
                 Order ID
@@ -282,11 +317,11 @@ export const CustomerReceiptView: React.FC<CustomerReceiptViewProps> = ({
 
             <div>
               <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider block">
-                Order Placed
+                Bill ID
               </span>
-              <span className="font-semibold text-[#202124] block mt-0.5">
-                {createdFormatted}
-              </span>
+              <strong className="font-mono font-bold text-[#C85A3F] text-xs block mt-0.5">
+                {billId}
+              </strong>
             </div>
 
             <div>
@@ -295,6 +330,15 @@ export const CustomerReceiptView: React.FC<CustomerReceiptViewProps> = ({
               </span>
               <span className="font-semibold text-[#202124] block mt-0.5">
                 {seatingLabel}
+              </span>
+            </div>
+
+            <div>
+              <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider block">
+                Order Date
+              </span>
+              <span className="font-semibold text-[#202124] block mt-0.5">
+                {createdFormatted}
               </span>
             </div>
 
@@ -531,7 +575,7 @@ export const CustomerReceiptView: React.FC<CustomerReceiptViewProps> = ({
             <div>
               <h4 className="text-xs font-bold text-[#202124]">Verified Digital Receipt</h4>
               <p className="text-[11px] text-[#756B64]">
-                Authoritative transaction recorded on RestaurantOS ledger.
+                Authoritative transaction recorded on Spiral Dine ledger.
               </p>
             </div>
           </div>

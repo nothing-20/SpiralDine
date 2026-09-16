@@ -2,9 +2,16 @@ import { IOrderItem, TPaymentStatus, IPaymentBreakdown } from '../orders/types';
 
 export interface IBill {
   id?: string;
+  billId?: string;
   orderId: string;
   tenantId: string;
+  branchId?: string;
+  tableId?: string;
   tableNumber: string;
+  customerId?: string;
+  customerName?: string;
+  customerPhone?: string;
+  restaurantName?: string;
   waiterName?: string;
   waiterId?: string;
   invoiceNumber: string;
@@ -18,12 +25,19 @@ export interface IBill {
   taxPercent: number;       // raw %
   serviceCharge: number;    // in cents
   serviceChargePercent: number;
-  roundOff: number;         // in cents
+  tip?: number;             // in cents
+  roundOff?: number;        // in cents
   total: number;            // in cents (grand total)
+  currency?: string;
+  orderStatus?: string;
   paymentStatus: TPaymentStatus;
   paymentMethods: IPaymentBreakdown;
-  processedBy: string;
-  processedByName: string;
+  paymentMethod?: string;
+  transactionRef?: string;
+  notes?: string;
+  processedBy?: string;
+  processedByName?: string;
+  processedByRole?: string;
   createdAt: string;
   paidAt?: string;
 }

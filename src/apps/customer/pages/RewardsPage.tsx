@@ -71,7 +71,7 @@ export const RewardsPage: React.FC = () => {
         <div className="absolute right-[-10%] top-[-10%] w-24 h-24 bg-primary/25 rounded-full blur-2xl pointer-events-none" />
         <div className="flex justify-between items-start">
           <div>
-            <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest font-semibold">RestaurantOS VIP Club</span>
+            <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest font-semibold">Spiral Dine VIP Club</span>
             <h4 className="text-sm font-extrabold text-white mt-0.5">
               {points > 500 ? 'Gold VIP Member' : points > 0 ? 'Member' : 'Verified Diner'}
             </h4>

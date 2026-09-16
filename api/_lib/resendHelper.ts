@@ -54,7 +54,7 @@ export const sendMailWithLogging = async (
     const resend = new Resend(apiKey);
 
     const response = await resend.emails.send({
-      from: 'RestaurantOS <onboarding@resend.dev>',
+      from: 'Spiral Dine <onboarding@resend.dev>',
       to: [to],
       subject: subject,
       html: html,

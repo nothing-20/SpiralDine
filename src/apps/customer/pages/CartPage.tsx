@@ -5,7 +5,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { useCurrency } from '../../../context/CurrencyContext';
 import { doc, getDoc, setDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
-import { generateUniqueOrderId } from '../../../shared/utils/orderUtils';
+import { generateUniqueOrderId, isOrderActive } from '../../../shared/utils/orderUtils';
 import { getMenuItemPath } from '../../../shared/firebase/collections';
 import TableSelectionModal, { ITableData } from '../components/TableSelectionModal';
 import { 
@@ -354,7 +354,7 @@ export const CartPage: React.FC = () => {
         const existingSnap = await getDocs(qExisting);
         existingSnap.forEach(d => {
           const od = d.data();
-          if (od.status && !['ARCHIVED', 'CANCELLED'].includes(od.status.toUpperCase())) {
+          if (isOrderActive(od)) {
             existingCount++;
           }
         });

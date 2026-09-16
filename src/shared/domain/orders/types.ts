@@ -104,6 +104,8 @@ export interface IOrder {
   guestsCount?: number;
 
   // ── Billing & POS fields ──────────────────────────────────────────────────
+  billId?: string;                // Canonical Bill ID e.g. BILL-ORD-XXXX
+  billGeneratedAt?: string;       // ISO — when canonical bill was generated
   paymentStatus?: TPaymentStatus;
   paymentMethods?: IPaymentBreakdown;
   paymentMethod?: string;
@@ -116,6 +118,7 @@ export interface IOrder {
   serviceChargePercent?: number;  // raw % (e.g. 5)
   roundOff?: number;              // in cents — can be negative
   billRequestedAt?: string;       // ISO — when waiter clicked Request Bill
+  diningCompletedAt?: string;     // ISO — when customer or staff marked dining completed
   billOpenedAt?: string;          // ISO — when owner opened the bill
   paidAt?: string;                // ISO — when payment was completed
   processedBy?: string;           // uid of owner/cashier who processed payment
@@ -143,7 +146,7 @@ export type TKdsTab = 'table' | 'category' | 'station' | 'item-queue' | 'queue' 
 
 export type TOrderStatus =
   | 'NEW' | 'PLACED' | 'ACCEPTED' | 'CHEF_ASSIGNED' | 'PREPARING' | 'PAUSED'
-  | 'READY' | 'PICKED_UP' | 'DELIVERED' | 'SERVED' | 'COMPLETED' | 'PAID' | 'CLOSED' | 'ARCHIVED' | 'CANCELLED'
+  | 'READY' | 'PICKED_UP' | 'DELIVERED' | 'SERVED' | 'DINING_COMPLETED' | 'COMPLETED' | 'PAID' | 'CLOSED' | 'ARCHIVED' | 'CANCELLED'
   | 'CREATED' | 'VERIFIED' | 'SENT_TO_KITCHEN' | 'DELIVERING' | 'DINING' | 'BILL_REQUESTED' | 'PAYMENT_COMPLETED' | 'TABLE_CLEANING' | 'TABLE_AVAILABLE';
 
 export type TPriority = 'critical' | 'high' | 'normal' | 'low';

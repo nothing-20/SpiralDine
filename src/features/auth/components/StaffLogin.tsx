@@ -221,11 +221,11 @@ export const StaffLogin: React.FC = () => {
       <header className="w-full max-w-6xl mx-auto px-6 py-4 flex items-center justify-between relative z-20">
         <Link to="/" className="flex items-center space-x-3 group">
           <div className="w-10 h-10 bg-[#C94F3D] rounded-xl flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
-            <span className="text-white font-extrabold text-xl font-display leading-none">R</span>
+            <span className="text-white font-extrabold text-xl font-display leading-none">S</span>
           </div>
           <div>
             <span className="font-display font-extrabold text-xl tracking-tight text-[#17233D]">
-              Restaurant<span className="text-[#C94F3D]">OS</span>
+              Spiral <span className="text-[#C94F3D]">Dine</span>
             </span>
             <p className="text-[10px] font-semibold text-[#667085] hidden sm:block leading-none mt-0.5">
               Smart Dining. Smarter Business.
@@ -447,7 +447,7 @@ export const StaffLogin: React.FC = () => {
       <footer className="w-full border-t border-[#E5E1DC] bg-[#F3E8DF]/60 relative z-20">
         <div className="max-w-6xl mx-auto px-6 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-medium text-[#667085]">
           <div>
-            <span>&copy; {new Date().getFullYear()} RestaurantOS. All rights reserved.</span>
+            <span>&copy; {new Date().getFullYear()} Spiral Dine. All rights reserved.</span>
           </div>
           <div className="flex space-x-6">
             <a href="#" className="hover:text-[#17233D] transition-colors">Privacy Policy</a>

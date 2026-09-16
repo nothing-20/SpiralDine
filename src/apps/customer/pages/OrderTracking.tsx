@@ -12,6 +12,9 @@ import { getMenuItemPath } from '../../../shared/firebase/collections';
 import CustomerHeader from '../../../shared/ui/navigation/CustomerHeader';
 import CustomerReceiptView from '../components/CustomerReceiptView';
 import ErrorBoundary from '../../../shared/ui/feedback/ErrorBoundary';
+import { billingService } from '../../../shared/services/billingService';
+import { IBill } from '../../../shared/domain/billing/types';
+import { CanonicalBillModal } from '../../../shared/ui/billing/CanonicalBillModal';
 
 // Icons
 import { 
@@ -133,10 +136,11 @@ export const OrderTracking: React.FC = () => {
   const [cancelDialogRequest, setCancelDialogRequest] = useState<any | null>(null);
   const [isCancellingRequest, setIsCancellingRequest] = useState(false);
   
-  // Payment Simulated States
-  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState('');
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  // Canonical Bill States (real-time sync across Customer, Waiter, and Owner)
+  const [resolvedTenantId, setResolvedTenantId] = useState<string>(tenantId || '');
+  const [canonicalBill, setCanonicalBill] = useState<IBill | null>(null);
+  const [isCanonicalBillModalOpen, setIsCanonicalBillModalOpen] = useState(false);
+  const [isMarkingDiningCompleted, setIsMarkingDiningCompleted] = useState(false);
   const [paymentCompleted, setPaymentCompleted] = useState(false);
 
   // Feedback form states
@@ -149,14 +153,14 @@ export const OrderTracking: React.FC = () => {
   const [repeatCustomer, setRepeatCustomer] = useState(true);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
-  // Status Timeline Steps
+  // Status Timeline Steps (Strict separation: Order Lifecycle vs Payment Lifecycle)
   const trackingSteps = [
     { key: 'NEW', label: 'Order Received', desc: 'Your ticket is in the kitchen queue.' },
     { key: 'ACCEPTED', label: 'Accepted', desc: 'The kitchen has accepted your order.' },
     { key: 'PREPARING', label: 'Preparing', desc: 'The chef is cooking your dishes.' },
     { key: 'READY', label: 'Ready', desc: 'Food is plated and ready for serving.' },
-    { key: 'DELIVERED', label: 'Delivered', desc: 'Delivered to your table. Enjoy!' },
-    { key: 'COMPLETED', label: 'Completed', desc: 'Your dining experience is complete.' }
+    { key: 'SERVED', label: 'Served', desc: 'Food is delivered to your table. Enjoy!' },
+    { key: 'DINING_COMPLETED', label: 'Dining Completed', desc: 'Dining finished. Settle your canonical bill.' }
   ];
 
   const getStepIndex = (status: string) => {
@@ -166,7 +170,9 @@ export const OrderTracking: React.FC = () => {
       case 'ACCEPTED': return 1;
       case 'PREPARING': return 2;
       case 'READY': return 3;
-      case 'DELIVERED': return 4;
+      case 'DELIVERED':
+      case 'SERVED': return 4;
+      case 'DINING_COMPLETED':
       case 'COMPLETED': return 5;
       default: return 0;
     }
@@ -183,6 +189,31 @@ export const OrderTracking: React.FC = () => {
       }
     }
   }, []);
+
+  // 1.5. Real-time Canonical Bill Listener & Sync
+  useEffect(() => {
+    const effectiveTenant = order?.tenantId || resolvedTenantId || tenantId;
+    if (!effectiveTenant || !orderId) return;
+    const unsub = billingService.subscribeToCanonicalBill(effectiveTenant, orderId, (b) => {
+      setCanonicalBill(b);
+      if (b?.paymentStatus === 'paid') {
+        setPaymentCompleted(true);
+      }
+    });
+    return () => unsub();
+  }, [tenantId, resolvedTenantId, order?.tenantId, orderId]);
+
+  // Canonical bill generation trigger: Only generate when dining is explicitly completed
+  useEffect(() => {
+    const effectiveTenant = order?.tenantId || resolvedTenantId || tenantId;
+    if (!effectiveTenant || !order || !orderId) return;
+    const st = (order.status || '').toUpperCase();
+    if (st === 'DINING_COMPLETED' && !canonicalBill) {
+      billingService.getOrCreateCanonicalBill(effectiveTenant, order, restaurantData).catch(err => {
+        console.warn('[OrderTracking] Canonical bill auto-generation warning:', err);
+      });
+    }
+  }, [tenantId, resolvedTenantId, order?.tenantId, orderId, order?.status, canonicalBill, restaurantData]);
 
   // 2. Real-time Listeners for Order & Waiter Requests, plus Tenant & Menu Info
   useEffect(() => {
@@ -224,6 +255,8 @@ export const OrderTracking: React.FC = () => {
             console.warn('[OrderTracking] Slug lookup warning:', slugErr);
           }
         }
+
+        setResolvedTenantId(effectiveTenantId);
 
         if (tenantDoc.exists()) {
           const tData = tenantDoc.data();
@@ -267,6 +300,33 @@ export const OrderTracking: React.FC = () => {
             if ((orderData.paymentStatus || '').toLowerCase() === 'paid') {
               setPaymentCompleted(true);
             }
+
+            // Synchronize status with local recent orders index
+            try {
+              const localOrdersStr = localStorage.getItem('restaurantos_customer_orders');
+              if (localOrdersStr) {
+                const list = JSON.parse(localOrdersStr);
+                if (Array.isArray(list)) {
+                  let changed = false;
+                  const updated = list.map((it: any) => {
+                    if (it.orderId === docSnap.id) {
+                      changed = true;
+                      return {
+                        ...it,
+                        status: orderData.status,
+                        paymentStatus: orderData.paymentStatus
+                      };
+                    }
+                    return it;
+                  });
+                  if (changed) {
+                    localStorage.setItem('restaurantos_customer_orders', JSON.stringify(updated));
+                    window.dispatchEvent(new Event('storage'));
+                  }
+                }
+              }
+            } catch (_) {}
+
             setIsLoading(false);
           } else {
             // Document not found directly: attempt fallback lookup (fuzzy, transposed chars, case-insensitive)
@@ -508,18 +568,50 @@ export const OrderTracking: React.FC = () => {
         } catch (_) {}
       }
 
+      // Generate or fetch canonical authoritative bill for immediate display
+      const bill = await billingService.getOrCreateCanonicalBill(tenantId, order, restaurantData);
+      setCanonicalBill(bill);
+      setIsCanonicalBillModalOpen(true);
+
       // Log event
       await customerService.logCustomerEvent(tenantId, 'Bill Requested', `Customer requested bill for Table ${order.tableNumber}`, {
         tableNumber: order.tableNumber,
         orderId
       });
 
-      toast.success('Bill request sent to staff!');
+      toast.success('Bill generated & staff notified!');
     } catch (e) {
       console.error(e);
       toast.error('Unable to send your bill request. Please try again.');
     } finally {
       setIsSubmittingRequest(false);
+    }
+  };
+
+  // 5.2. Mark Dining Completed (lifecycle transition: SERVED -> DINING_COMPLETED)
+  const handleCompleteDining = async () => {
+    if (!tenantId || !orderId || !order) return;
+    setIsMarkingDiningCompleted(true);
+    try {
+      const orderRef = doc(db, 'restaurants', tenantId, 'orders', orderId);
+      await updateDoc(orderRef, {
+        status: 'DINING_COMPLETED',
+        diningCompletedAt: new Date().toISOString()
+      });
+
+      const bill = await billingService.getOrCreateCanonicalBill(tenantId, {
+        ...order,
+        status: 'DINING_COMPLETED'
+      }, restaurantData);
+      setCanonicalBill(bill);
+      setIsCanonicalBillModalOpen(true);
+      toast.success('Dining completed! Here is your bill.');
+    } catch (e) {
+      console.error('[OrderTracking] Dining completion error:', e);
+      toast.error('Could not complete dining. Opening bill anyway.');
+      setIsCanonicalBillModalOpen(true);
+    } finally {
+      setIsMarkingDiningCompleted(false);
     }
   };
 
@@ -567,99 +659,47 @@ export const OrderTracking: React.FC = () => {
     }
   };
 
-  // 6. Simulated payment checkout flow (UPI / CARD / WALLET)
-  const handleProcessPayment = async () => {
-    if (!tenantId || !orderId || !order) return;
-    if (!selectedPaymentMethod) {
-      toast.error('Please select a payment method');
-      return;
-    }
+  // 6. Open Canonical Authoritative Bill (Shared modal across Customer, Waiter, and Owner)
+  const handleOpenCanonicalBill = async () => {
+    const effectiveTenant = order?.tenantId || resolvedTenantId || tenantId;
+    const effectiveOrderId = order?.orderId || orderId;
+    if (!effectiveTenant || !effectiveOrderId) return;
 
-    setIsProcessingPayment(true);
-    
-    setTimeout(async () => {
-      try {
-        const orderRef = doc(db, 'restaurants', tenantId, 'orders', orderId);
-        
-        // Update Firestore order to Paid
-        await updateDoc(orderRef, {
-          paymentStatus: 'paid',
-          paidAt: new Date().toISOString(),
-          status: 'COMPLETED',
-          paymentMethods: {
-            cash: selectedPaymentMethod === 'Cash' ? order.total : 0,
-            upi: selectedPaymentMethod === 'UPI' ? order.total : 0,
-            card: selectedPaymentMethod === 'Card' ? order.total : 0,
-            wallet: selectedPaymentMethod === 'Wallet' ? order.total : 0
-          }
-        });
+    // Open modal immediately so user receives clear, instant UI feedback
+    setIsCanonicalBillModalOpen(true);
 
-        // Release the physical table layout slot
-        if (order.tableId) {
-          try {
-            const tableRef = doc(db, 'restaurants', tenantId, 'tables', order.tableId);
-            await updateDoc(tableRef, {
-              status: 'empty',
-              activeOrderId: '',
-              seatingTime: '',
-              guestsCount: 0,
-              assignedWaiterId: '',
-              assignedWaiterName: '',
-              updatedAt: new Date().toISOString()
-            });
-          } catch (_) {}
+    try {
+      // If the order is not yet in DINING_COMPLETED or COMPLETED status,
+      // transition order to DINING_COMPLETED first so that customer canonical bill creation
+      // satisfies Firestore security rules (isValidCustomerBillCreation).
+      const currentStatus = (order?.status || '').toUpperCase();
+      let activeOrder = order;
+
+      if (currentStatus !== 'DINING_COMPLETED' && currentStatus !== 'COMPLETED') {
+        try {
+          const orderRef = doc(db, 'restaurants', effectiveTenant, 'orders', effectiveOrderId);
+          await updateDoc(orderRef, {
+            status: 'DINING_COMPLETED',
+            diningCompletedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          });
+          activeOrder = { ...order, status: 'DINING_COMPLETED' };
+          setOrder(activeOrder);
+        } catch (statusErr) {
+          console.warn('[OrderTracking] Dining completion sync warning:', statusErr);
         }
-
-        // Add records to customer profile database
-        if (user?.uid) {
-          let targetCol = 'customers';
-          try {
-            const custSnap = await getDoc(doc(db, 'customers', user.uid));
-            if (!custSnap.exists()) {
-              const userSnap = await getDoc(doc(db, 'users', user.uid));
-              if (userSnap.exists()) {
-                targetCol = 'users';
-              }
-            }
-          } catch (_e) {
-            targetCol = 'customers';
-          }
-
-          // Append dining history record
-          await addDoc(collection(db, targetCol, user.uid, 'diningHistory'), {
-            restaurantId: tenantId,
-            restaurantName: restaurantName || 'Restaurant',
-            orderId,
-            total: order.total,
-            date: new Date().toISOString(),
-            diners: order.guests || 2
-          }).catch(err => console.warn('Failed to append dining history:', err));
-
-          // Increment loyalty points
-          const userDocRef = doc(db, targetCol, user.uid);
-          const pointsEarned = Math.round((order.total || 0) / 100) || 50;
-          await updateDoc(userDocRef, {
-            loyaltyPoints: increment(pointsEarned)
-          }).catch(err => console.warn('Failed to increment loyalty points:', err));
-        }
-
-        // Trigger Event engine logs
-        await customerService.logCustomerEvent(tenantId, 'Payment Completed', `Diner completed payment of ${formatPrice(order.total)} via ${selectedPaymentMethod}`, {
-          orderId,
-          method: selectedPaymentMethod,
-          total: order.total
-        });
-
-        toast.success('Payment settled successfully!');
-        setPaymentCompleted(true);
-        setIsPaymentModalOpen(false);
-      } catch (e) {
-        console.error(e);
-        toast.error('Transaction simulation failed.');
-      } finally {
-        setIsProcessingPayment(false);
       }
-    }, 2000);
+
+      const bill = await billingService.getOrCreateCanonicalBill(
+        effectiveTenant, 
+        activeOrder || { orderId: effectiveOrderId, tenantId: effectiveTenant, total: order?.total || 0, items: order?.items || [] }, 
+        restaurantData
+      );
+      setCanonicalBill(bill);
+    } catch (e: any) {
+      console.warn('[OrderTracking] Open bill warning:', e);
+      // CanonicalBillModal also handles real-time loading/fallback if the bill document is still syncing
+    }
   };
 
   // 7. Submit Ratings and Feedback review
@@ -1460,77 +1500,147 @@ export const OrderTracking: React.FC = () => {
                 </div>
               </div>
 
-              {/* Invoicing / Request Bill Buttons */}
-              <div className="pt-1">
+              {/* Invoicing / Canonical Bill Section */}
+              <div className="pt-1 space-y-3">
                 {order.paymentStatus === 'paid' ? (
-                  <div className="w-full py-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center text-xs font-bold text-[#2E8B57] flex items-center justify-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Invoice Settled Successfully</span>
+                  <div className="space-y-2">
+                    <div className="w-full py-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center text-xs font-bold text-[#2E8B57] flex items-center justify-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Invoice Settled Successfully</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`?view=receipt`)}
+                      className="w-full py-2.5 bg-white hover:bg-[#FCFAF7] border border-[#E5DCD5] text-[#202124] rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer"
+                    >
+                      <Receipt className="w-3.5 h-3.5 text-[#C85A3F]" />
+                      <span>View Official Tax Receipt</span>
+                    </button>
                   </div>
-                ) : activeBillRequest ? (
-                  isRequestPending(activeBillRequest.status) ? (
-                    <div className="bg-amber-50/90 border border-amber-200 rounded-xl p-4 space-y-3">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center space-x-2.5">
-                          <div className="w-8 h-8 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
-                            <Receipt className="w-4 h-4" />
-                          </div>
-                          <div>
-                            <h4 className="text-xs font-bold text-amber-950">Bill Request — Pending</h4>
-                            <p className="text-[11px] text-amber-700">Staff has been notified and is preparing your bill.</p>
-                          </div>
+                ) : (
+                  <>
+                    {/* Prompt to mark dining completed when food has been served */}
+                    {(order.status === 'SERVED' || order.status === 'DELIVERED') && (
+                      <div className="bg-[#FFF8F2] border border-[#C85A3F]/30 rounded-xl p-3.5 space-y-2 text-left">
+                        <div className="flex items-center gap-2 text-xs font-bold text-[#202124]">
+                          <Sparkles className="w-4 h-4 text-[#C85A3F]" />
+                          <span>Finished your meal?</span>
                         </div>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300 shrink-0">
-                          Pending
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between pt-2 border-t border-amber-200/60">
-                        <span className="text-[10.5px] text-amber-700">Want to order more items?</span>
+                        <p className="text-[11px] text-[#756B64]">
+                          Click below to wrap up your dining experience and generate your final bill.
+                        </p>
                         <button
                           type="button"
-                          onClick={() => setCancelDialogRequest(activeBillRequest)}
-                          className="px-3 py-1.5 bg-white hover:bg-amber-100/60 text-amber-900 border border-amber-300 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                          disabled={isMarkingDiningCompleted}
+                          onClick={handleCompleteDining}
+                          className="w-full py-2 bg-[#C85A3F] hover:bg-[#A94332] text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
                         >
-                          Cancel Request
+                          <Utensils className="w-3.5 h-3.5" />
+                          <span>{isMarkingDiningCompleted ? 'Finalizing Bill...' : 'Done Eating — Get Bill'}</span>
                         </button>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="bg-blue-50/90 border border-blue-200 rounded-xl p-4 space-y-3">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center space-x-2.5">
-                          <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center text-blue-700 shrink-0">
-                            <Receipt className="w-4 h-4" />
+                    )}
+
+                    {/* Canonical Authoritative Bill Card */}
+                    {canonicalBill ? (
+                      <div className="bg-white border-2 border-[#C85A3F]/30 rounded-xl p-4 space-y-3 text-left shadow-xs">
+                        <div className="flex items-start justify-between">
+                          <div className="flex items-center space-x-2.5">
+                            <div className="w-8 h-8 rounded-xl bg-[#F3E8DF] flex items-center justify-center text-[#C85A3F] shrink-0">
+                              <Receipt className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-bold text-[#202124]">Canonical Bill Ready</h4>
+                              <p className="text-[10.5px] text-[#756B64] font-mono">#{canonicalBill.billId}</p>
+                            </div>
                           </div>
-                          <div>
-                            <h4 className="text-xs font-bold text-blue-950">Staff is Preparing Your Bill</h4>
-                            <p className="text-[11px] text-blue-700">Your server has acknowledged the request.</p>
-                          </div>
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300">
+                            {canonicalBill.paymentStatus.toUpperCase()}
+                          </span>
                         </div>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-800 border border-blue-300 shrink-0">
-                          Acknowledged
-                        </span>
+                        <button
+                          type="button"
+                          onClick={handleOpenCanonicalBill}
+                          className="w-full bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold py-3 px-4 rounded-xl text-xs shadow-md shadow-[#C85A3F]/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        >
+                          <DollarSign className="w-4 h-4" />
+                          <span>View & Settle Bill</span>
+                        </button>
                       </div>
+                    ) : activeBillRequest ? (
+                      isRequestPending(activeBillRequest.status) ? (
+                        <div className="bg-amber-50/90 border border-amber-200 rounded-xl p-4 space-y-3 text-left">
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center space-x-2.5">
+                              <div className="w-8 h-8 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
+                                <Receipt className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h4 className="text-xs font-bold text-amber-950">Bill Request — Pending</h4>
+                                <p className="text-[11px] text-amber-700">Staff has been notified and is preparing your bill.</p>
+                              </div>
+                            </div>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300 shrink-0">
+                              Pending
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between pt-2 border-t border-amber-200/60">
+                            <span className="text-[10.5px] text-amber-700">Need to cancel?</span>
+                            <button
+                              type="button"
+                              onClick={() => setCancelDialogRequest(activeBillRequest)}
+                              className="px-3 py-1.5 bg-white hover:bg-amber-100/60 text-amber-900 border border-amber-300 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                            >
+                              Cancel Request
+                            </button>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleOpenCanonicalBill}
+                            className="w-full bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold py-2.5 px-4 rounded-xl text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            <DollarSign className="w-3.5 h-3.5" />
+                            <span>Open Bill & Settle</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="bg-blue-50/90 border border-blue-200 rounded-xl p-4 space-y-3 text-left">
+                          <div className="flex items-start justify-between">
+                            <div className="flex items-center space-x-2.5">
+                              <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center text-blue-700 shrink-0">
+                                <Receipt className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h4 className="text-xs font-bold text-blue-950">Staff is Preparing Your Bill</h4>
+                                <p className="text-[11px] text-blue-700">Your server has acknowledged the request.</p>
+                              </div>
+                            </div>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-800 border border-blue-300 shrink-0">
+                              Acknowledged
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleOpenCanonicalBill}
+                            className="w-full bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold py-3 px-4 rounded-xl text-xs shadow-md shadow-[#C85A3F]/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            <DollarSign className="w-4 h-4" />
+                            <span>View & Settle Bill</span>
+                          </button>
+                        </div>
+                      )
+                    ) : (
                       <button
                         type="button"
-                        onClick={() => setIsPaymentModalOpen(true)}
-                        className="w-full bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold py-3 px-4 rounded-xl text-xs shadow-md shadow-[#C85A3F]/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                        disabled={isSubmittingRequest}
+                        onClick={handleRequestBill}
+                        className="w-full bg-white hover:bg-[#F3E8DF] border-2 border-[#C85A3F] text-[#C85A3F] hover:text-[#A94332] font-extrabold py-3.5 px-4 rounded-xl text-xs transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                       >
-                        <DollarSign className="w-4 h-4" />
-                        <span>Settle Bill Online</span>
+                        <Receipt className="w-4 h-4" />
+                        <span>{isSubmittingRequest ? 'Requesting Bill...' : 'Request Bill & Pay'}</span>
                       </button>
-                    </div>
-                  )
-                ) : (
-                  <button
-                    type="button"
-                    disabled={isSubmittingRequest}
-                    onClick={handleRequestBill}
-                    className="w-full bg-white hover:bg-[#F3E8DF] border-2 border-[#C85A3F] text-[#C85A3F] hover:text-[#A94332] font-extrabold py-3.5 px-4 rounded-xl text-xs transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    <Receipt className="w-4 h-4" />
-                    <span>{isSubmittingRequest ? 'Requesting Bill...' : 'Request Bill'}</span>
-                  </button>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -1671,78 +1781,26 @@ export const OrderTracking: React.FC = () => {
         </div>
       )}
 
-      {/* 6. SIMULATED BILL SETTLEMENT MODAL */}
-      {isPaymentModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
-          <div className="bg-white border border-[#E5DCD5] rounded-3xl p-6 max-w-md w-full shadow-xl space-y-5 text-left">
-            <div className="flex items-center justify-between pb-2 border-b border-[#E5DCD5]">
-              <div className="flex items-center space-x-2">
-                <DollarSign className="w-4 h-4 text-[#C85A3F]" />
-                <h3 className="text-base font-extrabold text-[#202124]">Settle Bill</h3>
-              </div>
-              <button
-                onClick={() => setIsPaymentModalOpen(false)}
-                className="text-[#756B64] hover:text-[#202124] font-bold text-xs p-1"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="bg-[#FCFAF7] border border-[#E5DCD5] p-4 rounded-xl space-y-1">
-              <div className="flex justify-between items-baseline">
-                <span className="text-xs font-semibold text-[#756B64]">Total Payable Amount</span>
-                <span className="text-xl font-black text-[#C85A3F] font-mono">{formatPrice(orderTotal)}</span>
-              </div>
-              <p className="text-[10px] text-[#756B64] pt-1 border-t border-[#E5DCD5]/60">
-                Select your simulated payment method below to complete the order.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-[11px] font-extrabold uppercase tracking-wider text-[#756B64] block">
-                Payment Method
-              </label>
-              <div className="grid grid-cols-3 gap-2.5">
-                {[
-                  { id: 'UPI', label: 'UPI QR' },
-                  { id: 'Card', label: 'Credit Card' },
-                  { id: 'Wallet', label: 'E-Wallet' }
-                ].map(opt => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setSelectedPaymentMethod(opt.id)}
-                    disabled={isProcessingPayment}
-                    className={`p-3 rounded-xl border flex flex-col items-center justify-center font-bold text-center gap-1.5 transition-all cursor-pointer ${
-                      selectedPaymentMethod === opt.id
-                        ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F] shadow-xs'
-                        : 'bg-white border-[#E5DCD5] text-[#756B64] hover:bg-[#FCFAF7]'
-                    }`}
-                  >
-                    <DollarSign className="w-4 h-4 text-[#2E8B57]" />
-                    <span className="text-xs">{opt.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {isProcessingPayment && (
-              <div className="p-3 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl flex items-center justify-center space-x-2.5">
-                <RefreshCw className="w-4 h-4 text-[#C85A3F] animate-spin" />
-                <span className="text-xs text-[#756B64] font-semibold">Contacting payment clearance gateway...</span>
-              </div>
-            )}
-
-            <button
-              type="button"
-              disabled={isProcessingPayment || !selectedPaymentMethod}
-              onClick={handleProcessPayment}
-              className="w-full bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold py-3.5 px-4 rounded-xl text-xs shadow-md shadow-[#C85A3F]/20 transition-all cursor-pointer disabled:opacity-50"
-            >
-              Confirm Payment & Finish
-            </button>
-          </div>
-        </div>
+      {/* 6. CANONICAL AUTHORITATIVE BILL & PAYMENT MODAL */}
+      {isCanonicalBillModalOpen && (order?.tenantId || resolvedTenantId || tenantId) && (
+        <CanonicalBillModal
+          isOpen={isCanonicalBillModalOpen}
+          onClose={() => setIsCanonicalBillModalOpen(false)}
+          tenantId={order?.tenantId || resolvedTenantId || tenantId}
+          orderId={orderId || order?.orderId}
+          initialBill={canonicalBill}
+          mode="customer"
+          restaurantName={restaurantName}
+          restaurantLogo={restaurantImage}
+          onPaymentSettled={(settledBill) => {
+            setCanonicalBill(settledBill);
+            setPaymentCompleted(true);
+          }}
+          onOpenReceipt={() => {
+            setIsCanonicalBillModalOpen(false);
+            navigate(`?view=receipt`);
+          }}
+        />
       )}
 
       {/* 7. CANCEL REQUEST CONFIRMATION MODAL */}

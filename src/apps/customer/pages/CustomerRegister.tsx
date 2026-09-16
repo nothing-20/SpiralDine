@@ -45,7 +45,7 @@ export const CustomerRegister: React.FC = () => {
     setErrorText(null);
     try {
       await authService.signUpCustomer(data.email, data.password, data.fullName, data.phoneNumber);
-      toast.success('Account created successfully! Welcome to RestaurantOS.');
+      toast.success('Account created successfully! Welcome to Spiral Dine.');
       navigate('/customer/restaurants');
     } catch (e: any) {
       console.error(e);
@@ -74,7 +74,7 @@ export const CustomerRegister: React.FC = () => {
             <UserPlus className="w-6 h-6 text-primary" />
           </div>
           <h1 className="text-xl font-display font-extrabold text-textPearl">Diner Registration</h1>
-          <p className="text-xs text-mutedAsh font-semibold">Join RestaurantOS to start ordering table-side dishes.</p>
+          <p className="text-xs text-mutedAsh font-semibold">Join Spiral Dine to start ordering table-side dishes.</p>
         </div>
 
         {errorText && (

@@ -188,11 +188,11 @@ export const CustomerLogin: React.FC = () => {
       <header className="w-full max-w-6xl mx-auto px-6 py-5 flex items-center justify-between relative z-20">
         <Link to="/" className="flex items-center space-x-3.5 group">
           <div className="w-10 h-10 bg-[#D65336] rounded-xl flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform">
-            <span className="text-white font-extrabold text-xl font-display leading-none">R</span>
+            <span className="text-white font-extrabold text-xl font-display leading-none">S</span>
           </div>
           <div>
             <span className="font-display font-extrabold text-xl tracking-tight text-[#17202A]">
-              Restaurant<span className="text-[#D65336]">OS</span>
+              Spiral <span className="text-[#D65336]">Dine</span>
             </span>
             <p className="text-[10px] font-semibold text-[#8A817A] hidden sm:block leading-none mt-0.5">
               Smart Dining. Smarter Business.
@@ -346,7 +346,7 @@ export const CustomerLogin: React.FC = () => {
           {/* Footer inside Card */}
           <div className="text-center mt-6 pt-5 border-t border-[#E9DED6] text-xs space-y-2.5">
             <p className="text-[#667085] font-medium">
-              New to RestaurantOS?{' '}
+              New to Spiral Dine?{' '}
               <Link to="/customer/register" className="text-[#D65336] hover:text-[#B9432D] font-bold hover:underline">
                 Register Customer Account
               </Link>
@@ -411,7 +411,7 @@ export const CustomerLogin: React.FC = () => {
       <footer className="w-full border-t border-[#E9DED6] bg-[#F7F0EA]/80 relative z-20">
         <div className="max-w-6xl mx-auto px-6 py-5 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-medium text-[#8A817A]">
           <div>
-            <span>&copy; {new Date().getFullYear()} RestaurantOS. All rights reserved.</span>
+            <span>&copy; {new Date().getFullYear()} Spiral Dine. All rights reserved.</span>
           </div>
           <div className="flex space-x-6">
             <a href="#" className="hover:text-[#17202A] transition-colors">Privacy Policy</a>

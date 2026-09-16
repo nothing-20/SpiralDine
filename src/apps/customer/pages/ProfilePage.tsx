@@ -409,7 +409,7 @@ export const ProfilePage: React.FC = () => {
                 <Wallet className="w-5 h-5" />
               </div>
               <div>
-                <span className="text-[9px] text-[#6B6B6B] font-extrabold uppercase block tracking-wider">RestaurantOS Pay Balance</span>
+                <span className="text-[9px] text-[#6B6B6B] font-extrabold uppercase block tracking-wider">Spiral Dine Pay Balance</span>
                 <span className="text-base font-extrabold text-[#242424]">{formatCurrency(walletBalance)}</span>
               </div>
             </div>

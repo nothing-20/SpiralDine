@@ -197,11 +197,11 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
             onClick={() => navigate('/customer/home')}
           >
             <div className="w-9 h-9 bg-[#C85A3F] rounded-xl flex items-center justify-center shadow-md shadow-[#C85A3F]/20">
-              <span className="text-white font-display font-extrabold text-xl">R</span>
+              <span className="text-white font-display font-extrabold text-xl">S</span>
             </div>
             <div>
               <h1 className="text-sm font-display font-extrabold text-[#202124] tracking-tight">
-                Restaurant<span className="text-[#C85A3F]">OS</span>
+                Spiral <span className="text-[#C85A3F]">Dine</span>
               </h1>
             </div>
           </div>

@@ -626,7 +626,7 @@ export const WaiterAssignedTablesPage: React.FC = () => {
           </head>
           <body>
             <div class="header">
-              <h2>RestaurantOS</h2>
+              <h2>Spiral Dine</h2>
               <p>Table: ${table.number} | Order: ${activeOrder.orderId.substring(0, 8)}</p>
               <p>Date: ${new Date(activeOrder.createdAt).toLocaleString()}</p>
             </div>

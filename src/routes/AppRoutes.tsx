@@ -38,6 +38,15 @@ const OwnerAnalytics = React.lazy(() => import('../apps/owner/pages/OwnerAnalyti
 const OwnerAutomationCenter = React.lazy(() => import('../apps/owner/pages/OwnerAutomationCenter'));
 const OwnerStrategyCenter = React.lazy(() => import('../apps/owner/pages/OwnerStrategyCenter'));
 const OwnerIntelligence = React.lazy(() => import('../apps/owner/pages/OwnerIntelligence'));
+const OwnerRestaurants = React.lazy(() => import('../apps/owner/pages/OwnerRestaurants'));
+const OwnerReservations = React.lazy(() => import('../apps/owner/pages/OwnerReservations'));
+const OwnerCustomers = React.lazy(() => import('../apps/owner/pages/OwnerCustomers'));
+const OwnerFeedback = React.lazy(() => import('../apps/owner/pages/OwnerFeedback'));
+const OwnerMarketing = React.lazy(() => import('../apps/owner/pages/OwnerMarketing'));
+const OwnerAlerts = React.lazy(() => import('../apps/owner/pages/OwnerAlerts'));
+const OwnerReports = React.lazy(() => import('../apps/owner/pages/OwnerReports'));
+const OwnerBranchTransfers = React.lazy(() => import('../apps/owner/pages/OwnerBranchTransfers'));
+const OwnerAuditLogs = React.lazy(() => import('../apps/owner/pages/OwnerAuditLogs'));
 
 // Kitchen
 const KitchenQueue = React.lazy(() => import('../apps/owner/kitchen/KitchenQueue'));
@@ -57,6 +66,7 @@ const WaiterItemHistoryPage = React.lazy(() => import('../apps/owner/waiter/Wait
 const WaiterPerformancePage = React.lazy(() => import('../apps/owner/waiter/WaiterPerformancePage'));
 const WaiterTimelinePage = React.lazy(() => import('../apps/owner/waiter/WaiterTimelinePage'));
 const WaiterShiftReportPage = React.lazy(() => import('../apps/owner/waiter/WaiterShiftReportPage'));
+const WaiterBillingPage = React.lazy(() => import('../apps/owner/waiter/WaiterBillingPage'));
 
 // Super Admin
 const SuperAdminOverview = React.lazy(() => import('../apps/super-admin/pages/SuperAdminOverview'));
@@ -287,6 +297,15 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/owner/strategy" element={<OwnerStrategyCenter />} />
                 <Route path="/owner/intelligence" element={<OwnerIntelligence />} />
                 <Route path="/owner/settings" element={<OwnerSettings />} />
+                <Route path="/owner/restaurants" element={<OwnerRestaurants />} />
+                <Route path="/owner/reservations" element={<OwnerReservations />} />
+                <Route path="/owner/customers" element={<OwnerCustomers />} />
+                <Route path="/owner/feedback" element={<OwnerFeedback />} />
+                <Route path="/owner/marketing" element={<OwnerMarketing />} />
+                <Route path="/owner/alerts" element={<OwnerAlerts />} />
+                <Route path="/owner/reports" element={<OwnerReports />} />
+                <Route path="/owner/branch-transfers" element={<OwnerBranchTransfers />} />
+                <Route path="/owner/audit-logs" element={<OwnerAuditLogs />} />
 
                 <Route path="/dashboard/owner" element={<OwnerOverview />} />
                 <Route path="/dashboard/owner/menu" element={<MenuManagement />} />
@@ -300,6 +319,15 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/dashboard/owner/strategy" element={<OwnerStrategyCenter />} />
                 <Route path="/dashboard/owner/intelligence" element={<OwnerIntelligence />} />
                 <Route path="/dashboard/owner/settings" element={<OwnerSettings />} />
+                <Route path="/dashboard/owner/restaurants" element={<OwnerRestaurants />} />
+                <Route path="/dashboard/owner/reservations" element={<OwnerReservations />} />
+                <Route path="/dashboard/owner/customers" element={<OwnerCustomers />} />
+                <Route path="/dashboard/owner/feedback" element={<OwnerFeedback />} />
+                <Route path="/dashboard/owner/marketing" element={<OwnerMarketing />} />
+                <Route path="/dashboard/owner/alerts" element={<OwnerAlerts />} />
+                <Route path="/dashboard/owner/reports" element={<OwnerReports />} />
+                <Route path="/dashboard/owner/branch-transfers" element={<OwnerBranchTransfers />} />
+                <Route path="/dashboard/owner/audit-logs" element={<OwnerAuditLogs />} />
               </Route>
               
               {/* Branch Manager Dashboard */}
@@ -338,6 +366,7 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/dashboard/waiter/performance" element={<WaiterPerformancePage />} />
                 <Route path="/dashboard/waiter/timeline" element={<WaiterTimelinePage />} />
                 <Route path="/dashboard/waiter/shift-report" element={<WaiterShiftReportPage />} />
+                <Route path="/dashboard/waiter/billing" element={<WaiterBillingPage />} />
               </Route>
 
               {/* Branch Admin/Logs Dashboards */}

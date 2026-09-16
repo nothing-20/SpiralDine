@@ -274,11 +274,11 @@ export const CustomerWelcome: React.FC = () => {
         </div>
         <div className="relative z-10 space-y-6">
           <div className="w-16 h-16 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-center mx-auto shadow-2xl relative">
-            <span className="text-primary font-display font-extrabold text-3xl animate-pulse">R</span>
+            <span className="text-primary font-display font-extrabold text-3xl animate-pulse">S</span>
             <div className="absolute inset-0 border-2 border-primary/20 border-t-primary rounded-2xl animate-spin" />
           </div>
           <div className="space-y-2">
-            <h2 className="text-sm font-display font-extrabold uppercase tracking-widest text-slate-500">RestaurantOS</h2>
+            <h2 className="text-sm font-display font-extrabold uppercase tracking-widest text-slate-500">Spiral Dine</h2>
             <p className="text-xs text-mutedAsh animate-pulse">Establishing secure dining gateway...</p>
           </div>
         </div>
@@ -462,13 +462,13 @@ export const CustomerWelcome: React.FC = () => {
               </div>
             ) : (
               <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
-                <span className="text-primary font-display font-extrabold text-3xl">R</span>
+                <span className="text-primary font-display font-extrabold text-3xl">S</span>
               </div>
             )}
             
             <div className="space-y-1">
               <h1 className="text-xl font-display font-extrabold text-textPearl">
-                {restaurant?.restaurantName || restaurant?.name || 'RestaurantOS'}
+                {restaurant?.restaurantName || restaurant?.name || 'Spiral Dine'}
               </h1>
               <p className="text-xs text-primary font-bold tracking-wider uppercase">
                 {restaurant?.cuisine || 'Gourmet Cuisine'}
@@ -548,7 +548,7 @@ export const CustomerWelcome: React.FC = () => {
 
       {/* Brand signature */}
       <footer className="w-full py-4 text-center text-[10px] text-slate-650 z-10 select-none">
-        <span>Powered by RestaurantOS Core v1.2</span>
+        <span>Powered by Spiral Dine Core v1.2</span>
       </footer>
 
       {/* About Info Modal overlay */}

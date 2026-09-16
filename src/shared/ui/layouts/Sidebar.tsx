@@ -27,7 +27,16 @@ import {
   Clock,
   SlidersHorizontal,
   PackageX,
-  Utensils
+  Utensils,
+  Building2,
+  CalendarCheck,
+  Contact2,
+  MessageSquareQuote,
+  Megaphone,
+  Bell,
+  FileSpreadsheet,
+  ArrowLeftRight,
+  ShieldCheck
 } from 'lucide-react';
 
 interface ISidebarLink {
@@ -58,6 +67,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
   const [activeWaiterAlertsCount, setActiveWaiterAlertsCount] = useState<number>(0);
   const [restaurantName, setRestaurantName] = useState<string>('Bawarchi Restaurant');
   const [restaurantCity, setRestaurantCity] = useState<string>('Hyderabad');
+  const [unreadAlertsCount, setUnreadAlertsCount] = useState<number>(0);
 
   useEffect(() => {
     if (!tenantId) return;
@@ -105,9 +115,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
     };
     fetchRestInfo();
 
+    // 4. Listen for unread alerts for owner
+    const qAlerts = query(
+      collection(db, 'restaurants', tenantId, 'alerts'),
+      where('read', '==', false)
+    );
+    const unsubAlerts = onSnapshot(qAlerts, (snap) => {
+      setUnreadAlertsCount(snap.size);
+    }, (err) => {
+      console.warn('Sidebar alerts count listener:', err);
+    });
+
     return () => {
       unsubOrders();
       unsubRequests();
+      unsubAlerts();
     };
   }, [tenantId]);
 
@@ -144,6 +166,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
         },
         { to: 'divider-waiter-1', label: '', icon: () => null },
         { to: '/dashboard/waiter/assigned-tables', label: 'My Assigned Tables', icon: QrCode },
+        { to: '/dashboard/waiter/billing', label: 'Billing', icon: DollarSign },
         { to: '/dashboard/waiter/order-history', label: 'Order History', icon: History },
         { to: '/dashboard/waiter/item-history', label: 'Item History', icon: ListOrdered },
         { to: '/dashboard/waiter/performance', label: 'Waiter Performance', icon: Sparkles },
@@ -175,6 +198,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
       if (featureFlags.strategy) {
         ownerLinks.push({ to: '/owner/strategy', label: 'Strategy', icon: Target });
       }
+
+      // ── New Owner Sections (Appended while strictly preserving existing order) ──
+      ownerLinks.push(
+        { to: 'divider-new-owner-sections', label: '', icon: () => null },
+        { to: '/owner/restaurants', label: 'Restaurants', icon: Building2 },
+        { to: '/owner/reservations', label: 'Reservations', icon: CalendarCheck },
+        { to: '/owner/customers', label: 'Customers', icon: Contact2 },
+        { to: '/owner/feedback', label: 'Feedback', icon: MessageSquareQuote },
+        { to: '/owner/marketing', label: 'Marketing', icon: Megaphone },
+        { to: '/owner/alerts', label: 'Alerts', icon: Bell, badge: unreadAlertsCount > 0 ? unreadAlertsCount : undefined },
+        { to: '/owner/reports', label: 'Reports', icon: FileSpreadsheet },
+        { to: '/owner/branch-transfers', label: 'Branch Transfers', icon: ArrowLeftRight },
+        { to: '/owner/audit-logs', label: 'Audit Logs', icon: ShieldCheck }
+      );
       
       return ownerLinks;
     }
@@ -217,7 +254,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
               </div>
               <div className="text-left">
                 <div className="flex items-center space-x-1.5 leading-none">
-                  <span className="font-serif text-[15px] font-bold tracking-tight text-white">RestaurantOS</span>
+                  <span className="font-serif text-[15px] font-bold tracking-tight text-white">Spiral Dine</span>
                   <span className="text-[9px] uppercase tracking-wider font-extrabold text-[#C84A38] bg-[#C84A38]/15 px-1.5 py-0.5 rounded">
                     {roleTitle}
                   </span>
@@ -346,7 +383,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
               </div>
               <div className="text-left">
                 <div className="flex items-center space-x-1.5 leading-none">
-                  <span className="font-serif text-[16px] font-bold tracking-tight text-white">RestaurantOS</span>
+                  <span className="font-serif text-[16px] font-bold tracking-tight text-white">Spiral Dine</span>
                   <span className="text-[9px] uppercase tracking-wider font-extrabold text-[#FBEAE5] bg-[#C9533B]/30 border border-[#C9533B]/40 px-1.5 py-0.5 rounded">
                     Owner
                   </span>
@@ -465,9 +502,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
       <div className="h-16 flex items-center px-6 border-b border-slate-800/40 justify-between">
         <div className="flex items-center space-x-2.5">
           <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center">
-            <span className="text-primary font-display font-extrabold text-lg">R</span>
+            <span className="text-primary font-display font-extrabold text-lg">S</span>
           </div>
-          <span className="font-display font-bold text-base text-textPearl">RestaurantOS</span>
+          <span className="font-display font-bold text-base text-textPearl">Spiral Dine</span>
         </div>
         {onClose && (
           <button 

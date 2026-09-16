@@ -577,7 +577,7 @@ export const OwnerTablesManager: React.FC = () => {
         </head>
         <body onload="window.print(); window.close();">
           <div class="card">
-            <div class="logo">RestaurantOS</div>
+            <div class="logo">Spiral Dine</div>
             <img class="qr-code" src="${qrUrl}" alt="QR code" />
             <div class="table-num">TABLE ${tbl.tableNumber}</div>
             <div>${tbl.tableName}</div>
@@ -613,7 +613,7 @@ export const OwnerTablesManager: React.FC = () => {
       ctx.fillStyle = '#f8fafc';
       ctx.font = 'bold 20px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('RESTAURANT OS', 200, 70);
+      ctx.fillText('SPIRAL DINE', 200, 70);
 
       ctx.fillStyle = '#64748b';
       ctx.font = '12px sans-serif';

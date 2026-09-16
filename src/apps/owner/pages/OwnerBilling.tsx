@@ -16,6 +16,8 @@ import { IOrder, IOrderItem, ITable, IPaymentBreakdown, TPaymentStatus, IShiftRe
 import { formatPrice, formatTimestamp, getElapsedMinutes } from '../../../utils/format';
 import { useCurrency } from '../../../context/CurrencyContext';
 import { logEvent } from '../../../services/eventEngine';
+import { billingService } from '../../../shared/services/billingService';
+import CanonicalBillModal from '../../../shared/ui/billing/CanonicalBillModal';
 
 // UI Kit components
 import Card from '../../../components/ui/Card/Card';
@@ -97,6 +99,10 @@ export const OwnerBilling: React.FC = () => {
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isInvoicePreviewOpen, setIsInvoicePreviewOpen] = useState(false);
   const [isRefundModalOpen, setIsRefundModalOpen] = useState(false);
+  
+  // Canonical Authoritative Bill Modal states
+  const [canonicalBillOrder, setCanonicalBillOrder] = useState<IOrder | null>(null);
+  const [isCanonicalBillOpen, setIsCanonicalBillOpen] = useState(false);
   
   // Refund Flow states
   const [refundTargetOrder, setRefundTargetOrder] = useState<IOrder | null>(null);
@@ -207,9 +213,72 @@ export const OwnerBilling: React.FC = () => {
     };
   }, [user]);
 
-  const billingQueueTables = useMemo(() => {
-    return tables.filter(t => t.status === 'bill_requested');
-  }, [tables]);
+  const pendingBillingQueue = useMemo(() => {
+    const queueList: Array<{
+      id: string;
+      tableNumber: string;
+      orderId: string;
+      order: IOrder;
+      waiterName: string;
+      elapsedMinutes: number;
+      reason: string;
+      total: number;
+    }> = [];
+
+    const processedOrderIds = new Set<string>();
+
+    // 1. Tables with status bill_requested
+    tables.filter(t => t.status === 'bill_requested').forEach(table => {
+      const activeOrder = orders.find(o => 
+        o.orderId === table.activeOrderId || 
+        o.orderId === table.currentOrderId || 
+        String(o.tableNumber) === String(table.number)
+      );
+      if (activeOrder) {
+        processedOrderIds.add(activeOrder.orderId);
+        const elapsed = table.billRequestedAt ? getElapsedMinutes(table.billRequestedAt) : getElapsedMinutes(activeOrder.createdAt);
+        queueList.push({
+          id: table.id || `tbl-${table.number}`,
+          tableNumber: String(table.number),
+          orderId: activeOrder.orderId,
+          order: activeOrder,
+          waiterName: table.assignedWaiterName || activeOrder.waiterName || 'Not Assigned',
+          elapsedMinutes: elapsed,
+          reason: 'Bill Requested',
+          total: activeOrder.total || 0
+        });
+      }
+    });
+
+    // 2. Orders with DINING_COMPLETED or BILL_REQUESTED that are unpaid
+    orders.forEach(o => {
+      if (processedOrderIds.has(o.orderId)) return;
+      if (o.status === 'CANCELLED' || o.status === 'COMPLETED') return;
+      const isPaid = (o.paymentStatus || '').toLowerCase() === 'paid';
+      if (isPaid) return;
+
+      const st = (o.status || '').toUpperCase();
+      if (st === 'DINING_COMPLETED' || st === 'BILL_REQUESTED' || o.billRequestedAt) {
+        processedOrderIds.add(o.orderId);
+        const elapsed = o.diningCompletedAt 
+          ? getElapsedMinutes(o.diningCompletedAt) 
+          : (o.billRequestedAt ? getElapsedMinutes(o.billRequestedAt) : getElapsedMinutes(o.createdAt));
+        const matchedTable = tables.find(t => String(t.number) === String(o.tableNumber));
+        queueList.push({
+          id: matchedTable?.id || `ord-${o.orderId}`,
+          tableNumber: String(o.tableNumber || 'Walk-in'),
+          orderId: o.orderId,
+          order: o,
+          waiterName: matchedTable?.assignedWaiterName || o.waiterName || 'Not Assigned',
+          elapsedMinutes: elapsed,
+          reason: st === 'DINING_COMPLETED' ? 'Dining Completed' : 'Bill Requested',
+          total: o.total || 0
+        });
+      }
+    });
+
+    return queueList;
+  }, [tables, orders]);
 
   const openBillsOrders = useMemo(() => {
     return orders.filter(o => 
@@ -307,13 +376,13 @@ export const OwnerBilling: React.FC = () => {
       tax: todayTax,
       discount: todayDiscount,
       avgBill: avgValue,
-      queueCount: billingQueueTables.length + heldBillsOrders.length,
+      queueCount: pendingBillingQueue.length + heldBillsOrders.length,
       paidCount: todayPaidOrders.length
     };
-  }, [orders, billingQueueTables, heldBillsOrders]);
+  }, [orders, pendingBillingQueue, heldBillsOrders]);
 
   const tabsList = [
-    { id: 'billing_queue', label: `Queue (${billingQueueTables.length + heldBillsOrders.length})`, icon: Clock },
+    { id: 'billing_queue', label: `Queue (${pendingBillingQueue.length + heldBillsOrders.length})`, icon: Clock },
     { id: 'open_bills', label: 'Open Bills', icon: Sparkles },
     { id: 'paid_bills', label: 'Paid Bills', icon: CheckCircle },
     { id: 'refunds', label: 'Refunds', icon: RefreshCcw },
@@ -920,6 +989,21 @@ export const OwnerBilling: React.FC = () => {
         description: `Grand total of ${formatVal(roundedTotal)} settled for Table ${selectedOrder.tableNumber}. Invoice ${invoiceNo} generated.`
       });
 
+      // Synchronize with canonical bill for real-time customer and waiter updates
+      try {
+        await billingService.settleBillPayment(user.tenantId, selectedOrder.orderId, {
+          method: (paymentMode as any) || 'cash',
+          breakdown: paymentBreakdown,
+          processedBy: user.uid,
+          processedByName: user.displayName || user.email || 'Reception / Owner',
+          processedByRole: 'owner',
+          invoiceNumber: invoiceNo,
+          roundOff: roundOffAmount
+        });
+      } catch (billErr) {
+        console.warn('[OwnerBilling] Canonical bill settlement sync warning:', billErr);
+      }
+
       toast.success('Invoice settled and table closed!', { icon: '💰' });
       setIsCheckoutOpen(false);
       
@@ -1107,40 +1191,41 @@ export const OwnerBilling: React.FC = () => {
             <div className="space-y-6">
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
-                  <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Active Waiter Requests</h2>
-                  <Badge variant={billingQueueTables.length > 0 ? 'warning' : 'muted'}>
-                    {billingQueueTables.length} Tables Waiting
+                  <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Pending Bills & Requests</h2>
+                  <Badge variant={pendingBillingQueue.length > 0 ? 'warning' : 'muted'}>
+                    {pendingBillingQueue.length} Bills Waiting
                   </Badge>
                 </div>
 
-                {billingQueueTables.length === 0 ? (
+                {pendingBillingQueue.length === 0 ? (
                   <Card className="p-8 text-center border-dashed border-slate-850 bg-slate-900/10">
-                    <p className="text-xs text-slate-500">No active waiter requests right now.</p>
+                    <p className="text-xs text-slate-500">No pending bills or dining completion requests right now.</p>
                   </Card>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {billingQueueTables.map((table) => {
-                      const activeOrder = orders.find(o => o.orderId === table.activeOrderId || o.orderId === table.currentOrderId);
-                      const elapsed = table.billRequestedAt ? getElapsedMinutes(table.billRequestedAt) : 0;
-                      
+                    {pendingBillingQueue.map((item) => {
                       return (
-                        <Card key={table.id} className="p-5 border-slate-800 bg-slate-900/35 hover:border-primary/40 transition-all flex flex-col justify-between h-48">
+                        <Card key={item.id} className="p-5 border-slate-800 bg-slate-900/35 hover:border-primary/40 transition-all flex flex-col justify-between h-52">
                           <div>
                             <div className="flex justify-between items-start">
-                              <span className="text-lg font-display font-extrabold text-textPearl">Table {table.number}</span>
-                              <Badge variant={elapsed > 10 ? 'danger' : 'warning'} className="animate-pulse">
-                                {elapsed === 0 ? 'Just now' : `${elapsed}m ago`}
+                              <span className="text-lg font-display font-extrabold text-textPearl">Table {item.tableNumber}</span>
+                              <Badge variant={item.elapsedMinutes > 10 ? 'danger' : 'warning'} className="animate-pulse">
+                                {item.reason} ({item.elapsedMinutes === 0 ? 'Just now' : `${item.elapsedMinutes}m ago`})
                               </Badge>
                             </div>
 
                             <div className="mt-3 space-y-1 text-xs text-slate-400 font-medium">
                               <div className="flex justify-between">
                                 <span>Order ID:</span>
-                                <span className="font-mono text-slate-350">#{activeOrder?.orderId.substring(0, 8) || '—'}</span>
+                                <span className="font-mono text-slate-350">#{item.order.orderId.substring(0, 8)}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Bill Total:</span>
+                                <span className="font-bold text-primary font-mono">{formatVal(item.total)}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span>Waiter:</span>
-                                <span className="font-semibold text-textPearl">{table.assignedWaiterName || 'Not Assigned'}</span>
+                                <span className="font-semibold text-textPearl">{item.waiterName}</span>
                               </div>
                             </div>
                           </div>
@@ -1149,9 +1234,7 @@ export const OwnerBilling: React.FC = () => {
                             <Button 
                               variant="secondary" 
                               size="sm" 
-                              onClick={() => {
-                                if (activeOrder) setViewingOrderDetails(activeOrder);
-                              }}
+                              onClick={() => setViewingOrderDetails(item.order)}
                               className="flex-1 text-xs font-semibold py-2 border-slate-800 bg-slate-950 text-slate-300"
                             >
                               <Eye className="w-3.5 h-3.5 mr-1" />
@@ -1161,22 +1244,12 @@ export const OwnerBilling: React.FC = () => {
                               variant="primary" 
                               size="sm" 
                               onClick={() => {
-                                if (activeOrder) {
-                                  setSelectedOrder(activeOrder);
-                                  setIsCheckoutOpen(true);
-                                  
-                                  setDiscountPercent(activeOrder.discountPercent || 0);
-                                  setDiscountFixed(0);
-                                  setDiscountType(activeOrder.discountType || 'percentage');
-                                  setPaymentMode('cash');
-                                  setCashAmount('');
-                                  setUpiAmount('');
-                                  setCardAmount('');
-                                  setWalletAmount('');
-                                }
+                                setCanonicalBillOrder(item.order);
+                                setIsCanonicalBillOpen(true);
                               }}
-                              className="flex-1 text-xs font-bold py-2"
+                              className="flex-1 text-xs font-bold py-2 bg-[#C85A3F] hover:bg-[#A94332]"
                             >
+                              <Receipt className="w-3.5 h-3.5 mr-1" />
                               Open Bill
                             </Button>
                           </div>
@@ -2333,7 +2406,7 @@ export const OwnerBilling: React.FC = () => {
                 </div>
               )}
 
-              <p className="text-[8px] text-slate-600 text-center font-semibold pt-2">Powered by RestaurantOS SaaS Suite v1.1. All transactions logged in auditing servers.</p>
+              <p className="text-[8px] text-slate-600 text-center font-semibold pt-2">Powered by Spiral Dine SaaS Suite v1.1. All transactions logged in auditing servers.</p>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-5 gap-2 pt-2">
@@ -2797,6 +2870,26 @@ export const OwnerBilling: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      {/* Canonical Authoritative Bill Modal for Owner / Reception Desk */}
+      {canonicalBillOrder && user?.tenantId && (
+        <CanonicalBillModal
+          isOpen={isCanonicalBillOpen}
+          onClose={() => {
+            setIsCanonicalBillOpen(false);
+            setCanonicalBillOrder(null);
+          }}
+          tenantId={user.tenantId}
+          orderId={canonicalBillOrder.orderId}
+          mode="owner"
+          restaurantName={(canonicalBillOrder as any).restaurantName || tenantSettings?.name || 'Restaurant'}
+          onPaymentSettled={() => {
+            setIsCanonicalBillOpen(false);
+            setCanonicalBillOrder(null);
+            toast.success('Bill settled successfully!', { icon: '💰' });
+          }}
+        />
+      )}
 
     </div>
   );

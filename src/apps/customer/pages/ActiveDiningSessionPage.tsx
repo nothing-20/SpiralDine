@@ -15,6 +15,7 @@ import {
   getActiveDiningSession, 
   IDiningSession 
 } from '../../../shared/utils/diningSession';
+import { isOrderActive } from '../../../shared/utils/orderUtils';
 import { formatPrice } from '../../../utils/format';
 import CustomerHeader from '../../../shared/ui/navigation/CustomerHeader';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner/LoadingSpinner';
@@ -122,7 +123,7 @@ export const ActiveDiningSessionPage: React.FC = () => {
       const list: any[] = [];
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
-        if (data.status !== 'ARCHIVED' && data.status !== 'CANCELLED') {
+        if (isOrderActive(data)) {
           // If sessionId is present on session, match it or match table orders within dining window
           if (
             !activeSession?.sessionId ||

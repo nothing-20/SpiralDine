@@ -20,6 +20,7 @@ import { formatPrice } from '../../../utils/format';
 import { getMenuItemPath } from '../../../firebase/collections';
 import { logEvent } from '../../../services/eventEngine';
 import { ActivityFeed } from '../../../components/ActivityFeed';
+import CanonicalBillModal from '../../../shared/ui/billing/CanonicalBillModal';
 
 // UI Kit
 import Card from '../../../components/ui/Card/Card';
@@ -2687,75 +2688,24 @@ export const WaiterMatrix: React.FC = () => {
       </Modal>
 
       {/* ─── Bill Invoice Checkout Modal ─── */}
-      <Modal
-        isOpen={selectedOrder !== null}
-        onClose={() => {
-          setSelectedOrder(null);
-          setDiscountPercent(0);
-        }}
-        title={selectedOrder ? `Bill Summary - Table ${selectedOrder.tableNumber}` : ''}
-      >
-        {selectedOrder && (
-          <div className="space-y-4 text-left">
-            <div className="space-y-2">
-              <span className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">Ordered Items</span>
-              <div className="text-xs divide-y divide-slate-855">
-                {selectedOrder.items.map((item, idx) => (
-                  <div key={idx} className="flex justify-between py-2 text-slate-350">
-                    <span>{item.name} x{item.count}</span>
-                    <span>{formatPrice(item.pricePerUnit * item.count)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Calculations detail */}
-            <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-xl space-y-2 text-xs">
-              <div className="flex justify-between text-slate-400">
-                <span>Subtotal</span>
-                <span>{formatPrice(selectedOrder.subtotal)}</span>
-              </div>
-              <div className="flex justify-between text-textPearl font-semibold text-sm pt-2 border-t border-slate-800/20">
-                <span>Total Amount (Estimated)</span>
-                <span>{formatPrice(selectedOrder.total || selectedOrder.subtotal)}</span>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-3 pt-2">
-              <Button
-                type="button"
-                variant="secondary"
-                className="flex-1"
-                onClick={() => setSelectedOrder(null)}
-                disabled={isUpdatingBill}
-              >
-                Cancel
-              </Button>
-              {(() => {
-                const isRequested = tables.find(t => t.number === selectedOrder.tableNumber)?.status === 'bill_requested';
-                return (
-                  <Button
-                    type="button"
-                    className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-slate-955 flex items-center justify-center space-x-1.5"
-                    onClick={async () => {
-                      const tObj = tables.find(t => t.number === selectedOrder.tableNumber);
-                      if (tObj) {
-                        await handleRequestBill(tObj);
-                        setSelectedOrder(null);
-                      }
-                    }}
-                    disabled={isRequested}
-                  >
-                    <DollarSign className="w-4 h-4" />
-                    <span>{isRequested ? 'Bill Requested' : 'Request Bill from Owner'}</span>
-                  </Button>
-                );
-              })()}
-            </div>
-          </div>
-        )}
-
-      </Modal>
+      {/* ─── Canonical Authoritative Bill Modal ─── */}
+      {selectedOrder && (
+        <CanonicalBillModal
+          isOpen={selectedOrder !== null}
+          onClose={() => {
+            setSelectedOrder(null);
+            setDiscountPercent(0);
+          }}
+          tenantId={user?.tenantId || ''}
+          orderId={selectedOrder.orderId}
+          mode="waiter"
+          restaurantName={(selectedOrder as any).restaurantName || 'Restaurant'}
+          onPaymentSettled={() => {
+            setSelectedOrder(null);
+            setDiscountPercent(0);
+          }}
+        />
+      )}
 
       {/* ─── Diner Satisfaction Rating Modal ─── */}
       <Modal

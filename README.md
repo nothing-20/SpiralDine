@@ -1,12 +1,12 @@
-# RestaurantOS: Production-Grade Multi-Tenant Restaurant SaaS Platform (Core v1.0.0)
+# Spiral Dine: Production-Grade Multi-Tenant Restaurant SaaS Platform (Core v1.0.0)
 
-RestaurantOS is a modern, stable, multi-tenant B2B/B2C SaaS suite built with React 18, TypeScript, Vite, Tailwind CSS, and Firebase. It provides a complete commercial operating system for high-performance dining establishments, integrating diner portal menus, real-time kitchen queues, visual layouts, waiter dispatch command centers, POS cash drawers, refunds registers, and operational event engines.
+Spiral Dine is a modern, stable, multi-tenant B2B/B2C SaaS suite built with React 18, TypeScript, Vite, Tailwind CSS, and Firebase. It provides a complete commercial operating system for high-performance dining establishments, integrating diner portal menus, real-time kitchen queues, visual layouts, waiter dispatch command centers, POS cash drawers, refunds registers, and operational event engines.
 
 ---
 
 ## 1. Project Overview & Architecture
 
-RestaurantOS utilizes a decentralized, multi-tenant cloud structure where all transactions are strictly scoped by `tenantId` (Restaurant ID).
+Spiral Dine utilizes a decentralized, multi-tenant cloud structure where all transactions are strictly scoped by `tenantId` (Restaurant ID).
 
 ```mermaid
 graph TD

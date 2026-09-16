@@ -40,14 +40,11 @@ export const PaymentPage: React.FC = () => {
     setIsProcessing(true);
     setTimeout(async () => {
       try {
-        // 1. If orderId is available, update order status to Paid
+        // Route to the canonical bill on OrderTracking where authentic UPI QR and staff verification takes place
         if (orderId && tenantId) {
-          const orderRef = doc(db, 'restaurants', tenantId, 'orders', orderId);
-          await updateDoc(orderRef, {
-            paymentStatus: 'paid',
-            paidAt: new Date().toISOString(),
-            status: 'COMPLETED'
-          });
+          toast.success('Opening your canonical order bill...');
+          navigate(`/customer/restaurant/${tenantId}/order/${orderId}`);
+          return;
         }
 
         // 2. If tableId is available, release the physical table

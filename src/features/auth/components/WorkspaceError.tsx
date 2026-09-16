@@ -130,10 +130,10 @@ export const WorkspaceError: React.FC = () => {
         {/* Branding header */}
         <div className="flex flex-col items-center text-center space-y-3">
           <div className="w-12 h-12 bg-primary/10 border border-primary/20 rounded-2xl flex items-center justify-center shadow-lg shadow-primary/5">
-            <span className="text-primary font-display font-extrabold text-2xl">R</span>
+            <span className="text-primary font-display font-extrabold text-2xl">S</span>
           </div>
           <div className="space-y-0.5">
-            <h1 className="text-sm font-display font-extrabold text-slate-500 tracking-wider uppercase">RestaurantOS</h1>
+            <h1 className="text-sm font-display font-extrabold text-slate-500 tracking-wider uppercase">Spiral Dine</h1>
             <span className="text-xs font-semibold text-slate-400">Workspace Verification Error</span>
           </div>
         </div>

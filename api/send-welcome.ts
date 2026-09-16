@@ -17,7 +17,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const templateHtml = getWelcomeTemplate({ fullName, restaurantName });
     const emailRes = await sendMailWithLogging({
       to: email.trim(),
-      subject: 'Welcome to RestaurantOS!',
+      subject: 'Welcome to Spiral Dine!',
       html: templateHtml,
       tenantId: tenantId,
       type: 'welcome_email',
