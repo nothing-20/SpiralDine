@@ -760,6 +760,10 @@ export const MenuManagement: React.FC = () => {
   };
 
   const seedSampleItems = async () => {
+    if (!import.meta.env.DEV) {
+      toast.error('Sample menu seeding is strictly disabled in production.');
+      return;
+    }
     if (!user?.tenantId) return;
     setIsSeeding(true);
     try {
@@ -1306,7 +1310,7 @@ export const MenuManagement: React.FC = () => {
           { id: 'availability', label: 'Availability', icon: Grid },
           { id: 'pricing', label: 'Pricing', icon: DollarSign },
           { id: 'preview', label: 'Menu Preview', icon: Eye },
-          { id: 'tests', label: 'Auto-Tests', icon: Sparkles }
+          ...(import.meta.env.DEV ? [{ id: 'tests', label: 'Auto-Tests (Dev Only)', icon: Sparkles }] : [])
         ].map((tab) => {
           const Icon = tab.icon;
           return (

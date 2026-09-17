@@ -9,6 +9,7 @@ import {
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { ICustomerProfile, IOrder } from '../../../types';
+import { useCurrency } from '../../../context/CurrencyContext';
 
 // UI Kit components
 import Card from '../../../components/ui/Card/Card';
@@ -62,6 +63,7 @@ type TCustomerSegment = 'all' | 'new' | 'returning' | 'frequent' | 'inactive';
 
 export const OwnerCustomers: React.FC = () => {
   const { user } = useAuth();
+  const { formatPrice } = useCurrency();
   const tenantId = user?.tenantId;
 
   const [customers, setCustomers] = useState<ICustomerAggregated[]>([]);
@@ -95,7 +97,7 @@ export const OwnerCustomers: React.FC = () => {
             if (key) {
               customerMap.set(key, {
                 id: d.id,
-                name: data.fullName || data.displayName || 'Guest Diner',
+                name: data.fullName || data.displayName || 'Customer',
                 phone: phone,
                 email: email,
                 loyaltyPoints: data.loyaltyPoints || data.walletBalance || 0,
@@ -114,16 +116,32 @@ export const OwnerCustomers: React.FC = () => {
           const ordersSnap = await getDocs(query(collection(db, 'restaurants', targetTenant, 'orders'), limit(300)));
           ordersSnap.forEach((docSnap) => {
             const order = { id: docSnap.id, ...docSnap.data() } as any;
-            const key = order.customerId || order.phone || order.customerPhone || order.customerName;
+
+            // Strictly skip any seed or mock orders
+            if (docSnap.id.startsWith('ORD-SEED') || (order.orderId && order.orderId.startsWith('ORD-SEED'))) {
+              return;
+            }
+
+            const rawName = (order.customerName || '').trim();
+            const lowerName = rawName.toLowerCase();
+
+            // Do not create artificial customer CRM entities from anonymous table placeholders
+            const isAnonymousPlaceholder = !order.customerId && !order.phone && !order.customerPhone && (
+              !rawName || 
+              ['guest diner', 'guest', 'walk-in guest', 'walk-in', 'diner guest'].includes(lowerName)
+            );
+            if (isAnonymousPlaceholder) return;
+
+            const key = order.customerId || order.phone || order.customerPhone || rawName;
             if (!key) return;
 
             let existing = customerMap.get(key);
             if (!existing) {
               existing = {
                 id: key,
-                name: order.customerName || 'Walk-in Guest',
+                name: rawName || 'Customer',
                 phone: order.phone || order.customerPhone || '',
-                email: '',
+                email: order.email || '',
                 loyaltyPoints: 0,
                 orderCount: 0,
                 totalSpend: 0,
@@ -135,7 +153,7 @@ export const OwnerCustomers: React.FC = () => {
             }
 
             const rawTotal = Number(order.total || 0);
-            const total = rawTotal > 1000 ? Math.round(rawTotal / 100) : rawTotal; // convert cents if applicable
+            const total = rawTotal > 1000 ? Math.round(rawTotal / 100) : rawTotal;
             existing.totalSpend = (existing.totalSpend || 0) + total;
             existing.orderCount = (existing.orderCount || 0) + 1;
             existing.orders?.push(order);
@@ -181,21 +199,30 @@ export const OwnerCustomers: React.FC = () => {
           });
         } catch (_) {}
 
+        // Filter only authentic diners who have real history with this restaurant
+        const tenantDiners = Array.from(customerMap.values()).filter((c) => {
+          const hasOrders = (c.orderCount || 0) > 0;
+          const hasReservations = (c.reservations && c.reservations.length > 0);
+          const hasFeedback = (c.feedback && c.feedback.length > 0);
+          return hasOrders || hasReservations || hasFeedback;
+        });
+
         // Now compute derived metrics and segments
         const nowMs = Date.now();
         const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
 
-        const aggregated: ICustomerAggregated[] = Array.from(customerMap.values()).map((c) => {
-          const visits = c.orderCount || (c.reservations?.length || 1);
+        const aggregated: ICustomerAggregated[] = tenantDiners.map((c) => {
+          const visits = c.orderCount || 0;
           const spend = c.totalSpend || 0;
           const aov = visits > 0 ? Math.round(spend / visits) : 0;
 
-          // Compute top ordered items
+          // Compute top ordered items from actual order history
           const itemCounts: Record<string, number> = {};
           c.orders?.forEach((o) => {
             o.items?.forEach((item: any) => {
-              if (item.name) {
-                itemCounts[item.name] = (itemCounts[item.name] || 0) + (item.count || 1);
+              const name = item.name || item.itemName;
+              if (name) {
+                itemCounts[name] = (itemCounts[name] || 0) + (item.count || item.quantity || 1);
               }
             });
           });
@@ -204,7 +231,7 @@ export const OwnerCustomers: React.FC = () => {
             .map(([name]) => name)
             .slice(0, 3);
 
-          // Determine customer segment
+          // Determine customer segment based on authentic frequency
           const lastVisitMs = c.lastVisit ? new Date(c.lastVisit).getTime() : 0;
           const isInactive = lastVisitMs > 0 && nowMs - lastVisitMs > thirtyDaysMs;
 
@@ -221,16 +248,16 @@ export const OwnerCustomers: React.FC = () => {
 
           return {
             id: c.id || `CUST-${Math.random().toString(36).substr(2, 6)}`,
-            name: c.name || 'Diner Guest',
+            name: c.name || 'Customer',
             phone: c.phone || '',
             email: c.email || '',
             totalVisits: visits,
             totalSpend: spend,
             averageOrderValue: aov,
-            lastVisit: c.lastVisit ? new Date(c.lastVisit).toLocaleDateString() : 'Recent',
-            favoriteRestaurant: 'SpiralDine Bistro - Main',
-            topItems: sortedItems.length > 0 ? sortedItems : ['Chef Special Biryani'],
-            loyaltyPoints: c.loyaltyPoints || Math.round(spend * 0.1),
+            lastVisit: c.lastVisit ? new Date(c.lastVisit).toLocaleDateString() : '—',
+            favoriteRestaurant: '',
+            topItems: sortedItems,
+            loyaltyPoints: c.loyaltyPoints || 0,
             segment,
             orders: c.orders || [],
             reservations: c.reservations || [],
@@ -346,7 +373,7 @@ export const OwnerCustomers: React.FC = () => {
           </div>
           <div>
             <p className="text-[11px] font-semibold text-[#6B7280] uppercase">Average Lifetime Spend</p>
-            <p className="text-xl font-bold font-serif text-[#17202A]">${metrics.avgSpend}</p>
+            <p className="text-xl font-bold font-serif text-[#17202A]">{formatPrice(metrics.avgSpend)}</p>
           </div>
         </div>
 
@@ -455,11 +482,11 @@ export const OwnerCustomers: React.FC = () => {
                     </td>
 
                     <td className="py-3.5 px-4 font-serif font-bold text-[#16845B]">
-                      ${cust.totalSpend}
+                      {formatPrice(cust.totalSpend)}
                     </td>
 
                     <td className="py-3.5 px-4 font-semibold text-[#6B7280]">
-                      ${cust.averageOrderValue}
+                      {formatPrice(cust.averageOrderValue)}
                     </td>
 
                     <td className="py-3.5 px-4 text-[#6B7280]">

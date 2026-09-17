@@ -76,6 +76,10 @@ export const SuperAdminOverview: React.FC = () => {
   const [isSeeding, setIsSeeding] = useState(false);
 
   const handleSeedData = async () => {
+    if (!import.meta.env.DEV) {
+      toast.error('Database seeding is strictly disabled in production.');
+      return;
+    }
     if (!seedingTenantId.trim()) {
       toast.error('Please enter a target Tenant ID to seed.');
       return;
@@ -267,29 +271,31 @@ export const SuperAdminOverview: React.FC = () => {
           </div>
 
           {/* Seeding utility */}
-          <Card className="p-5 border-slate-850 bg-slate-900/40 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h3 className="font-display font-bold text-sm text-textPearl text-left">Workspace Database Seeding</h3>
-              <p className="text-[10px] text-slate-500 text-left">Insert 20 menu items, 8 tables, 5 employees, active orders, and safety inventory levels.</p>
-            </div>
-            <div className="flex items-center space-x-2 shrink-0 self-start md:self-center">
-              <input 
-                type="text"
-                placeholder="E.g. test-restaurant"
-                value={seedingTenantId}
-                onChange={(e) => setSeedingTenantId(e.target.value)}
-                className="px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-xl text-xs text-textPearl placeholder-slate-650 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary w-44"
-              />
-              <Button 
-                size="sm"
-                isLoading={isSeeding}
-                onClick={handleSeedData}
-                className="text-xs px-4"
-              >
-                Seed Tenant
-              </Button>
-            </div>
-          </Card>
+          {import.meta.env.DEV && (
+            <Card className="p-5 border-slate-850 bg-slate-900/40 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h3 className="font-display font-bold text-sm text-textPearl text-left">Workspace Database Seeding</h3>
+                <p className="text-[10px] text-slate-500 text-left">Insert 20 menu items, 8 tables, 5 employees, active orders, and safety inventory levels.</p>
+              </div>
+              <div className="flex items-center space-x-2 shrink-0 self-start md:self-center">
+                <input 
+                  type="text" 
+                  placeholder="E.g. test-restaurant" 
+                  value={seedingTenantId} 
+                  onChange={(e) => setSeedingTenantId(e.target.value)} 
+                  className="px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-xl text-xs text-textPearl placeholder-slate-650 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary w-44" 
+                />
+                <Button 
+                  size="sm" 
+                  isLoading={isSeeding} 
+                  onClick={handleSeedData} 
+                  className="text-xs px-4"
+                >
+                  Seed Tenant
+                </Button>
+              </div>
+            </Card>
+          )}
 
           {/* Aggregate health details */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

@@ -65,7 +65,7 @@ export const WaiterPerformancePage: React.FC = () => {
       : '—';
 
     const tablesManaged = new Set(waiterOrders.map(o => o.tableNumber)).size;
-    const tipsEarned = waiterOrders.length * 350; // Mock $3.50 tips avg
+    const tipsEarned = waiterOrders.reduce((sum, o) => sum + Number((o as any).tip || (o as any).tipAmount || 0), 0);
     const upsellValue = waiterOrders.reduce((sum, o) => {
       const upsellItems = o.items?.filter((it: any) => 
         ['Dessert', 'Desserts', 'Coffee', 'Tea', 'Cold Drinks', 'Soft Drinks', 'Beverages'].includes(it.category)
@@ -84,8 +84,15 @@ export const WaiterPerformancePage: React.FC = () => {
     // Service Efficiency Rating
     const efficiencyScore = Math.min(100, Math.max(40, 100 - (lateDeliveries * 8) - (complaints * 12) + (resolvedAlerts.length * 2.5)));
 
-    // Mock repeat customer satisfaction
-    const repeatCustomerSatis = Math.round(waiterOrders.length * 0.25);
+    // Authentic repeat diner count from customer records
+    const dinerOrderCounts = new Map<string, number>();
+    waiterOrders.forEach(o => {
+      const name = (o.customerName || '').trim();
+      if (name && !['guest diner', 'walk-in guest', 'guest'].includes(name.toLowerCase())) {
+        dinerOrderCounts.set(name, (dinerOrderCounts.get(name) || 0) + 1);
+      }
+    });
+    const repeatCustomerSatis = Array.from(dinerOrderCounts.values()).filter(c => c > 1).length;
 
     return {
       ordersServed: deliveredOrders.length,
@@ -105,6 +112,30 @@ export const WaiterPerformancePage: React.FC = () => {
     };
   }, [orders, waiterRequests, user]);
 
+  // Compute authentic weekly productivity trends from real waiter orders
+  const weeklyTrends = useMemo(() => {
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const counts = [0, 0, 0, 0, 0, 0, 0];
+    
+    (metrics.waiterOrders || []).forEach((o: any) => {
+      const dateStr = o.createdAt || o.completedAt || o.updatedAt;
+      if (dateStr) {
+        const d = new Date(dateStr);
+        if (!isNaN(d.getTime())) {
+          counts[d.getDay()]++;
+        }
+      }
+    });
+
+    const maxCount = Math.max(...counts, 1);
+    const orderedIndices = [1, 2, 3, 4, 5, 6, 0]; // Mon to Sun
+    return orderedIndices.map(dayIdx => ({
+      day: dayNames[dayIdx],
+      count: counts[dayIdx],
+      value: counts[dayIdx] > 0 ? Math.round((counts[dayIdx] / maxCount) * 100) : 6
+    }));
+  }, [metrics.waiterOrders]);
+
   if (isLoading) {
     return (
       <div className="h-96 flex items-center justify-center">
@@ -112,17 +143,6 @@ export const WaiterPerformancePage: React.FC = () => {
       </div>
     );
   }
-
-  // Weekdays mock chart percentages
-  const weeklyTrends = [
-    { day: 'Mon', value: 60 },
-    { day: 'Tue', value: 45 },
-    { day: 'Wed', value: 80 },
-    { day: 'Thu', value: 75 },
-    { day: 'Fri', value: 95 },
-    { day: 'Sat', value: 100 },
-    { day: 'Sun', value: 90 }
-  ];
 
   return (
     <div className="space-y-6 text-left select-none pb-24">

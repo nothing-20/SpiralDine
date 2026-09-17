@@ -110,6 +110,10 @@ export const OwnerSettings: React.FC = () => {
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
 
   const handleResetDemoData = async () => {
+    if (!import.meta.env.DEV) {
+      toast.error('Demo database reset is strictly disabled in production.');
+      return;
+    }
     const targetTenantId = resolvedTenantId || user?.tenantId;
     if (!targetTenantId) {
       toast.error('Could not resolve tenant workspace.');
@@ -666,7 +670,7 @@ export const OwnerSettings: React.FC = () => {
     { id: 'business', label: 'Business Settings', icon: Sliders },
     { id: 'tax', label: 'Tax & Compliance', icon: FileText },
     { id: 'qr', label: 'QR & Seating', icon: ShieldCheck },
-    { id: 'demo', label: 'Demo Mode', icon: Database }
+    ...(import.meta.env.DEV ? [{ id: 'demo', label: 'Demo Mode (Dev Only)', icon: Database }] : [])
   ];
 
   return (

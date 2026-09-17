@@ -75,30 +75,11 @@ function formatDisplayDate(dateStr: string): string {
   }
 }
 
-const REST_FALLBACK_CONFIGS: Record<string, { 
-  supportsSeatPreference: boolean; 
-  supportedSeatZones: string[]; 
-  availableTimeSlots: string[]; 
-  maxGuests: number;
-}> = {
-  'l-ambroisie': {
-    supportsSeatPreference: true,
-    supportedSeatZones: ['VIP Table', 'Window Seat', 'Private Dining Room', 'Corner Table'],
-    availableTimeSlots: ['12:00 PM', '1:30 PM', '7:00 PM', '8:30 PM', '9:30 PM'],
-    maxGuests: 8
-  },
-  'shuko': {
-    supportsSeatPreference: true,
-    supportedSeatZones: ['Corner Table', 'Near Live Music', 'VIP Table', 'Rooftop Bar'],
-    availableTimeSlots: ['6:00 PM', '7:30 PM', '9:00 PM', '10:30 PM'],
-    maxGuests: 4
-  },
-  'osteria': {
-    supportsSeatPreference: false,
-    supportedSeatZones: [],
-    availableTimeSlots: ['1:00 PM', '2:30 PM', '8:00 PM', '9:30 PM'],
-    maxGuests: 6
-  }
+const DEFAULT_BOOKING_CONFIG = {
+  supportsSeatPreference: false,
+  supportedSeatZones: [] as string[],
+  availableTimeSlots: ['12:00 PM', '1:00 PM', '7:00 PM', '8:00 PM', '9:00 PM'],
+  maxGuests: 8
 };
 
 export const TableBooking: React.FC = () => {
@@ -177,12 +158,7 @@ export const TableBooking: React.FC = () => {
         const rawArea = (typeof data.address === 'object' && data.address?.area) || data.area || '';
         const area = rawArea || extractAreaFromAddress(street, city);
 
-        const config = data.settings?.bookingConfig || REST_FALLBACK_CONFIGS[tenantId] || {
-          supportsSeatPreference: index % 2 === 0,
-          supportedSeatZones: ['VIP Table', 'Window Seat', 'Outdoor Terrace', 'Corner Table'],
-          availableTimeSlots: ['6:00 PM', '7:30 PM', '9:00 PM', '10:00 PM'],
-          maxGuests: 8
-        };
+        const config = data.settings?.bookingConfig || DEFAULT_BOOKING_CONFIG;
 
         const availableSlots = data.availableTimeSlots || data.settings?.availableTimeSlots || config.availableTimeSlots || ['6:00 PM', '7:30 PM', '9:00 PM', '10:00 PM'];
         const supportedZones = data.supportedSeatZones || config.supportedSeatZones || [];

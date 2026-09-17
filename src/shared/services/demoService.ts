@@ -180,6 +180,9 @@ export const demoService = {
    * Resets all tenant collections and seeds realistic demo data
    */
   seedDemoRestaurant: async (tenantId: string, presetKey: 'italian' | 'japanese'): Promise<{ success: boolean; message: string }> => {
+    if (!import.meta.env.DEV) {
+      throw new Error('Demo restaurant seeding is strictly disabled in production.');
+    }
     if (!tenantId) throw new Error('Tenant ID is required for demo seeding.');
     
     const preset = CUISINE_PRESETS[presetKey];

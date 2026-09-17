@@ -20,9 +20,9 @@ export const PaymentPage: React.FC = () => {
   const { user } = useAuth();
   const { formatPrice } = useCurrency();
   
-  const orderTotalVal = Number(searchParams.get('total')) || 10842; // in cents
+  const orderTotalVal = Number(searchParams.get('total')) || 0; // in cents
   const orderId = searchParams.get('orderId') || '';
-  const tenantId = searchParams.get('tenantId') || 'l-ambroisie';
+  const tenantId = searchParams.get('tenantId') || '';
   const tableId = searchParams.get('tableId') || '';
   
   const [splitCount, setSplitCount] = useState(1);
@@ -76,14 +76,16 @@ export const PaymentPage: React.FC = () => {
             targetCol = 'customers';
           }
 
-          await addDoc(collection(db, targetCol, user.uid, 'diningHistory'), {
-            restaurantId: tenantId,
-            restaurantName: 'Gourmet Bistro',
-            orderId: orderId || `ORD-MOCK-${Date.now().toString().substring(8)}`,
-            total: orderTotalVal,
-            date: new Date().toISOString(),
-            diners: splitCount
-          }).catch(err => console.warn('Failed to add dining history:', err));
+          if (orderId && tenantId) {
+            await addDoc(collection(db, targetCol, user.uid, 'diningHistory'), {
+              restaurantId: tenantId,
+              restaurantName: tenantId,
+              orderId: orderId,
+              total: orderTotalVal,
+              date: new Date().toISOString(),
+              diners: splitCount
+            }).catch(err => console.warn('Failed to add dining history:', err));
+          }
 
           const userDocRef = doc(db, targetCol, user.uid);
           const pointsEarned = Math.round(orderTotalVal / 100) || 50;

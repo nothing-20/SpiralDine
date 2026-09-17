@@ -4,6 +4,9 @@ import { getMenuItemPath, getMenuCategoryPath } from './collections';
 import toast from 'react-hot-toast';
 
 export const seedDatabase = async (tenantId: string): Promise<void> => {
+  if (!import.meta.env.DEV) {
+    throw new Error('Database seeding is strictly disabled in production.');
+  }
   if (!tenantId) throw new Error('Tenant ID is required for seeding.');
 
   // 1. Skip seeding if data already exists in the menu items collection
