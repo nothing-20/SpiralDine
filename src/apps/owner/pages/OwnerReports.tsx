@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { 
   collection, 
   getDocs, 
@@ -7,6 +8,8 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
+import { useWorkspace } from '../../../context/WorkspaceContext';
+import { restaurantService, IBranchItem } from '../../../shared/services/restaurantService';
 import { exportToCsv, exportToExcel, printReportPreview } from '../../../shared/utils/exportUtils';
 import { logAuditEvent } from '../../../shared/services/auditService';
 
@@ -38,7 +41,8 @@ import {
   XCircle, 
   Receipt,
   Building2,
-  RefreshCw
+  RefreshCw,
+  ShieldAlert
 } from 'lucide-react';
 
 export type TReportType = 
@@ -55,17 +59,33 @@ export type TReportType =
   | 'cancellations'
   | 'tax';
 
+interface IRestaurantEntry {
+  id: string;
+  name?: string;
+  restaurantName?: string;
+  city?: string;
+  address?: any;
+  planTier?: string;
+  status?: string;
+  phone?: string;
+  createdAt?: string;
+  branches?: IBranchItem[];
+}
+
 export const OwnerReports: React.FC = () => {
-  const { user } = useAuth();
-  const tenantId = user?.tenantId;
+  const { user, role } = useAuth();
+  const { workspace } = useWorkspace();
+  const [searchParams] = useSearchParams();
+
+  // Query parameter security validation
+  const urlParamTenant = searchParams.get('restaurantId') || searchParams.get('tenantId');
+  const [isAccessDenied, setIsAccessDenied] = useState<boolean>(false);
 
   // Selected Report Configuration
   const [selectedReport, setSelectedReport] = useState<TReportType>('sales');
   const [dateRangePreset, setDateRangePreset] = useState<'today' | 'yesterday' | '7days' | 'month' | 'last_month' | 'custom'>('month');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
-  const [selectedRestaurant, setSelectedRestaurant] = useState<string>('all');
-  const [selectedStatus, setSelectedStatus] = useState<string>('all');
 
   // Loaded Data Repositories
   const [orders, setOrders] = useState<any[]>([]);
@@ -73,72 +93,138 @@ export const OwnerReports: React.FC = () => {
   const [staffList, setStaffList] = useState<any[]>([]);
   const [reservations, setReservations] = useState<any[]>([]);
   const [feedbacks, setFeedbacks] = useState<any[]>([]);
-  const [restaurants, setRestaurants] = useState<any[]>([]);
+  const [authorizedRestaurants, setAuthorizedRestaurants] = useState<IRestaurantEntry[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // 1. Fetch raw data from Firestore
+  // 1. Fetch raw data strictly scoped by tenant authorization
   useEffect(() => {
     if (!user) return;
     setIsLoading(true);
-
-    const targetTenant = tenantId || 'default';
+    setIsAccessDenied(false);
 
     const loadAllReportData = async () => {
       try {
-        // Orders
-        const ordersSnap = await getDocs(collection(db, 'restaurants', targetTenant, 'orders'));
-        const ords: any[] = [];
-        ordersSnap.forEach(d => ords.push({ id: d.id, ...d.data() }));
-        setOrders(ords);
+        const isSuperAdmin = user.role === 'super-admin' || role === 'super-admin';
 
-        // Transactions (financial ledger)
-        try {
-          const transSnap = await getDocs(collection(db, 'restaurants', targetTenant, 'transactions'));
-          const trs: any[] = [];
-          transSnap.forEach(d => trs.push({ id: d.id, ...d.data() }));
-          setTransactions(trs);
-        } catch (_) {}
+        // Direct URL parameter tamper check
+        if (urlParamTenant && !isSuperAdmin) {
+          const isAuthorized = await restaurantService.isTenantAuthorized(user, urlParamTenant);
+          if (!isAuthorized) {
+            console.warn(`[OwnerReports] Blocked unauthorized access attempt to restaurant: ${urlParamTenant}`);
+            setIsAccessDenied(true);
+            setIsLoading(false);
+            return;
+          }
+        }
 
-        // Inventory
-        const invSnap = await getDocs(collection(db, 'restaurants', targetTenant, 'inventory'));
-        const invs: any[] = [];
-        invSnap.forEach(d => invs.push({ id: d.id, ...d.data() }));
-        setInventory(invs);
+        // Resolve canonical tenantId for current workspace
+        const targetTenant = urlParamTenant || user?.tenantId || workspace?.tenant?.id || '';
 
-        // Staff
-        const staffSnap = await getDocs(query(collection(db, 'employees'), where('tenantId', '==', targetTenant)));
-        const stfs: any[] = [];
-        staffSnap.forEach(d => stfs.push({ id: d.id, ...d.data() }));
-        setStaffList(stfs);
+        // A. Load Authorized Restaurants & Branches strictly isolated by ownership/tenant
+        const authRestaurants = await restaurantService.getAuthorizedRestaurants(user);
+        const enrichedRestaurants: IRestaurantEntry[] = await Promise.all(
+          authRestaurants.map(async (r) => {
+            const branches = await restaurantService.getAuthorizedBranches(r.id);
+            return {
+              ...r,
+              branches
+            };
+          })
+        );
+        setAuthorizedRestaurants(enrichedRestaurants);
 
-        // Reservations
-        const resSnap = await getDocs(collection(db, 'restaurants', targetTenant, 'reservations'));
-        const resList: any[] = [];
-        resSnap.forEach(d => resList.push({ id: d.id, ...d.data() }));
-        setReservations(resList);
+        // If no targetTenant could be determined and not super-admin, use the first authorized restaurant
+        const effectiveTenant = targetTenant || (enrichedRestaurants.length > 0 ? enrichedRestaurants[0].id : '');
 
-        // Feedback
-        const feedSnap = await getDocs(collection(db, 'restaurants', targetTenant, 'satisfactionRatings'));
-        const fds: any[] = [];
-        feedSnap.forEach(d => fds.push({ id: d.id, ...d.data() }));
-        setFeedbacks(fds);
+        if (!effectiveTenant && !isSuperAdmin) {
+          setOrders([]);
+          setInventory([]);
+          setStaffList([]);
+          setReservations([]);
+          setFeedbacks([]);
+          setTransactions([]);
+          setIsLoading(false);
+          return;
+        }
 
-        // Restaurants
-        const restSnap = await getDocs(collection(db, 'restaurants'));
-        const rList: any[] = [];
-        restSnap.forEach(d => rList.push({ id: d.id, ...d.data() }));
-        setRestaurants(rList);
+        // B. Tenant-scoped operational queries
+        if (effectiveTenant) {
+          // 1. Orders
+          try {
+            const ordersSnap = await getDocs(collection(db, 'restaurants', effectiveTenant, 'orders'));
+            const ords: any[] = [];
+            ordersSnap.forEach(d => ords.push({ id: d.id, ...d.data() }));
+            setOrders(ords);
+          } catch (e) {
+            console.warn('[OwnerReports] Note fetching orders:', e);
+            setOrders([]);
+          }
+
+          // 2. Transactions (financial ledger)
+          try {
+            const transSnap = await getDocs(collection(db, 'restaurants', effectiveTenant, 'transactions'));
+            const trs: any[] = [];
+            transSnap.forEach(d => trs.push({ id: d.id, ...d.data() }));
+            setTransactions(trs);
+          } catch (_) {
+            setTransactions([]);
+          }
+
+          // 3. Inventory
+          try {
+            const invSnap = await getDocs(collection(db, 'restaurants', effectiveTenant, 'inventory'));
+            const invs: any[] = [];
+            invSnap.forEach(d => invs.push({ id: d.id, ...d.data() }));
+            setInventory(invs);
+          } catch (e) {
+            console.warn('[OwnerReports] Note fetching inventory:', e);
+            setInventory([]);
+          }
+
+          // 4. Staff
+          try {
+            const staffSnap = await getDocs(query(collection(db, 'employees'), where('tenantId', '==', effectiveTenant)));
+            const stfs: any[] = [];
+            staffSnap.forEach(d => stfs.push({ id: d.id, ...d.data() }));
+            setStaffList(stfs);
+          } catch (e) {
+            console.warn('[OwnerReports] Note fetching staff:', e);
+            setStaffList([]);
+          }
+
+          // 5. Reservations
+          try {
+            const resSnap = await getDocs(collection(db, 'restaurants', effectiveTenant, 'reservations'));
+            const resList: any[] = [];
+            resSnap.forEach(d => resList.push({ id: d.id, ...d.data() }));
+            setReservations(resList);
+          } catch (e) {
+            console.warn('[OwnerReports] Note fetching reservations:', e);
+            setReservations([]);
+          }
+
+          // 6. Feedback / Satisfaction Ratings
+          try {
+            const feedSnap = await getDocs(collection(db, 'restaurants', effectiveTenant, 'satisfactionRatings'));
+            const fds: any[] = [];
+            feedSnap.forEach(d => fds.push({ id: d.id, ...d.data() }));
+            setFeedbacks(fds);
+          } catch (e) {
+            console.warn('[OwnerReports] Note fetching feedback:', e);
+            setFeedbacks([]);
+          }
+        }
 
         setIsLoading(false);
       } catch (err) {
-        console.error('Error fetching report data:', err);
+        console.error('[OwnerReports] Error fetching report data:', err);
         setIsLoading(false);
       }
     };
 
     loadAllReportData();
-  }, [user, tenantId]);
+  }, [user, role, workspace, urlParamTenant]);
 
   // Compute Active Date Filter Window
   const dateFilterBounds = useMemo(() => {
@@ -181,6 +267,8 @@ export const OwnerReports: React.FC = () => {
       return ms >= startMs && ms <= endMs;
     };
 
+    const isSuperAdmin = user?.role === 'super-admin' || role === 'super-admin';
+
     switch (selectedReport) {
       case 'sales': {
         const title = 'Sales Performance Report';
@@ -202,17 +290,42 @@ export const OwnerReports: React.FC = () => {
       }
 
       case 'restaurant': {
-        const title = 'Restaurant & Branch Portfolio Report';
-        const headers = ['Restaurant ID', 'Name', 'City', 'Plan Tier', 'Status', 'Phone', 'Created Date'];
-        const rows = restaurants.map(r => [
-          r.id,
-          r.name,
-          r.city || 'Hyderabad',
-          (r.planTier || 'Pro').toUpperCase(),
-          (r.status || 'Active').toUpperCase(),
-          r.phone || '-',
-          r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '-'
-        ]);
+        const title = isSuperAdmin ? 'Platform Restaurant Portfolio Report' : 'Restaurant & Branch Report';
+        const headers = ['Restaurant / Branch ID', 'Name', 'City', 'Tier / Type', 'Status', 'Phone', 'Created Date'];
+        const rows: any[] = [];
+
+        authorizedRestaurants.forEach(r => {
+          const rCity = typeof r.address === 'object' ? r.address?.city : (r.city || 'Hyderabad');
+          // Main Restaurant entry
+          rows.push([
+            r.id,
+            r.name || r.restaurantName || 'Main Restaurant',
+            rCity || 'Hyderabad',
+            (r.planTier || 'Pro').toUpperCase(),
+            (r.status || 'Active').toUpperCase(),
+            r.phone || '-',
+            r.createdAt ? new Date(r.createdAt).toLocaleDateString() : '-'
+          ]);
+
+          // Authorized sub-branches under this restaurant
+          if (r.branches && r.branches.length > 0) {
+            r.branches.forEach((b, bIdx) => {
+              const isLast = bIdx === (r.branches?.length || 1) - 1;
+              const branchPrefix = isLast ? '└── ' : '├── ';
+              const bCity = b.city || (typeof b.address === 'object' ? b.address?.city : b.address) || rCity;
+              rows.push([
+                b.id,
+                `${branchPrefix}${b.name || 'Branch'}`,
+                bCity || 'Hyderabad',
+                'BRANCH',
+                (b.status || 'Active').toUpperCase(),
+                b.phone || r.phone || '-',
+                b.createdAt ? new Date(b.createdAt).toLocaleDateString() : '-'
+              ]);
+            });
+          }
+        });
+
         return { title, headers, rows };
       }
 
@@ -414,7 +527,7 @@ export const OwnerReports: React.FC = () => {
       default:
         return { title: 'Business Report', headers: [], rows: [] };
     }
-  }, [selectedReport, orders, inventory, staffList, reservations, feedbacks, restaurants, transactions, dateFilterBounds]);
+  }, [selectedReport, orders, inventory, staffList, reservations, feedbacks, authorizedRestaurants, transactions, dateFilterBounds, user?.role, role]);
 
   // Export handlers
   const handleExportCsv = () => {
@@ -426,7 +539,7 @@ export const OwnerReports: React.FC = () => {
       userEmail: user?.email || '',
       userName: user?.displayName || 'Owner',
       userRole: user?.role || 'owner',
-      tenantId: tenantId || 'default',
+      tenantId: user?.tenantId || 'default',
       module: 'Billing',
       action: 'EXPORT',
       targetEntity: `${reportPayload.title} (CSV)`
@@ -442,7 +555,7 @@ export const OwnerReports: React.FC = () => {
       userEmail: user?.email || '',
       userName: user?.displayName || 'Owner',
       userRole: user?.role || 'owner',
-      tenantId: tenantId || 'default',
+      tenantId: user?.tenantId || 'default',
       module: 'Billing',
       action: 'EXPORT',
       targetEntity: `${reportPayload.title} (Excel)`
@@ -450,14 +563,15 @@ export const OwnerReports: React.FC = () => {
   };
 
   const handlePrintPreview = () => {
-    const subtitle = `Filter: ${dateRangePreset.toUpperCase()} &middot; Generated for Owner Workspace`;
+    const subtitle = `Filter: ${dateRangePreset.toUpperCase()} &middot; Generated for Authorized Workspace`;
     printReportPreview(reportPayload.title, subtitle, reportPayload.headers, reportPayload.rows);
   };
 
   // 12 Report Types Definition
+  const isSuperAdmin = user?.role === 'super-admin' || role === 'super-admin';
   const reportOptions: { id: TReportType; label: string; icon: React.ComponentType<any> }[] = [
     { id: 'sales', label: 'Sales Report', icon: DollarSign },
-    { id: 'restaurant', label: 'Restaurant Report', icon: Building2 },
+    { id: 'restaurant', label: isSuperAdmin ? 'Restaurant Portfolio' : 'Restaurant & Branches', icon: Building2 },
     { id: 'orders', label: 'Order Report', icon: ShoppingBag },
     { id: 'inventory', label: 'Inventory Report', icon: Package },
     { id: 'customers', label: 'Customer Report', icon: Users },
@@ -469,6 +583,22 @@ export const OwnerReports: React.FC = () => {
     { id: 'cancellations', label: 'Cancellation Report', icon: XCircle },
     { id: 'tax', label: 'Tax Report', icon: Receipt },
   ];
+
+  if (isAccessDenied) {
+    return (
+      <div className="space-y-6 pb-12 select-none">
+        <div className="p-8 rounded-2xl bg-white border border-red-200 text-center space-y-3 shadow-sm">
+          <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto">
+            <ShieldAlert className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-bold text-red-900">Access Denied</h3>
+          <p className="text-xs text-red-600 max-w-md mx-auto">
+            You do not have authorization to access or view reports for the requested restaurant workspace ({urlParamTenant}).
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-12 select-none">
@@ -624,9 +754,9 @@ export const OwnerReports: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#E5E7EB] text-[#17202A]">
-                {reportPayload.rows.map((row, rIdx) => (
+                {reportPayload.rows.map((row: any[], rIdx: number) => (
                   <tr key={rIdx} className="hover:bg-[#F8F6F2] transition-colors">
-                    {row.map((val, cIdx) => (
+                    {row.map((val: any, cIdx: number) => (
                       <td key={cIdx} className="py-3 px-4 font-medium">
                         {val ?? '-'}
                       </td>

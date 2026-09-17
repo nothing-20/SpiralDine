@@ -16,3 +16,4 @@ export * from './UserContext';
 export * from './WorkspaceContext';
 export * from './customerService';
 export * from './recommendationEngine';
+export * from './restaurantService';

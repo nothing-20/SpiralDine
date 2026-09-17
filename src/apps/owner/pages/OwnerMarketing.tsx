@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
+import { restaurantService } from '../../../shared/services/restaurantService';
 import { logAuditEvent } from '../../../shared/services/auditService';
 
 // UI Kit components
@@ -117,12 +118,10 @@ export const OwnerMarketing: React.FC = () => {
 
     const targetTenant = tenantId || 'default';
 
-    // Fetch restaurants
+    // Fetch authorized restaurants
     const fetchRest = async () => {
       try {
-        const snap = await getDocs(collection(db, 'restaurants'));
-        const list: any[] = [];
-        snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+        const list = await restaurantService.getAuthorizedRestaurants(user);
         setRestaurants(list);
       } catch (_) {}
     };

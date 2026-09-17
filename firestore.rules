@@ -234,8 +234,9 @@ service cloud.firestore {
 
     // Merchant Restaurant hierarchy (scoping subcollections)
     match /restaurants/{tenantId} {
-      allow read: if true;
-      allow write: if isAuth();
+      allow get: if true;
+      allow list: if hasRole('super-admin') || (isAuth() && (resource.data.ownerUid == request.auth.uid || resource.data.ownerId == request.auth.uid));
+      allow write: if isAuth() && (hasRole('super-admin') || isTenantManager(tenantId) || request.resource.data.ownerUid == request.auth.uid);
 
       // Public & Customer readable subcollections (branches, tables)
       match /branches/{branchId} {
@@ -328,7 +329,7 @@ service cloud.firestore {
 
       // Universal rule for other management subcollections inside tenant workspace
       match /{subcollection}/{docId} {
-        allow read: if isAuth() && (isTenant(tenantId) || getUserData().get('role', '') in ['super-admin', 'owner', 'admin']);
+        allow read: if isAuth() && (isTenant(tenantId) || hasRole('super-admin'));
         allow write: if isTenantStaff(tenantId);
       }
     }

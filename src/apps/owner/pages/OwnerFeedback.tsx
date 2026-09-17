@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
+import { restaurantService } from '../../../shared/services/restaurantService';
 import { logAuditEvent } from '../../../shared/services/auditService';
 
 // UI Kit components
@@ -117,12 +118,10 @@ export const OwnerFeedback: React.FC = () => {
     };
     fetchStaff();
 
-    // Load restaurants
+    // Load authorized restaurants
     const fetchRestaurants = async () => {
       try {
-        const snap = await getDocs(collection(db, 'restaurants'));
-        const rList: any[] = [];
-        snap.forEach(d => rList.push({ id: d.id, ...d.data() }));
+        const rList = await restaurantService.getAuthorizedRestaurants(user);
         setRestaurants(rList);
       } catch (_) {}
     };
