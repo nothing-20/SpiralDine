@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { 
   collection, 
@@ -131,6 +132,107 @@ export const OwnerOverview: React.FC = () => {
   const [dailyReceiptSearch, setDailyReceiptSearch] = useState('');
   const [dailyPaymentFilter, setDailyPaymentFilter] = useState('all');
   const [dailyStatusFilter, setDailyStatusFilter] = useState('all');
+
+  // Calendar Popover Positioning & Event Management
+  const calendarTriggerRef = useRef<HTMLDivElement | null>(null);
+  const calendarPopoverRef = useRef<HTMLDivElement | null>(null);
+  const [popoverCoords, setPopoverCoords] = useState<{
+    isMobile: boolean;
+    top: number;
+    left: number;
+    isAbove: boolean;
+  }>({
+    isMobile: false,
+    top: 0,
+    left: 0,
+    isAbove: false,
+  });
+
+  const updatePopoverPosition = useCallback(() => {
+    if (!calendarTriggerRef.current) return;
+    const rect = calendarTriggerRef.current.getBoundingClientRect();
+    const isMobile = window.innerWidth < 640;
+
+    if (isMobile) {
+      setPopoverCoords({
+        isMobile: true,
+        top: 0,
+        left: 0,
+        isAbove: false,
+      });
+      return;
+    }
+
+    const popoverWidth = 330;
+    const popoverHeight = 360;
+    const padding = 16;
+
+    // Calculate vertical position (below or above)
+    let top = rect.bottom + 8;
+    let isAbove = false;
+    if (top + popoverHeight > window.innerHeight - padding) {
+      if (rect.top - popoverHeight - 8 >= padding) {
+        top = rect.top - popoverHeight - 8;
+        isAbove = true;
+      } else {
+        top = Math.max(padding, window.innerHeight - popoverHeight - padding);
+      }
+    }
+
+    // Calculate horizontal position (align to trigger right edge, clamp within viewport)
+    let left = rect.right - popoverWidth;
+    if (left < padding) {
+      left = padding;
+    }
+    if (left + popoverWidth > window.innerWidth - padding) {
+      left = window.innerWidth - popoverWidth - padding;
+    }
+
+    setPopoverCoords({
+      isMobile: false,
+      top,
+      left,
+      isAbove,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!isCalendarOpen) return;
+    updatePopoverPosition();
+
+    const handleScrollOrResize = () => {
+      updatePopoverPosition();
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsCalendarOpen(false);
+      }
+    };
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        calendarPopoverRef.current &&
+        !calendarPopoverRef.current.contains(e.target as Node) &&
+        calendarTriggerRef.current &&
+        !calendarTriggerRef.current.contains(e.target as Node)
+      ) {
+        setIsCalendarOpen(false);
+      }
+    };
+
+    window.addEventListener('resize', handleScrollOrResize);
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('mousedown', handleClickOutside);
+
+    return () => {
+      window.removeEventListener('resize', handleScrollOrResize);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isCalendarOpen, updatePopoverPosition]);
 
   // 1. Subscribe to Firestore databases
   useEffect(() => {
@@ -2456,154 +2558,214 @@ export const OwnerOverview: React.FC = () => {
               </div>
             </div>
 
-            {/* Interactive Date Selector with Calendar Dropdown Popover */}
-            <div className="relative">
+            {/* Interactive Date Selector with Portal-Positioned Calendar Popover */}
+            <div ref={calendarTriggerRef} className="relative">
               <Button
                 variant="secondary"
                 onClick={() => setIsCalendarOpen(prev => !prev)}
-                className="text-xs font-bold py-2.5 px-4 border border-slate-800 bg-slate-955 hover:border-primary/50 text-textPearl flex items-center gap-2.5 shadow-lg"
+                aria-expanded={isCalendarOpen}
+                aria-haspopup="dialog"
+                aria-label="Select date for daily revenue"
+                className="text-xs font-bold py-2.5 px-4 border border-slate-800 bg-slate-955 hover:border-primary/50 text-textPearl flex items-center gap-2.5 shadow-lg transition-colors cursor-pointer"
               >
                 <Calendar className="w-4 h-4 text-primary" />
                 <span>{selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
                 <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${isCalendarOpen ? 'rotate-180' : ''}`} />
               </Button>
 
-              {/* Calendar Popover */}
-              {isCalendarOpen && (
-                <div className="absolute right-0 top-full mt-2 w-80 bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl p-4 space-y-3 z-50">
-                  {(() => {
-                    const currentYear = calendarViewMonth.year;
-                    const currentMonth = calendarViewMonth.month;
-                    const monthName = new Date(currentYear, currentMonth).toLocaleString('default', { month: 'long' });
-                    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-                    const firstDayOfWeek = (new Date(currentYear, currentMonth, 1).getDay() + 6) % 7; // Mon = 0
-                    const today = new Date();
+              {/* Portal-Rendered Calendar Popover (immune to parent overflow clipping) */}
+              {isCalendarOpen && createPortal(
+                <div className="fixed inset-0 z-[100] select-none">
+                  {/* Dismiss Backdrop */}
+                  <div 
+                    className={`fixed inset-0 transition-opacity ${
+                      popoverCoords.isMobile ? 'bg-black/60 backdrop-blur-xs' : 'bg-transparent'
+                    }`}
+                    onClick={() => setIsCalendarOpen(false)}
+                    aria-hidden="true"
+                  />
 
-                    const calendarDays: (number | null)[] = [];
-                    for (let i = 0; i < firstDayOfWeek; i++) {
-                      calendarDays.push(null);
+                  {/* Popover Card */}
+                  <div
+                    ref={calendarPopoverRef}
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Calendar date selector"
+                    style={
+                      popoverCoords.isMobile
+                        ? {
+                            position: 'fixed',
+                            top: '50%',
+                            left: '50%',
+                            transform: 'translate(-50%, -50%)',
+                            width: 'calc(100vw - 32px)',
+                            maxWidth: '340px',
+                          }
+                        : {
+                            position: 'fixed',
+                            top: `${popoverCoords.top}px`,
+                            left: `${popoverCoords.left}px`,
+                            width: '330px',
+                          }
                     }
-                    for (let d = 1; d <= daysInMonth; d++) {
-                      calendarDays.push(d);
-                    }
+                    className="bg-[#0F172A] border border-[#334155] rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.6)] p-4 space-y-3 animate-in fade-in zoom-in-95 duration-150 z-10"
+                  >
+                    {(() => {
+                      const currentYear = calendarViewMonth.year;
+                      const currentMonth = calendarViewMonth.month;
+                      const monthName = new Date(currentYear, currentMonth).toLocaleString('default', { month: 'long' });
+                      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+                      const daysInPrevMonth = new Date(currentYear, currentMonth, 0).getDate();
+                      const firstDayOfWeek = (new Date(currentYear, currentMonth, 1).getDay() + 6) % 7; // Mon = 0
+                      const today = new Date();
 
-                    return (
-                      <>
-                        {/* Month Navigation */}
-                        <div className="flex items-center justify-between pb-2 border-b border-slate-850">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCalendarViewMonth(prev => {
-                                const newM = prev.month === 0 ? 11 : prev.month - 1;
-                                const newY = prev.month === 0 ? prev.year - 1 : prev.year;
-                                return { year: newY, month: newM };
-                              });
-                            }}
-                            className="p-1 rounded-lg hover:bg-slate-850 text-slate-400 hover:text-textPearl transition-colors"
-                          >
-                            <ChevronLeft className="w-4 h-4" />
-                          </button>
+                      const calendarDays: { dayNum: number; isCurrentMonth: boolean; month: number; year: number }[] = [];
 
-                          <span className="text-xs font-bold text-textPearl">
-                            {monthName} {currentYear}
-                          </span>
+                      // Trailing days from previous month
+                      for (let i = firstDayOfWeek - 1; i >= 0; i--) {
+                        const pDay = daysInPrevMonth - i;
+                        const pMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+                        const pYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+                        calendarDays.push({ dayNum: pDay, isCurrentMonth: false, month: pMonth, year: pYear });
+                      }
 
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setCalendarViewMonth(prev => {
-                                const newM = prev.month === 11 ? 0 : prev.month + 1;
-                                const newY = prev.month === 11 ? prev.year + 1 : prev.year;
-                                return { year: newY, month: newM };
-                              });
-                            }}
-                            className="p-1 rounded-lg hover:bg-slate-850 text-slate-400 hover:text-textPearl transition-colors"
-                          >
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        </div>
+                      // Days of current month
+                      for (let d = 1; d <= daysInMonth; d++) {
+                        calendarDays.push({ dayNum: d, isCurrentMonth: true, month: currentMonth, year: currentYear });
+                      }
 
-                        {/* Weekdays */}
-                        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-slate-500 uppercase">
-                          <span>Mon</span>
-                          <span>Tue</span>
-                          <span>Wed</span>
-                          <span>Thu</span>
-                          <span>Fri</span>
-                          <span>Sat</span>
-                          <span>Sun</span>
-                        </div>
+                      // Leading days of next month to complete the grid row
+                      const remaining = 7 - (calendarDays.length % 7);
+                      if (remaining > 0 && remaining < 7) {
+                        const nMonth = currentMonth === 11 ? 0 : currentMonth + 1;
+                        const nYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+                        for (let d = 1; d <= remaining; d++) {
+                          calendarDays.push({ dayNum: d, isCurrentMonth: false, month: nMonth, year: nYear });
+                        }
+                      }
 
-                        {/* Days Grid */}
-                        <div className="grid grid-cols-7 gap-1">
-                          {calendarDays.map((dayNum, idx) => {
-                            if (dayNum === null) {
-                              return <div key={`empty-${idx}`} className="h-8 w-8" />;
-                            }
+                      return (
+                        <>
+                          {/* Month Navigation */}
+                          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCalendarViewMonth(prev => {
+                                  const newM = prev.month === 0 ? 11 : prev.month - 1;
+                                  const newY = prev.month === 0 ? prev.year - 1 : prev.year;
+                                  return { year: newY, month: newM };
+                                });
+                              }}
+                              aria-label="Previous month"
+                              className="p-1.5 rounded-lg bg-slate-850 hover:bg-slate-800 text-slate-200 hover:text-white transition-colors border border-slate-700/60 cursor-pointer"
+                            >
+                              <ChevronLeft className="w-4 h-4" />
+                            </button>
 
-                            const isSelected = selectedDate.getDate() === dayNum &&
-                              selectedDate.getMonth() === currentMonth &&
-                              selectedDate.getFullYear() === currentYear;
+                            <span className="text-sm font-extrabold text-white tracking-wide">
+                              {monthName} {currentYear}
+                            </span>
 
-                            const isToday = today.getDate() === dayNum &&
-                              today.getMonth() === currentMonth &&
-                              today.getFullYear() === currentYear;
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCalendarViewMonth(prev => {
+                                  const newM = prev.month === 11 ? 0 : prev.month + 1;
+                                  const newY = prev.month === 11 ? prev.year + 1 : prev.year;
+                                  return { year: newY, month: newM };
+                                });
+                              }}
+                              aria-label="Next month"
+                              className="p-1.5 rounded-lg bg-slate-850 hover:bg-slate-800 text-slate-200 hover:text-white transition-colors border border-slate-700/60 cursor-pointer"
+                            >
+                              <ChevronRight className="w-4 h-4" />
+                            </button>
+                          </div>
 
-                            const hasSales = hasOrdersDates.has(`${currentYear}-${currentMonth}-${dayNum}`);
+                          {/* Weekdays Header */}
+                          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-slate-300 uppercase pb-1 border-b border-slate-800/80">
+                            <span>Mon</span>
+                            <span>Tue</span>
+                            <span>Wed</span>
+                            <span>Thu</span>
+                            <span>Fri</span>
+                            <span>Sat</span>
+                            <span>Sun</span>
+                          </div>
 
-                            return (
-                              <button
-                                key={`day-${dayNum}`}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedDate(new Date(currentYear, currentMonth, dayNum));
-                                  setIsCalendarOpen(false);
-                                }}
-                                className={`h-8 w-8 rounded-lg flex flex-col items-center justify-center text-xs transition-all relative ${
-                                  isSelected
-                                    ? 'bg-primary text-slate-950 font-black shadow-md shadow-primary/30 ring-2 ring-primary'
-                                    : isToday
-                                    ? 'border border-primary/50 text-textPearl font-bold hover:bg-slate-800'
-                                    : 'hover:bg-slate-850 text-slate-300 font-medium'
-                                }`}
-                              >
-                                <span>{dayNum}</span>
-                                {hasSales && !isSelected && (
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 absolute bottom-1" />
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
+                          {/* Days Grid */}
+                          <div className="grid grid-cols-7 gap-1">
+                            {calendarDays.map((item, idx) => {
+                              const isSelected = selectedDate.getDate() === item.dayNum &&
+                                selectedDate.getMonth() === item.month &&
+                                selectedDate.getFullYear() === item.year;
 
-                        {/* Footer Controls */}
-                        <div className="flex items-center justify-between pt-2 border-t border-slate-850 text-[11px]">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const now = new Date();
-                              setSelectedDate(now);
-                              setCalendarViewMonth({ year: now.getFullYear(), month: now.getMonth() });
-                              setIsCalendarOpen(false);
-                            }}
-                            className="text-primary hover:underline font-bold"
-                          >
-                            Jump to Today
-                          </button>
+                              const isToday = today.getDate() === item.dayNum &&
+                                today.getMonth() === item.month &&
+                                today.getFullYear() === item.year;
 
-                          <button
-                            type="button"
-                            onClick={() => setIsCalendarOpen(false)}
-                            className="text-slate-400 hover:text-textPearl font-semibold"
-                          >
-                            Close
-                          </button>
-                        </div>
-                      </>
-                    );
-                  })()}
-                </div>
+                              const hasSales = hasOrdersDates.has(`${item.year}-${item.month}-${item.dayNum}`);
+
+                              return (
+                                <button
+                                  key={`cal-${item.year}-${item.month}-${item.dayNum}-${idx}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedDate(new Date(item.year, item.month, item.dayNum));
+                                    if (!item.isCurrentMonth) {
+                                      setCalendarViewMonth({ year: item.year, month: item.month });
+                                    }
+                                    setIsCalendarOpen(false);
+                                  }}
+                                  className={`w-full h-9 rounded-lg flex flex-col items-center justify-center text-xs transition-all relative cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-gradient-to-br from-[#E05A3E] to-[#C9533B] text-white font-black shadow-md shadow-[#C9533B]/40 ring-2 ring-[#C9533B] z-10'
+                                      : isToday
+                                      ? 'border-2 border-[#C9533B]/80 text-[#FF8E72] font-bold hover:bg-slate-800'
+                                      : !item.isCurrentMonth
+                                      ? 'text-slate-500 hover:text-slate-300 hover:bg-slate-850/50 font-normal'
+                                      : 'text-slate-100 hover:bg-slate-800 hover:text-white font-semibold'
+                                  }`}
+                                >
+                                  <span className="leading-none">{item.dayNum}</span>
+                                  {hasSales && !isSelected && (
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 ring-1 ring-emerald-950 absolute bottom-1" />
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* Footer Controls */}
+                          <div className="flex items-center justify-between pt-2.5 border-t border-slate-800 text-xs">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const now = new Date();
+                                setSelectedDate(now);
+                                setCalendarViewMonth({ year: now.getFullYear(), month: now.getMonth() });
+                                setIsCalendarOpen(false);
+                              }}
+                              className="text-[#E05A3E] hover:text-[#FF8E72] hover:underline font-bold transition-colors cursor-pointer"
+                            >
+                              Jump to Today
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setIsCalendarOpen(false)}
+                              className="text-slate-300 hover:text-white px-2.5 py-1 rounded-lg hover:bg-slate-800 font-semibold transition-colors cursor-pointer"
+                            >
+                              Close
+                            </button>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>,
+                document.body
               )}
             </div>
           </div>
