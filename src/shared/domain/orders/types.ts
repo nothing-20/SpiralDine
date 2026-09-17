@@ -41,6 +41,7 @@ export interface IPaymentBreakdown {
 }
 
 export interface IOrder {
+  id?: string;
   orderId: string;
   tableNumber: string;
   tableId?: string;
@@ -50,6 +51,7 @@ export interface IOrder {
   branchId?: string;
   orderType?: 'dine_in' | 'takeaway' | 'delivery' | 'walk_in' | 'dine-in';
   orderSource?: 'qr' | 'app' | 'pos' | 'waiter';
+  customerId?: string;
   customerName: string;
   phone: string;
   customerPhone?: string;

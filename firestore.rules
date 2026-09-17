@@ -183,12 +183,12 @@ service cloud.firestore {
       allow read: if isAuth() && (
         request.auth.uid == customerUid ||
         request.auth.token.role == 'super-admin' ||
-        getUserData().get('role', '') in ['super-admin', 'admin']
+        getUserData().get('role', '') in ['super-admin', 'admin', 'owner']
       );
       allow write: if isAuth() && (
         request.auth.uid == customerUid ||
         request.auth.token.role == 'super-admin' ||
-        getUserData().get('role', '') in ['super-admin', 'admin']
+        getUserData().get('role', '') in ['super-admin', 'admin', 'owner']
       );
 
       // Customer reservations subcollection: customer can read/write; restaurant staff can update reservation status

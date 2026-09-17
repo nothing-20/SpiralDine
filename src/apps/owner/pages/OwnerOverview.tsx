@@ -52,6 +52,12 @@ import {
   UserPlus,
   Info,
   ChevronRight,
+  ChevronLeft,
+  ChevronDown,
+  CheckCircle2,
+  Clock,
+  Search,
+  X,
   Smartphone,
   CreditCard,
   Wallet,
@@ -114,7 +120,17 @@ export const OwnerOverview: React.FC = () => {
   const [receiptSearch, setReceiptSearch] = useState('');
   const [receiptPaymentFilter, setReceiptPaymentFilter] = useState('all');
 
-
+  // Date-Based Daily Revenue & Calendar States
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [calendarViewMonth, setCalendarViewMonth] = useState<{ year: number; month: number }>({
+    year: new Date().getFullYear(),
+    month: new Date().getMonth()
+  });
+  const [customerProfiles, setCustomerProfiles] = useState<Record<string, { name: string; phone?: string; email?: string }>>({});
+  const [dailyReceiptSearch, setDailyReceiptSearch] = useState('');
+  const [dailyPaymentFilter, setDailyPaymentFilter] = useState('all');
+  const [dailyStatusFilter, setDailyStatusFilter] = useState('all');
 
   // 1. Subscribe to Firestore databases
   useEffect(() => {
@@ -122,8 +138,8 @@ export const OwnerOverview: React.FC = () => {
 
     setIsLoading(true);
 
-    // 1. Orders (bounded to 30 recent orders)
-    const qOrders = query(collection(db, 'restaurants', tenantId, 'orders'), limit(30));
+    // 1. Orders (bounded to 500 orders for comprehensive revenue and daily reports)
+    const qOrders = query(collection(db, 'restaurants', tenantId, 'orders'), limit(500));
     const unsubOrders = onSnapshot(qOrders, (snap) => {
       const list: IOrder[] = [];
       snap.forEach(d => list.push({ ...d.data() } as IOrder));
@@ -234,9 +250,27 @@ export const OwnerOverview: React.FC = () => {
       console.warn('[OwnerOverview] Transactions subscription warning:', err);
     });
 
+    // 13. Customer Profiles Subscription (for real customer name resolution in revenue reports)
+    const qCustomers = query(collection(db, 'customers'), limit(250));
+    const unsubCustomers = onSnapshot(qCustomers, (snap) => {
+      const map: Record<string, { name: string; phone?: string; email?: string }> = {};
+      snap.forEach((d) => {
+        const data = d.data();
+        const resolvedName = data.displayName || data.fullName || data.name || '';
+        map[d.id] = { name: resolvedName, phone: data.phoneNumber || data.phone, email: data.email };
+        if (data.uid) {
+          map[data.uid] = { name: resolvedName, phone: data.phoneNumber || data.phone, email: data.email };
+        }
+      });
+      setCustomerProfiles(map);
+    }, (err) => {
+      console.warn('[OwnerOverview] Customers subscription warning:', err);
+    });
+
     return () => {
       unsubOrders();
       unsubTrans();
+      unsubCustomers();
       unsubInventory();
       unsubTables();
       unsubRatings();
@@ -914,6 +948,245 @@ export const OwnerOverview: React.FC = () => {
   const selectedMonthData = useMemo(() => {
     return monthsData[selectedMonthIndex] || monthsData[0];
   }, [monthsData, selectedMonthIndex]);
+
+  // Real Customer Name Resolver (Authoritative Profile > Order Snapshot > Phone > Guest Customer)
+  const resolveCustomerName = (item: any): string => {
+    if (!item) return 'Guest Customer';
+
+    // 1. Direct customerId / userId lookup in authoritative customer profiles
+    const cid = item.customerId || item.userId;
+    if (cid && cid !== 'guest-uid' && customerProfiles[cid]?.name) {
+      return customerProfiles[cid].name;
+    }
+
+    // 2. Check if a valid authentic name is present on the order document
+    const rawName = (item.customerName || item.customer_name || '').trim();
+    if (rawName) {
+      const lower = rawName.toLowerCase();
+      const isGeneric = lower === 'walk-in client' || lower === 'walk-in guest' || lower === 'guest diner' || lower === 'walk-in';
+      if (!isGeneric) {
+        return rawName;
+      }
+    }
+
+    // 3. Fallback to phone number match if available
+    const phone = (item.phone || item.customerPhone || '').replace(/\D/g, '');
+    if (phone && phone.length >= 10) {
+      for (const profile of Object.values(customerProfiles)) {
+        if (profile.phone && profile.phone.replace(/\D/g, '') === phone && profile.name) {
+          return profile.name;
+        }
+      }
+    }
+
+    // 4. Genuine unauthenticated walk-in without customer identity
+    return 'Guest Customer';
+  };
+
+  // Synchronize calendar view and selected date when entering monthly view or switching months
+  useEffect(() => {
+    if (view === 'monthly' && selectedMonthData) {
+      setCalendarViewMonth({
+        year: selectedMonthData.year,
+        month: selectedMonthData.calendarMonth
+      });
+
+      const today = new Date();
+      if (today.getFullYear() === selectedMonthData.year && today.getMonth() === selectedMonthData.calendarMonth) {
+        setSelectedDate(today);
+      } else {
+        const mOrders = selectedMonthData.orders;
+        if (mOrders && mOrders.length > 0) {
+          const sorted = [...mOrders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          setSelectedDate(new Date(sorted[0].createdAt));
+        } else {
+          setSelectedDate(new Date(selectedMonthData.year, selectedMonthData.calendarMonth, 1));
+        }
+      }
+    }
+  }, [view, selectedMonthIndex, selectedMonthData.year, selectedMonthData.calendarMonth]);
+
+  // Set of dates with recorded orders/transactions for calendar activity dots
+  const hasOrdersDates = useMemo(() => {
+    const set = new Set<string>();
+    orders.forEach(o => {
+      if (o.createdAt) {
+        const d = new Date(o.createdAt);
+        if (!isNaN(d.getTime())) {
+          set.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+        }
+      }
+    });
+    paidTransactions.forEach(t => {
+      if (t.createdAt) {
+        const d = new Date(t.createdAt);
+        if (!isNaN(d.getTime())) {
+          set.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+        }
+      }
+    });
+    return set;
+  }, [orders, paidTransactions]);
+
+  // Canonical Daily Revenue calculation and unified order ledger for the selected calendar date
+  const dailyRevenueData = useMemo(() => {
+    if (!selectedDate) {
+      return {
+        gross: 0,
+        net: 0,
+        gst: 0,
+        count: 0,
+        aov: 0,
+        pending: 0,
+        refunds: 0,
+        cash: 0,
+        upi: 0,
+        card: 0,
+        wallet: 0,
+        other: 0,
+        ordersList: []
+      };
+    }
+
+    const isSameDay = (timestamp: any) => {
+      if (!timestamp) return false;
+      const d = new Date(timestamp);
+      return !isNaN(d.getTime()) &&
+        d.getFullYear() === selectedDate.getFullYear() &&
+        d.getMonth() === selectedDate.getMonth() &&
+        d.getDate() === selectedDate.getDate();
+    };
+
+    // 1. Gather all transactions matching this calendar day
+    const dayTransactions = paidTransactions.filter(t => isSameDay(t.createdAt));
+
+    // 2. Gather all orders matching this calendar day
+    const dayOrders = orders.filter(o => isSameDay(o.createdAt));
+
+    // 3. Map orders by ID for fast enrichment
+    const orderMap = new Map<string, any>();
+    dayOrders.forEach(o => {
+      const key = o.orderId || o.id;
+      if (key) orderMap.set(key, { ...o });
+    });
+
+    const unifiedList: any[] = [];
+    const processedKeys = new Set<string>();
+
+    // First add all confirmed settled transactions
+    dayTransactions.forEach(t => {
+      const orderId = t.orderId || t.id;
+      const matchedOrder = orderId ? orderMap.get(orderId) : null;
+      if (orderId) processedKeys.add(orderId);
+      if (t.id) processedKeys.add(t.id);
+
+      unifiedList.push({
+        id: t.id || orderId,
+        orderId: orderId,
+        billId: t.billId || matchedOrder?.billId,
+        invoiceNumber: t.invoiceNumber || matchedOrder?.invoiceNumber || (orderId ? `INV-${orderId.replace(/^ORD-/, '')}` : '-'),
+        tableNumber: t.tableNumber || matchedOrder?.tableNumber || 'Walk-in',
+        customerId: t.customerId || matchedOrder?.customerId,
+        customerName: resolveCustomerName({
+          customerId: t.customerId || matchedOrder?.customerId,
+          customerName: t.customerName || matchedOrder?.customerName,
+          phone: matchedOrder?.phone
+        }),
+        orderTime: t.createdAt || matchedOrder?.createdAt,
+        paymentStatus: 'paid',
+        paymentMethod: t.paymentMethod || matchedOrder?.paymentMethod || (t.paymentMethods?.upi ? 'upi' : t.paymentMethods?.card ? 'card' : 'cash'),
+        paymentMethods: t.paymentMethods || matchedOrder?.paymentMethods,
+        orderStatus: matchedOrder?.status || 'COMPLETED',
+        subtotal: t.subtotal ?? matchedOrder?.subtotal ?? ((t.total || 0) - (t.tax || 0)),
+        tax: t.tax ?? matchedOrder?.tax ?? 0,
+        discount: t.discount ?? matchedOrder?.discount ?? 0,
+        total: t.total ?? matchedOrder?.total ?? 0,
+        items: t.items || matchedOrder?.items || []
+      });
+    });
+
+    // Next add any day orders not yet represented in transactions (e.g. pending or newly placed)
+    dayOrders.forEach(o => {
+      const key = o.orderId || o.id;
+      if (key && !processedKeys.has(key)) {
+        processedKeys.add(key);
+        const pStatus = (o.paymentStatus || 'pending').toLowerCase();
+        unifiedList.push({
+          id: o.id || key,
+          orderId: key,
+          billId: o.billId,
+          invoiceNumber: o.invoiceNumber || (key ? `INV-${key.replace(/^ORD-/, '')}` : '-'),
+          tableNumber: o.tableNumber || 'Walk-in',
+          customerId: o.customerId,
+          customerName: resolveCustomerName(o),
+          orderTime: o.createdAt,
+          paymentStatus: pStatus,
+          paymentMethod: o.paymentMethod || (o.paymentMethods?.upi ? 'upi' : o.paymentMethods?.card ? 'card' : 'cash'),
+          paymentMethods: o.paymentMethods,
+          orderStatus: o.status || 'NEW',
+          subtotal: o.subtotal ?? ((o.total || 0) - (o.tax || 0)),
+          tax: o.tax ?? 0,
+          discount: o.discount ?? 0,
+          total: o.total ?? 0,
+          items: o.items || []
+        });
+      }
+    });
+
+    // Sort newest orders first
+    unifiedList.sort((a, b) => new Date(b.orderTime).getTime() - new Date(a.orderTime).getTime());
+
+    // Calculate canonical revenue KPIs
+    const paidItems = unifiedList.filter(item => item.paymentStatus === 'paid');
+    const gross = paidItems.reduce((sum, item) => sum + (item.total || 0), 0);
+    const gst = paidItems.reduce((sum, item) => sum + (item.tax || 0), 0);
+    const net = gross - gst;
+    const count = paidItems.length;
+    const aov = count > 0 ? gross / count : 0;
+
+    const pendingItems = unifiedList.filter(item => item.paymentStatus !== 'paid' && item.orderStatus !== 'CANCELLED' && item.orderStatus !== 'REFUNDED');
+    const pending = pendingItems.reduce((sum, item) => sum + (item.total || 0), 0);
+
+    const refundedItems = unifiedList.filter(item => item.paymentStatus === 'refunded' || item.orderStatus === 'REFUNDED');
+    const refunds = refundedItems.reduce((sum, item) => sum + (item.total || 0), 0);
+
+    let cash = 0;
+    let upi = 0;
+    let card = 0;
+    let wallet = 0;
+    let other = 0;
+
+    paidItems.forEach(item => {
+      if (item.paymentMethods) {
+        cash += item.paymentMethods.cash || 0;
+        upi += item.paymentMethods.upi || 0;
+        card += item.paymentMethods.card || 0;
+        wallet += item.paymentMethods.wallet || 0;
+      } else {
+        const method = String(item.paymentMethod || 'cash').toLowerCase();
+        if (method.includes('upi') || method.includes('razorpay')) upi += item.total || 0;
+        else if (method.includes('card')) card += item.total || 0;
+        else if (method.includes('wallet')) wallet += item.total || 0;
+        else cash += item.total || 0;
+      }
+    });
+
+    return {
+      gross,
+      net,
+      gst,
+      count,
+      aov,
+      pending,
+      refunds,
+      cash,
+      upi,
+      card,
+      wallet,
+      other,
+      ordersList: unifiedList
+    };
+  }, [selectedDate, paidTransactions, orders, customerProfiles]);
 
   const handleReservationActionSubmit = async () => {
     if (!tenantId || !selectedRes || !resActionType) return;
@@ -2131,10 +2404,11 @@ export const OwnerOverview: React.FC = () => {
 
       {view === 'monthly' && (
         <div className="space-y-6">
+          {/* Header Bar */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/30 p-6 border border-slate-850 rounded-3xl">
             <div>
               <h1 className="text-2xl font-display font-extrabold text-textPearl">Monthly Revenue Detail</h1>
-              <p className="text-xs text-mutedAsh font-semibold mt-1">Detailed checkout events log, tax allocations, and payment splits for {selectedMonthData.label}.</p>
+              <p className="text-xs text-mutedAsh font-semibold mt-1">Detailed checkout events log, tax allocations, and daily revenue investigation for {selectedMonthData.label}.</p>
             </div>
             <Button
               variant="secondary"
@@ -2145,72 +2419,339 @@ export const OwnerOverview: React.FC = () => {
             </Button>
           </div>
 
-          {selectedMonthData.ordersCount === 0 ? (
-            <Card className="p-12 text-center border border-dashed border-slate-850 rounded-2xl bg-slate-900/10">
-              <Calendar className="w-12 h-12 text-slate-700 mx-auto mb-3 animate-pulse" />
-              <h3 className="text-sm font-bold text-textPearl uppercase tracking-wider mb-2">No Transactions Recorded</h3>
-              <p className="text-xs text-slate-500 font-semibold max-w-md mx-auto leading-relaxed">
-                No orders or settled payments were recorded for {selectedMonthData.label}. Revenue detail graphs, receipt logs, and tax breakdowns will automatically display when sales are generated.
-              </p>
-            </Card>
-          ) : (
-            <>
-              {/* Monthly KPI Summary */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Card className="p-4 border-slate-850 bg-slate-900/30">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Gross Revenue</span>
-                  <h3 className="text-lg font-display font-black text-textPearl mt-1">{formatPrice(selectedMonthData.gross)}</h3>
-                </Card>
-                <Card className="p-4 border-slate-850 bg-slate-900/30">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Net Revenue</span>
-                  <h3 className="text-lg font-display font-black text-emerald-500 mt-1">{formatPrice(selectedMonthData.net)}</h3>
-                </Card>
-                <Card className="p-4 border-slate-850 bg-slate-900/30">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">GST Collected</span>
-                  <h3 className="text-lg font-display font-black text-amber-500 mt-1">{formatPrice(selectedMonthData.gst)}</h3>
-                </Card>
-                <Card className="p-4 border-slate-850 bg-slate-900/30">
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Successful Orders</span>
-                  <h3 className="text-lg font-display font-black text-textPearl mt-1">{selectedMonthData.ordersCount} sales</h3>
-                </Card>
+          {/* MONTHLY SUMMARY (Monthly KPIs) */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Monthly Summary — {selectedMonthData.label}</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <Card className="p-4 border-slate-850 bg-slate-900/30">
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Gross Revenue</span>
+                <h3 className="text-lg font-display font-black text-textPearl mt-1">{formatPrice(selectedMonthData.gross)}</h3>
+              </Card>
+              <Card className="p-4 border-slate-850 bg-slate-900/30">
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Net Revenue</span>
+                <h3 className="text-lg font-display font-black text-emerald-500 mt-1">{formatPrice(selectedMonthData.net)}</h3>
+              </Card>
+              <Card className="p-4 border-slate-850 bg-slate-900/30">
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">GST Collected</span>
+                <h3 className="text-lg font-display font-black text-amber-500 mt-1">{formatPrice(selectedMonthData.gst)}</h3>
+              </Card>
+              <Card className="p-4 border-slate-850 bg-slate-900/30">
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Successful Orders</span>
+                <h3 className="text-lg font-display font-black text-textPearl mt-1">{selectedMonthData.ordersCount} sales</h3>
+              </Card>
+            </div>
+          </div>
+
+          {/* CALENDAR & DATE SELECTOR BAR */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-900/50 p-5 border border-slate-850 rounded-2xl relative">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-primary/10 border border-primary/20 text-primary">
+                <Calendar className="w-5 h-5" />
               </div>
+              <div>
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Date-Based Revenue Investigation</span>
+                <h3 className="text-sm font-bold text-textPearl">
+                  {selectedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric', year: 'numeric' })}
+                </h3>
+              </div>
+            </div>
 
-              {/* Two Column details split */}
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
-                {/* Left column: Receipt log and Timeline */}
-                <div className="lg:col-span-2 space-y-6">
-                  
-                  {/* Receipt Log */}
-                  <Card className="p-5 border-slate-850 bg-slate-900/30 space-y-4">
-                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-                      <div>
-                        <h3 className="font-display font-bold text-sm text-textPearl">Receipt Ledger Log</h3>
-                        <p className="text-[10px] text-slate-500">Historical list of invoice receipts settled during the month.</p>
-                      </div>
-                      
-                      {/* Interactive search and filter */}
-                      <div className="flex gap-2 w-full sm:w-auto">
-                        <input
-                          type="text"
-                          placeholder="Search client..."
-                          value={receiptSearch}
-                          onChange={(e) => setReceiptSearch(e.target.value)}
-                          className="bg-slate-955 border border-slate-850 text-xs text-textPearl font-semibold rounded-xl px-3 py-1.5 outline-none focus:border-primary w-full sm:w-40"
-                        />
-                        <select
-                          value={receiptPaymentFilter}
-                          onChange={(e) => setReceiptPaymentFilter(e.target.value)}
-                          className="bg-slate-955 border border-slate-850 text-xs text-textPearl font-semibold rounded-xl px-2.5 py-1.5 outline-none"
-                        >
-                          <option value="all">All Modes</option>
-                          <option value="cash">Cash</option>
-                          <option value="upi">UPI</option>
-                          <option value="card">Card</option>
-                        </select>
-                      </div>
-                    </div>
+            {/* Interactive Date Selector with Calendar Dropdown Popover */}
+            <div className="relative">
+              <Button
+                variant="secondary"
+                onClick={() => setIsCalendarOpen(prev => !prev)}
+                className="text-xs font-bold py-2.5 px-4 border border-slate-800 bg-slate-955 hover:border-primary/50 text-textPearl flex items-center gap-2.5 shadow-lg"
+              >
+                <Calendar className="w-4 h-4 text-primary" />
+                <span>{selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${isCalendarOpen ? 'rotate-180' : ''}`} />
+              </Button>
 
+              {/* Calendar Popover */}
+              {isCalendarOpen && (
+                <div className="absolute right-0 top-full mt-2 w-80 bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl p-4 space-y-3 z-50">
+                  {(() => {
+                    const currentYear = calendarViewMonth.year;
+                    const currentMonth = calendarViewMonth.month;
+                    const monthName = new Date(currentYear, currentMonth).toLocaleString('default', { month: 'long' });
+                    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+                    const firstDayOfWeek = (new Date(currentYear, currentMonth, 1).getDay() + 6) % 7; // Mon = 0
+                    const today = new Date();
+
+                    const calendarDays: (number | null)[] = [];
+                    for (let i = 0; i < firstDayOfWeek; i++) {
+                      calendarDays.push(null);
+                    }
+                    for (let d = 1; d <= daysInMonth; d++) {
+                      calendarDays.push(d);
+                    }
+
+                    return (
+                      <>
+                        {/* Month Navigation */}
+                        <div className="flex items-center justify-between pb-2 border-b border-slate-850">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCalendarViewMonth(prev => {
+                                const newM = prev.month === 0 ? 11 : prev.month - 1;
+                                const newY = prev.month === 0 ? prev.year - 1 : prev.year;
+                                return { year: newY, month: newM };
+                              });
+                            }}
+                            className="p-1 rounded-lg hover:bg-slate-850 text-slate-400 hover:text-textPearl transition-colors"
+                          >
+                            <ChevronLeft className="w-4 h-4" />
+                          </button>
+
+                          <span className="text-xs font-bold text-textPearl">
+                            {monthName} {currentYear}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCalendarViewMonth(prev => {
+                                const newM = prev.month === 11 ? 0 : prev.month + 1;
+                                const newY = prev.month === 11 ? prev.year + 1 : prev.year;
+                                return { year: newY, month: newM };
+                              });
+                            }}
+                            className="p-1 rounded-lg hover:bg-slate-850 text-slate-400 hover:text-textPearl transition-colors"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        {/* Weekdays */}
+                        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-slate-500 uppercase">
+                          <span>Mon</span>
+                          <span>Tue</span>
+                          <span>Wed</span>
+                          <span>Thu</span>
+                          <span>Fri</span>
+                          <span>Sat</span>
+                          <span>Sun</span>
+                        </div>
+
+                        {/* Days Grid */}
+                        <div className="grid grid-cols-7 gap-1">
+                          {calendarDays.map((dayNum, idx) => {
+                            if (dayNum === null) {
+                              return <div key={`empty-${idx}`} className="h-8 w-8" />;
+                            }
+
+                            const isSelected = selectedDate.getDate() === dayNum &&
+                              selectedDate.getMonth() === currentMonth &&
+                              selectedDate.getFullYear() === currentYear;
+
+                            const isToday = today.getDate() === dayNum &&
+                              today.getMonth() === currentMonth &&
+                              today.getFullYear() === currentYear;
+
+                            const hasSales = hasOrdersDates.has(`${currentYear}-${currentMonth}-${dayNum}`);
+
+                            return (
+                              <button
+                                key={`day-${dayNum}`}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedDate(new Date(currentYear, currentMonth, dayNum));
+                                  setIsCalendarOpen(false);
+                                }}
+                                className={`h-8 w-8 rounded-lg flex flex-col items-center justify-center text-xs transition-all relative ${
+                                  isSelected
+                                    ? 'bg-primary text-slate-950 font-black shadow-md shadow-primary/30 ring-2 ring-primary'
+                                    : isToday
+                                    ? 'border border-primary/50 text-textPearl font-bold hover:bg-slate-800'
+                                    : 'hover:bg-slate-850 text-slate-300 font-medium'
+                                }`}
+                              >
+                                <span>{dayNum}</span>
+                                {hasSales && !isSelected && (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 absolute bottom-1" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Footer Controls */}
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-850 text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const now = new Date();
+                              setSelectedDate(now);
+                              setCalendarViewMonth({ year: now.getFullYear(), month: now.getMonth() });
+                              setIsCalendarOpen(false);
+                            }}
+                            className="text-primary hover:underline font-bold"
+                          >
+                            Jump to Today
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setIsCalendarOpen(false)}
+                            className="text-slate-400 hover:text-textPearl font-semibold"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* SELECTED DATE DAILY REVENUE SECTION */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-display font-extrabold uppercase tracking-wider text-textPearl flex items-center gap-2">
+                <span>DAILY REVENUE — {selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).toUpperCase()}</span>
+                {selectedDate.toDateString() === new Date().toDateString() && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">Today</span>
+                )}
+              </h2>
+            </div>
+
+            {/* Daily KPI Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+              <Card className="p-4 border-slate-850 bg-slate-900/40">
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Gross Revenue</span>
+                <h3 className="text-lg font-display font-black text-textPearl mt-1">{formatPrice(dailyRevenueData.gross)}</h3>
+              </Card>
+
+              <Card className="p-4 border-slate-850 bg-slate-900/40">
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Net Revenue</span>
+                <h3 className="text-lg font-display font-black text-emerald-500 mt-1">{formatPrice(dailyRevenueData.net)}</h3>
+              </Card>
+
+              <Card className="p-4 border-slate-850 bg-slate-900/40">
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">GST Collected</span>
+                <h3 className="text-lg font-display font-black text-amber-500 mt-1">{formatPrice(dailyRevenueData.gst)}</h3>
+              </Card>
+
+              <Card className="p-4 border-slate-850 bg-slate-900/40">
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Successful Orders</span>
+                <h3 className="text-lg font-display font-black text-textPearl mt-1">{dailyRevenueData.count} sales</h3>
+              </Card>
+
+              <Card className="p-4 border-slate-850 bg-slate-900/40">
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Avg Order Value</span>
+                <h3 className="text-lg font-display font-black text-textPearl mt-1">{formatPrice(dailyRevenueData.aov)}</h3>
+              </Card>
+
+              <Card className="p-4 border-slate-850 bg-slate-900/40">
+                <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Pending Payments</span>
+                <h3 className={`text-lg font-display font-black mt-1 ${dailyRevenueData.pending > 0 ? 'text-amber-400' : 'text-slate-500'}`}>
+                  {formatPrice(dailyRevenueData.pending)}
+                </h3>
+              </Card>
+            </div>
+          </div>
+
+          {/* TWO-COLUMN DETAILS SPLIT: ORDER LEDGER (LEFT) + BREAKDOWNS (RIGHT) */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            {/* Left Column: Daily Order / Receipt Ledger Log */}
+            <div className="lg:col-span-2 space-y-6">
+              <Card className="p-5 border-slate-850 bg-slate-900/30 space-y-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                  <div>
+                    <h3 className="font-display font-bold text-sm text-textPearl">
+                      Receipt Ledger Log — {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </h3>
+                    <p className="text-[10px] text-slate-500">Individual customer orders and settled check records for the selected date.</p>
+                  </div>
+
+                  {/* Interactive Search & Filter Controls */}
+                  <div className="flex flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto">
+                    <input
+                      type="text"
+                      placeholder="Search customer, invoice..."
+                      value={dailyReceiptSearch}
+                      onChange={(e) => setDailyReceiptSearch(e.target.value)}
+                      className="bg-slate-955 border border-slate-850 text-xs text-textPearl font-semibold rounded-xl px-3 py-1.5 outline-none focus:border-primary w-full sm:w-44"
+                    />
+                    <select
+                      value={dailyPaymentFilter}
+                      onChange={(e) => setDailyPaymentFilter(e.target.value)}
+                      className="bg-slate-955 border border-slate-850 text-xs text-textPearl font-semibold rounded-xl px-2.5 py-1.5 outline-none"
+                    >
+                      <option value="all">All Modes</option>
+                      <option value="cash">Cash</option>
+                      <option value="upi">UPI / Online</option>
+                      <option value="card">Card</option>
+                    </select>
+                    <select
+                      value={dailyStatusFilter}
+                      onChange={(e) => setDailyStatusFilter(e.target.value)}
+                      className="bg-slate-955 border border-slate-850 text-xs text-textPearl font-semibold rounded-xl px-2.5 py-1.5 outline-none"
+                    >
+                      <option value="all">All Status</option>
+                      <option value="paid">Paid</option>
+                      <option value="pending">Pending</option>
+                      <option value="refunded">Refunded</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Filter daily order list based on search and filters */}
+                {(() => {
+                  const filteredDailyOrders = dailyRevenueData.ordersList.filter(item => {
+                    const matchSearch = (item.customerName || '').toLowerCase().includes(dailyReceiptSearch.toLowerCase()) ||
+                      (item.invoiceNumber || '').toLowerCase().includes(dailyReceiptSearch.toLowerCase()) ||
+                      (item.orderId || '').toLowerCase().includes(dailyReceiptSearch.toLowerCase()) ||
+                      (String(item.tableNumber) || '').toLowerCase().includes(dailyReceiptSearch.toLowerCase());
+
+                    let matchPayment = true;
+                    if (dailyPaymentFilter !== 'all') {
+                      const mode = String(item.paymentMethod || '').toLowerCase();
+                      const methods = item.paymentMethods;
+                      if (dailyPaymentFilter === 'cash') matchPayment = !!methods?.cash || mode.includes('cash');
+                      if (dailyPaymentFilter === 'upi') matchPayment = !!methods?.upi || mode.includes('upi') || mode.includes('razorpay');
+                      if (dailyPaymentFilter === 'card') matchPayment = !!methods?.card || mode.includes('card');
+                    }
+
+                    let matchStatus = true;
+                    if (dailyStatusFilter !== 'all') {
+                      const pStatus = (item.paymentStatus || 'pending').toLowerCase();
+                      matchStatus = pStatus === dailyStatusFilter;
+                    }
+
+                    return matchSearch && matchPayment && matchStatus;
+                  });
+
+                  if (dailyRevenueData.ordersList.length === 0) {
+                    return (
+                      <div className="p-12 text-center border border-dashed border-slate-850 rounded-2xl bg-slate-900/10">
+                        <Calendar className="w-10 h-10 text-slate-700 mx-auto mb-3" />
+                        <h3 className="text-sm font-bold text-textPearl uppercase tracking-wider mb-1">
+                          No orders for {selectedDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+                        </h3>
+                        <p className="text-xs text-slate-500 font-semibold max-w-md mx-auto leading-relaxed">
+                          No revenue has been recorded for this date. Select another date from the calendar to inspect sales activity.
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  if (filteredDailyOrders.length === 0) {
+                    return (
+                      <div className="p-8 text-center border border-dashed border-slate-850 rounded-2xl bg-slate-900/10">
+                        <p className="text-xs text-slate-500 font-semibold">
+                          No orders on this date match your search or filter criteria.
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return (
                     <div className="overflow-x-auto">
                       <table className="w-full text-left text-xs">
                         <thead>
@@ -2218,182 +2759,270 @@ export const OwnerOverview: React.FC = () => {
                             <th className="pb-2.5">Invoice / ID</th>
                             <th className="pb-2.5">Customer</th>
                             <th className="pb-2.5">Table</th>
-                            <th className="pb-2.5">Payment</th>
+                            <th className="pb-2.5">Order Time</th>
+                            <th className="pb-2.5">Payment Method</th>
+                            <th className="pb-2.5">Payment Status</th>
+                            <th className="pb-2.5">Order Status</th>
+                            <th className="pb-2.5 text-right">Subtotal</th>
+                            <th className="pb-2.5 text-right">GST</th>
+                            <th className="pb-2.5 text-right">Discount</th>
                             <th className="pb-2.5 text-right">Total</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-850/40 text-slate-300 font-semibold">
-                          {selectedMonthData.orders
-                            .filter(o => {
-                              const matchSearch = (o.customerName || '').toLowerCase().includes(receiptSearch.toLowerCase()) || 
-                                (o.orderId || '').toLowerCase().includes(receiptSearch.toLowerCase());
-                              
-                              let matchPayment = true;
-                              if (receiptPaymentFilter !== 'all') {
-                                const mode = (o.paymentMethod || '').toLowerCase();
-                                const methods = o.paymentMethods;
-                                if (receiptPaymentFilter === 'cash') matchPayment = !!methods?.cash || mode.includes('cash');
-                                if (receiptPaymentFilter === 'upi') matchPayment = !!methods?.upi || mode.includes('upi');
-                                if (receiptPaymentFilter === 'card') matchPayment = !!methods?.card || mode.includes('card');
-                              }
-
-                              return matchSearch && matchPayment;
-                            })
-                            .map((o) => (
-                              <tr key={o.id || o.orderId} className="hover:bg-slate-900/10">
-                                <td className="py-3 font-mono text-[11px]">#{o.invoiceNumber || (o.orderId && o.orderId.includes('-') ? o.orderId.split('-')[1] : o.orderId || o.id)}</td>
-                                <td className="py-3 text-textPearl">{o.customerName || 'Walk-in Client'}</td>
-                                <td className="py-3 text-primary font-bold">Table #{o.tableNumber || 'Walk-in'}</td>
-                                <td className="py-3">
-                                  <Badge variant="muted" className="scale-90 origin-left uppercase">
-                                    {o.paymentMethod || (o.paymentMethods?.upi ? 'UPI' : (o.paymentMethods?.card ? 'CARD' : 'CASH'))}
-                                  </Badge>
-                                </td>
-                                <td className="py-3 text-right text-emerald-500 font-mono font-bold">{formatPrice(o.total)}</td>
-                              </tr>
-                            ))}
+                          {filteredDailyOrders.map((o) => (
+                            <tr key={o.id || o.orderId} className="hover:bg-slate-900/20 transition-colors">
+                              <td className="py-3 font-mono text-[11px]">
+                                <span className="text-textPearl font-bold">#{o.invoiceNumber || o.orderId}</span>
+                                {o.orderId && o.invoiceNumber !== o.orderId && (
+                                  <span className="block text-[9px] text-slate-500 font-mono">{o.orderId}</span>
+                                )}
+                              </td>
+                              <td className="py-3 text-textPearl font-semibold">{o.customerName}</td>
+                              <td className="py-3 text-primary font-bold">
+                                {o.tableNumber && o.tableNumber !== 'Walk-in' ? `Table #${o.tableNumber}` : 'Walk-in'}
+                              </td>
+                              <td className="py-3 text-slate-400 font-mono text-[11px]">
+                                {o.orderTime ? new Date(o.orderTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}
+                              </td>
+                              <td className="py-3">
+                                <Badge variant="muted" className="scale-90 origin-left uppercase font-bold">
+                                  {o.paymentMethod || (o.paymentMethods?.upi ? 'UPI' : (o.paymentMethods?.card ? 'CARD' : 'CASH'))}
+                                </Badge>
+                              </td>
+                              <td className="py-3">
+                                {o.paymentStatus === 'paid' ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-450 border border-emerald-500/20">
+                                    ✓ PAID
+                                  </span>
+                                ) : o.paymentStatus === 'refunded' ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-455 border border-rose-500/20">
+                                    ↺ REFUNDED
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-450 border border-amber-500/20">
+                                    ⚠ PENDING
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3">
+                                <Badge variant="secondary" className="scale-90 origin-left uppercase text-[10px]">
+                                  {o.orderStatus}
+                                </Badge>
+                              </td>
+                              <td className="py-3 text-right text-slate-400 font-mono">{formatPrice(o.subtotal)}</td>
+                              <td className="py-3 text-right text-amber-400 font-mono">{formatPrice(o.tax)}</td>
+                              <td className="py-3 text-right text-slate-500 font-mono">
+                                {o.discount > 0 ? formatPrice(o.discount) : '-'}
+                              </td>
+                              <td className="py-3 text-right text-emerald-400 font-mono font-bold">{formatPrice(o.total)}</td>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
                     </div>
-                  </Card>
+                  );
+                })()}
+              </Card>
 
-                  {/* Receipt Timeline */}
-                  <Card className="p-5 border-slate-850 bg-slate-900/30 space-y-4">
-                    <div>
-                      <h3 className="font-display font-bold text-sm text-textPearl">Receipt Settlements Timeline</h3>
-                      <p className="text-[10px] text-slate-500">Real-time chronicle log of receipt transactions completed.</p>
-                    </div>
-                    <div className="relative border-l-2 border-slate-800 ml-3 pl-5 space-y-4">
-                      {selectedMonthData.orders
-                        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                        .slice(0, 10)
-                        .map((o, idx) => (
-                          <div key={idx} className="relative">
-                            <div className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-slate-955" />
-                            <div className="text-xs">
-                              <span className="text-[9px] text-slate-500 font-bold block">{new Date(o.createdAt).toLocaleString()}</span>
-                              <p className="text-slate-355 font-semibold mt-0.5">
-                                Invoice <strong className="text-textPearl">#{o.invoiceNumber || (o.orderId && o.orderId.includes('-') ? o.orderId.split('-')[1] : o.orderId || o.id)}</strong> was completed for Table #{o.tableNumber || 'Walk-in'}. Total amount <strong className="text-emerald-500 font-mono">{formatPrice(o.total)}</strong> paid.
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-                  </Card>
-
+              {/* Monthly Historical Settlements Timeline */}
+              <Card className="p-5 border-slate-850 bg-slate-900/30 space-y-4">
+                <div>
+                  <h3 className="font-display font-bold text-sm text-textPearl">Monthly Settlements Timeline</h3>
+                  <p className="text-[10px] text-slate-500">Recent completed check settlements across {selectedMonthData.label}.</p>
                 </div>
-
-                {/* Right column: GST Tax and Payment Breakdowns */}
-                <div className="space-y-6">
-                  
-                  {/* GST Tax Breakdown */}
-                  <Card className="p-5 border-slate-850 bg-slate-900/30 space-y-4">
-                    <div>
-                      <h3 className="font-display font-bold text-sm text-textPearl">GST Margins Breakdown</h3>
-                      <p className="text-[10px] text-slate-500">Split allocations for Central and State tax rules.</p>
-                    </div>
-
-                    <div className="space-y-3.5 text-xs font-semibold text-slate-400">
-                      <div className="flex justify-between pb-2 border-b border-slate-850/60">
-                        <span>CGST (Central Tax 2.5%)</span>
-                        <span className="text-textPearl font-mono">{formatPrice(selectedMonthData.gst / 2)}</span>
-                      </div>
-                      <div className="flex justify-between pb-2 border-b border-slate-850/60">
-                        <span>SGST (State Tax 2.5%)</span>
-                        <span className="text-textPearl font-mono">{formatPrice(selectedMonthData.gst / 2)}</span>
-                      </div>
-                      <div className="flex justify-between pb-2 border-b border-slate-850/60">
-                        <span>IGST (Interstate Tax 0%)</span>
-                        <span className="text-slate-600 font-mono">{formatPrice(0)}</span>
-                      </div>
-                      <div className="flex justify-between text-textPearl font-extrabold pt-1">
-                        <span>Total GST Margins</span>
-                        <span className="text-amber-500 font-mono">{formatPrice(selectedMonthData.gst)}</span>
-                      </div>
-                    </div>
-                  </Card>
-
-                  {/* Payment Method Breakdown */}
-                  <Card className="p-5 border-slate-850 bg-slate-900/30 space-y-4">
-                    <div>
-                      <h3 className="font-display font-bold text-sm text-textPearl">Settled Payments Mix</h3>
-                      <p className="text-[10px] text-slate-500">Breakdown of revenue collected across methods.</p>
-                    </div>
-
-                    {(() => {
-                      let cash = 0;
-                      let upi = 0;
-                      let card = 0;
-                      let wallet = 0;
-
-                      selectedMonthData.orders.forEach(o => {
-                        if (o.paymentMethods) {
-                          cash += o.paymentMethods.cash || 0;
-                          upi += o.paymentMethods.upi || 0;
-                          card += o.paymentMethods.card || 0;
-                          wallet += o.paymentMethods.wallet || 0;
-                        } else {
-                          const method = String(o.paymentMethod || 'cash').toLowerCase();
-                          if (method.includes('upi')) upi += o.total || 0;
-                          else if (method.includes('card')) card += o.total || 0;
-                          else if (method.includes('wallet')) wallet += o.total || 0;
-                          else cash += o.total || 0;
-                        }
-                      });
-
-                      const totalSum = cash + upi + card + wallet || 1;
-
-                      return (
-                        <div className="space-y-3.5 text-xs font-semibold text-slate-450">
-                          <div className="space-y-1">
-                            <div className="flex justify-between text-slate-350">
-                              <span className="flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5 text-sky-400" /> UPI Transfer</span>
-                              <span className="font-mono">{formatPrice(upi)} ({Math.round(upi / totalSum * 100)}%)</span>
-                            </div>
-                            <div className="w-full bg-slate-955 h-1.5 rounded-full overflow-hidden">
-                              <div className="bg-sky-500 h-full rounded-full" style={{ width: `${(upi / totalSum * 100)}%` }} />
-                            </div>
-                          </div>
-
-                          <div className="space-y-1">
-                            <div className="flex justify-between text-slate-355">
-                              <span className="flex items-center gap-1.5"><CreditCard className="w-3.5 h-3.5 text-amber-400" /> Credit/Debit Card</span>
-                              <span className="font-mono">{formatPrice(card)} ({Math.round(card / totalSum * 100)}%)</span>
-                            </div>
-                            <div className="w-full bg-slate-955 h-1.5 rounded-full overflow-hidden">
-                              <div className="bg-amber-500 h-full rounded-full" style={{ width: `${(card / totalSum * 100)}%` }} />
-                            </div>
-                          </div>
-
-                          <div className="space-y-1">
-                            <div className="flex justify-between text-slate-355">
-                              <span className="flex items-center gap-1.5"><DollarSign className="w-3.5 h-3.5 text-emerald-400" /> Cash Settlements</span>
-                              <span className="font-mono">{formatPrice(cash)} ({Math.round(cash / totalSum * 100)}%)</span>
-                            </div>
-                            <div className="w-full bg-slate-955 h-1.5 rounded-full overflow-hidden">
-                              <div className="bg-emerald-455 h-full rounded-full" style={{ width: `${(cash / totalSum * 100)}%` }} />
-                            </div>
-                          </div>
-
-                          <div className="space-y-1">
-                            <div className="flex justify-between text-slate-355">
-                              <span className="flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5 text-purple-400" /> Digital Wallets</span>
-                              <span className="font-mono">{formatPrice(wallet)} ({Math.round(wallet / totalSum * 100)}%)</span>
-                            </div>
-                            <div className="w-full bg-slate-955 h-1.5 rounded-full overflow-hidden">
-                              <div className="bg-purple-500 h-full rounded-full" style={{ width: `${(wallet / totalSum * 100)}%` }} />
-                            </div>
-                          </div>
+                <div className="relative border-l-2 border-slate-800 ml-3 pl-5 space-y-4">
+                  {selectedMonthData.orders
+                    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                    .slice(0, 8)
+                    .map((o, idx) => (
+                      <div key={idx} className="relative">
+                        <div className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-emerald-500 border-2 border-slate-955" />
+                        <div className="text-xs">
+                          <span className="text-[9px] text-slate-500 font-bold block">{new Date(o.createdAt).toLocaleString()}</span>
+                          <p className="text-slate-355 font-semibold mt-0.5">
+                            Invoice <strong className="text-textPearl">#{o.invoiceNumber || (o.orderId && o.orderId.includes('-') ? o.orderId.split('-')[1] : o.orderId || o.id)}</strong> was completed for Table #{o.tableNumber || 'Walk-in'}. Total amount <strong className="text-emerald-500 font-mono">{formatPrice(o.total)}</strong> paid.
+                          </p>
                         </div>
-                      );
-                    })()}
-                  </Card>
+                      </div>
+                    ))}
+                </div>
+              </Card>
+            </div>
 
+            {/* Right Column: Payment Breakdown & Daily GST Breakdown */}
+            <div className="space-y-6">
+
+              {/* PAYMENT BREAKDOWN FOR SELECTED DATE */}
+              <Card className="p-5 border-slate-850 bg-slate-900/30 space-y-4">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h3 className="font-display font-bold text-sm text-textPearl">Payment Breakdown</h3>
+                    <p className="text-[10px] text-slate-500">Collected and pending funds for {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}.</p>
+                  </div>
+                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                    {dailyRevenueData.count} Settled
+                  </span>
                 </div>
 
-              </div>
-            </>
-          )}
+                <div className="space-y-3.5 text-xs font-semibold text-slate-350">
+                  {/* Cash */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-slate-350">
+                      <span className="flex items-center gap-1.5"><DollarSign className="w-3.5 h-3.5 text-emerald-400" /> Cash</span>
+                      <span className="font-mono text-textPearl font-bold">
+                        {formatPrice(dailyRevenueData.cash)} {dailyRevenueData.gross > 0 ? `(${Math.round(dailyRevenueData.cash / dailyRevenueData.gross * 100)}%)` : ''}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-955 h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-emerald-500 h-full rounded-full transition-all duration-300" style={{ width: `${dailyRevenueData.gross > 0 ? (dailyRevenueData.cash / dailyRevenueData.gross * 100) : 0}%` }} />
+                    </div>
+                  </div>
+
+                  {/* UPI / Razorpay */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-slate-350">
+                      <span className="flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5 text-sky-400" /> UPI / Razorpay</span>
+                      <span className="font-mono text-textPearl font-bold">
+                        {formatPrice(dailyRevenueData.upi)} {dailyRevenueData.gross > 0 ? `(${Math.round(dailyRevenueData.upi / dailyRevenueData.gross * 100)}%)` : ''}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-955 h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-sky-500 h-full rounded-full transition-all duration-300" style={{ width: `${dailyRevenueData.gross > 0 ? (dailyRevenueData.upi / dailyRevenueData.gross * 100) : 0}%` }} />
+                    </div>
+                  </div>
+
+                  {/* Card & Other */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-slate-350">
+                      <span className="flex items-center gap-1.5"><CreditCard className="w-3.5 h-3.5 text-amber-400" /> Card & Other Methods</span>
+                      <span className="font-mono text-textPearl font-bold">
+                        {formatPrice(dailyRevenueData.card + dailyRevenueData.wallet + dailyRevenueData.other)} {dailyRevenueData.gross > 0 ? `(${Math.round((dailyRevenueData.card + dailyRevenueData.wallet + dailyRevenueData.other) / dailyRevenueData.gross * 100)}%)` : ''}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-955 h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-amber-500 h-full rounded-full transition-all duration-300" style={{ width: `${dailyRevenueData.gross > 0 ? ((dailyRevenueData.card + dailyRevenueData.wallet + dailyRevenueData.other) / dailyRevenueData.gross * 100) : 0}%` }} />
+                    </div>
+                  </div>
+
+                  {/* Pending Payments */}
+                  <div className="space-y-1 pt-2 border-t border-slate-850/60">
+                    <div className="flex justify-between text-slate-350">
+                      <span className="flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5 text-amber-450" /> Outstanding / Pending</span>
+                      <span className="font-mono text-amber-400 font-bold">{formatPrice(dailyRevenueData.pending)}</span>
+                    </div>
+                    <div className="w-full bg-slate-955 h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-amber-500/80 h-full rounded-full transition-all duration-300" style={{ width: `${dailyRevenueData.pending > 0 ? 100 : 0}%` }} />
+                    </div>
+                  </div>
+                </div>
+              </Card>
+
+              {/* DAILY GST MARGINS BREAKDOWN */}
+              <Card className="p-5 border-slate-850 bg-slate-900/30 space-y-4">
+                <div>
+                  <h3 className="font-display font-bold text-sm text-textPearl">Daily GST Margins Breakdown</h3>
+                  <p className="text-[10px] text-slate-500">Split tax allocations for {selectedDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}.</p>
+                </div>
+
+                <div className="space-y-3.5 text-xs font-semibold text-slate-400">
+                  <div className="flex justify-between pb-2 border-b border-slate-850/60">
+                    <span>CGST (Central Tax 2.5%)</span>
+                    <span className="text-textPearl font-mono">{formatPrice(dailyRevenueData.gst / 2)}</span>
+                  </div>
+                  <div className="flex justify-between pb-2 border-b border-slate-850/60">
+                    <span>SGST (State Tax 2.5%)</span>
+                    <span className="text-textPearl font-mono">{formatPrice(dailyRevenueData.gst / 2)}</span>
+                  </div>
+                  <div className="flex justify-between pb-2 border-b border-slate-850/60">
+                    <span>IGST (Interstate Tax 0%)</span>
+                    <span className="text-slate-600 font-mono">{formatPrice(0)}</span>
+                  </div>
+                  <div className="flex justify-between text-textPearl font-extrabold pt-1">
+                    <span>Total Daily GST</span>
+                    <span className="text-amber-500 font-mono">{formatPrice(dailyRevenueData.gst)}</span>
+                  </div>
+                </div>
+              </Card>
+
+              {/* MONTHLY SETTLED PAYMENTS MIX */}
+              <Card className="p-5 border-slate-850 bg-slate-900/30 space-y-4">
+                <div>
+                  <h3 className="font-display font-bold text-sm text-textPearl">Monthly Payments Mix</h3>
+                  <p className="text-[10px] text-slate-500">Cumulative revenue collected across {selectedMonthData.label}.</p>
+                </div>
+
+                {(() => {
+                  let cash = 0;
+                  let upi = 0;
+                  let card = 0;
+                  let wallet = 0;
+
+                  selectedMonthData.orders.forEach(o => {
+                    if (o.paymentMethods) {
+                      cash += o.paymentMethods.cash || 0;
+                      upi += o.paymentMethods.upi || 0;
+                      card += o.paymentMethods.card || 0;
+                      wallet += o.paymentMethods.wallet || 0;
+                    } else {
+                      const method = String(o.paymentMethod || 'cash').toLowerCase();
+                      if (method.includes('upi')) upi += o.total || 0;
+                      else if (method.includes('card')) card += o.total || 0;
+                      else if (method.includes('wallet')) wallet += o.total || 0;
+                      else cash += o.total || 0;
+                    }
+                  });
+
+                  const totalSum = cash + upi + card + wallet || 1;
+
+                  return (
+                    <div className="space-y-3.5 text-xs font-semibold text-slate-450">
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-slate-350">
+                          <span className="flex items-center gap-1.5"><Smartphone className="w-3.5 h-3.5 text-sky-400" /> UPI Transfer</span>
+                          <span className="font-mono">{formatPrice(upi)} ({Math.round(upi / totalSum * 100)}%)</span>
+                        </div>
+                        <div className="w-full bg-slate-955 h-1.5 rounded-full overflow-hidden">
+                          <div className="bg-sky-500 h-full rounded-full" style={{ width: `${(upi / totalSum * 100)}%` }} />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-slate-355">
+                          <span className="flex items-center gap-1.5"><CreditCard className="w-3.5 h-3.5 text-amber-400" /> Credit/Debit Card</span>
+                          <span className="font-mono">{formatPrice(card)} ({Math.round(card / totalSum * 100)}%)</span>
+                        </div>
+                        <div className="w-full bg-slate-955 h-1.5 rounded-full overflow-hidden">
+                          <div className="bg-amber-500 h-full rounded-full" style={{ width: `${(card / totalSum * 100)}%` }} />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-slate-355">
+                          <span className="flex items-center gap-1.5"><DollarSign className="w-3.5 h-3.5 text-emerald-400" /> Cash Settlements</span>
+                          <span className="font-mono">{formatPrice(cash)} ({Math.round(cash / totalSum * 100)}%)</span>
+                        </div>
+                        <div className="w-full bg-slate-955 h-1.5 rounded-full overflow-hidden">
+                          <div className="bg-emerald-455 h-full rounded-full" style={{ width: `${(cash / totalSum * 100)}%` }} />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-slate-355">
+                          <span className="flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5 text-purple-400" /> Digital Wallets</span>
+                          <span className="font-mono">{formatPrice(wallet)} ({Math.round(wallet / totalSum * 100)}%)</span>
+                        </div>
+                        <div className="w-full bg-slate-955 h-1.5 rounded-full overflow-hidden">
+                          <div className="bg-purple-500 h-full rounded-full" style={{ width: `${(wallet / totalSum * 100)}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </Card>
+
+            </div>
+          </div>
         </div>
       )}
 
