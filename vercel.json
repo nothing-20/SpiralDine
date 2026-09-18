@@ -4,6 +4,14 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/api/payments/razorpay/create-order",
+      "destination": "/api/payments/create-order"
+    },
+    {
+      "source": "/api/payments/razorpay/verify",
+      "destination": "/api/payments/verify"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },
