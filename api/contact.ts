@@ -1,7 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { sendMailWithLogging } from './_lib/resendHelper';
-import { db } from './_lib/resendHelper';
-import { collection, addDoc } from 'firebase/firestore';
+import { Resend } from 'resend';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -29,19 +27,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       status: 'pending',
     };
 
-    // 1. Record inquiry in Firestore supportTickets collection
-    let ticketId: string | null = null;
-    try {
-      const docRef = await addDoc(collection(db, 'supportTickets'), {
-        ...submissionData,
-        type: 'contact_inquiry',
-      });
-      ticketId = docRef.id;
-    } catch (dbErr) {
-      console.warn('[Vercel API /contact] Firestore write failed or restricted:', dbErr);
-    }
-
-    // 2. Attempt email dispatch via Resend if RESEND_API_KEY is configured
     const apiKey = process.env.RESEND_API_KEY;
     if (!apiKey) {
       // Per instructions: Do not pretend message was sent if backend email service is unconfigured
@@ -49,12 +34,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         success: false,
         error: 'Contact email dispatch is currently unavailable on the server.',
         fallbackEmail: 'support@restaurantos.com',
-        ticketId: ticketId,
       });
     }
 
+    const resend = new Resend(apiKey);
     const emailHtml = `
-      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e8ded6; rounded: 12px;">
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e8ded6; border-radius: 12px;">
         <h2 style="color: #d65336;">New SpiralDine Contact Inquiry</h2>
         <p><strong>Name:</strong> ${submissionData.name}</p>
         <p><strong>Email:</strong> ${submissionData.email}</p>
@@ -68,26 +53,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       </div>
     `;
 
-    const emailResult = await sendMailWithLogging({
-      to: 'support@restaurantos.com',
+    const response = await resend.emails.send({
+      from: 'Spiral Dine <onboarding@resend.dev>',
+      to: ['support@restaurantos.com'],
       subject: `[SpiralDine Contact] ${submissionData.subject} - ${submissionData.restaurantName || submissionData.name}`,
       html: emailHtml,
-      type: 'contact_inquiry',
     });
 
-    if (!emailResult.success) {
+    if (response.error) {
       return res.status(502).json({
         success: false,
-        error: 'Failed to deliver message to support email.',
+        error: response.error.message || 'Failed to deliver message.',
         fallbackEmail: 'support@restaurantos.com',
-        ticketId: ticketId,
       });
     }
 
     return res.status(200).json({
       success: true,
       message: 'Inquiry received successfully. Our team will contact you shortly.',
-      ticketId: ticketId,
+      id: response.data?.id,
     });
   } catch (err: any) {
     console.error('[Vercel API /contact] Error processing request:', err);
