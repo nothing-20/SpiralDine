@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { useTheme } from '../../context/ThemeContext';
-import { getDashboardRoute } from '../../utils/navigation';
 import { motion } from 'framer-motion';
+import PublicNavbar from '../public-pages/components/PublicNavbar';
+import PublicFooter from '../public-pages/components/PublicFooter';
 
 // Decorative food imagery
 import leftPlateImg from '../../assets/left_food_plate.png';
@@ -13,14 +13,11 @@ import basilLeaf2 from '../../assets/basil_leaf_2.png';
 
 // Lucide icons
 import { 
-  Sun, 
-  Moon, 
   ChefHat, 
   Utensils, 
   TrendingUp, 
   SlidersHorizontal,
   ChevronDown,
-  Sparkles,
   Settings,
   Heart,
   Leaf,
@@ -29,9 +26,12 @@ import {
 } from 'lucide-react';
 
 export const LandingPage: React.FC = () => {
-  const { user, logout } = useAuth();
-  const { theme, toggleTheme } = useTheme();
+  const { user } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    document.title = 'SpiralDine | Home';
+  }, []);
 
   const [showSwitcher, setShowSwitcher] = useState(false);
 
@@ -112,63 +112,7 @@ export const LandingPage: React.FC = () => {
       {/* ========================================================================= */}
       {/* 2. HEADER & NAVIGATION                                                    */}
       {/* ========================================================================= */}
-      <header className="w-full max-w-7xl mx-auto px-6 py-5 flex items-center justify-between relative z-20">
-        {/* Left side: Logo & Tagline */}
-        <div className="flex items-center space-x-3.5">
-          <div className="w-10 h-10 bg-[#D65336] rounded-xl flex items-center justify-center shadow-xs">
-            <span className="text-white font-extrabold text-xl font-display leading-none">S</span>
-          </div>
-          <div>
-            <span className="font-display font-extrabold text-xl tracking-tight text-[#17202A]">
-              Spiral <span className="text-[#D65336]">Dine</span>
-            </span>
-            <p className="text-[10px] font-semibold text-[#8A817A] hidden sm:block leading-none mt-0.5">
-              Smart Dining. Smarter Business.
-            </p>
-          </div>
-        </div>
-
-        {/* Center navigation */}
-        <nav className="hidden md:flex items-center space-x-8 text-xs font-bold text-[#667085]">
-          <a href="#" className="text-[#D65336] relative py-1">
-            Home
-            <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#D65336] rounded-full" />
-          </a>
-          <a href="#features" className="hover:text-[#D65336] transition-colors">Features</a>
-          <a href="#pricing" className="hover:text-[#D65336] transition-colors">Pricing</a>
-          <a href="#about" className="hover:text-[#D65336] transition-colors">About</a>
-          <a href="#contact" className="hover:text-[#D65336] transition-colors">Contact</a>
-        </nav>
-
-        {/* Right side controls */}
-        <div className="flex items-center space-x-3">
-          <button 
-            onClick={toggleTheme}
-            className="p-2.5 bg-[#F7F0EA] border border-[#E8DED6] rounded-xl text-[#17202A] hover:bg-[#EFE5DC] transition-all shadow-2xs"
-            title="Toggle theme"
-          >
-            {theme === 'dark' ? <Sun className="w-4 h-4 text-[#D65336]" /> : <Moon className="w-4 h-4 text-[#17202A]" />}
-          </button>
-          
-          {user ? (
-            <div className="flex items-center space-x-2">
-              <span className="text-[11px] text-[#667085] font-bold hidden sm:inline">{user.displayName || user.email} ({user.role})</span>
-              <button
-                onClick={() => navigate(getDashboardRoute(user.role))}
-                className="px-3.5 py-2 bg-[#FCEDE7] hover:bg-[#F9DDD3] border border-[#F5CBC4] text-[#D65336] rounded-xl text-xs font-bold uppercase transition-all shadow-2xs"
-              >
-                Go to Dashboard
-              </button>
-              <button 
-                onClick={logout}
-                className="px-3.5 py-2 bg-[#F7F0EA] hover:bg-[#EFE5DC] border border-[#E8DED6] text-[#17202A] rounded-xl text-xs font-bold uppercase transition-all"
-              >
-                Logout
-              </button>
-            </div>
-          ) : null}
-        </div>
-      </header>
+      <PublicNavbar />
 
 
       {/* ========================================================================= */}
@@ -439,22 +383,7 @@ export const LandingPage: React.FC = () => {
       {/* ========================================================================= */}
       {/* 6. MINIMALIST FOOTER                                                      */}
       {/* ========================================================================= */}
-      <footer className="w-full border-t border-[#E8DED6] bg-[#F7F0EA]/80 relative z-20">
-        <div className="max-w-7xl mx-auto px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-medium text-[#8A817A]">
-          <div>
-            <span>&copy; {new Date().getFullYear()} Spiral Dine. All rights reserved.</span>
-          </div>
-          <div className="flex space-x-6">
-            <a href="#" className="hover:text-[#17202A] transition-colors">Privacy Policy</a>
-            <a href="#" className="hover:text-[#17202A] transition-colors">Terms of Service</a>
-            <a href="#" className="hover:text-[#17202A] transition-colors">Support Desk</a>
-            <a href="#" className="hover:text-[#17202A] transition-colors">Contact Us</a>
-          </div>
-          <div>
-            <span className="text-[11px] text-[#8A817A]">Build Version: v1.3.0</span>
-          </div>
-        </div>
-      </footer>
+      <PublicFooter />
     </div>
   );
 };

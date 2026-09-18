@@ -15,6 +15,13 @@ import LoadingSpinner from '../components/ui/LoadingSpinner/LoadingSpinner';
 
 const DashboardLayout = React.lazy(() => import('../components/layout/DashboardLayout'));
 
+// Public Website Pages
+const FeaturesPage = React.lazy(() => import('../features/public-pages/FeaturesPage'));
+const PricingPage = React.lazy(() => import('../features/public-pages/PricingPage'));
+const AboutPage = React.lazy(() => import('../features/public-pages/AboutPage'));
+const ContactPage = React.lazy(() => import('../features/public-pages/ContactPage'));
+const NotFoundPage = React.lazy(() => import('../features/public-pages/NotFoundPage'));
+
 // Authentication
 const LoginForm = React.lazy(() => import('../features/auth/components/LoginForm'));
 const StaffLogin = React.lazy(() => import('../features/auth/components/StaffLogin'));
@@ -221,7 +228,11 @@ export const AppRoutes: React.FC = () => {
     }>
       <Routes>
         {/* 1. Public Front facing routes */}
-        <Route path="/" element={<RootRedirect />} />
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/features" element={<FeaturesPage />} />
+        <Route path="/pricing" element={<PricingPage />} />
+        <Route path="/about" element={<AboutPage />} />
+        <Route path="/contact" element={<ContactPage />} />
         <Route path="/customer" element={<CustomerWelcomeRoute />} />
         <Route path="/customer/dashboard" element={<Navigate to="/customer/home" replace />} />
         <Route path="/customer/restaurant/:tenantId/menu" element={<CustomerMenu />} />
@@ -392,7 +403,7 @@ export const AppRoutes: React.FC = () => {
         </Route>
 
         {/* 9. Catch-all 404 Route */}
-        <Route path="*" element={<NotFound />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </React.Suspense>
   );
