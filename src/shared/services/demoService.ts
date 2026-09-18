@@ -265,20 +265,6 @@ export const demoService = {
       updatedAt: new Date().toISOString()
     });
 
-    // 4. Seed Branches
-    const branches = [
-      { id: 'branch-1', name: `${preset.name} - Downtown`, address: preset.address },
-      { id: 'branch-2', name: `${preset.name} - Uptown`, address: preset.address.replace('Culinary', 'Heights') }
-    ];
-    branches.forEach((b) => {
-      const ref = doc(db, 'restaurants', tenantId, 'branches', b.id);
-      batch.set(ref, {
-        ...b,
-        tenantId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
-    });
 
     // 5. Seed Layout Config Settings
     const layoutRef = doc(db, 'restaurants', tenantId, 'settings', 'layout');
@@ -399,7 +385,7 @@ export const demoService = {
         positionY: spec.y,
         qrCodeId: `QR-${tableId}`,
         qrCodeUrl,
-        branchId: 'branch-1',
+        branchId: 'main',
         isActive: true,
         notes: `Standard seating layout for ${spec.name}`,
         createdAt: new Date().toISOString(),

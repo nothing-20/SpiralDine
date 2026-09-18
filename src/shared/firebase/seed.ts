@@ -97,20 +97,6 @@ export const seedDatabase = async (tenantId: string): Promise<void> => {
     updatedAt: new Date().toISOString()
   });
 
-  // Seed 2 Branches
-  const branches = [
-    { id: 'branch-1', name: 'Downtown Branch', address: '123 Downtown St' },
-    { id: 'branch-2', name: 'Uptown Branch', address: '789 Uptown Ave' }
-  ];
-  branches.forEach((b) => {
-    const ref = doc(db, 'restaurants', tenantId, 'branches', b.id);
-    batch.set(ref, {
-      ...b,
-      tenantId,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    });
-  });
 
   // 2. Seed 25 Menu Items
   const menuItems = [
@@ -285,59 +271,6 @@ export const seedDatabase = async (tenantId: string): Promise<void> => {
     });
   });
 
-  // Seed Mock Employees
-  const employees = [
-    { id: 'emp-1', name: 'Owner Jack', role: 'owner', email: 'owner@palace.com' },
-    { id: 'emp-2', name: 'Manager Arthur', role: 'admin', email: 'arthur@palace.com' },
-    { id: 'emp-3', name: 'Chef Mario', role: 'kitchen', email: 'mario@palace.com' },
-    { id: 'emp-4', name: 'Waiter Peter', role: 'waiter', email: 'peter@palace.com' },
-    { id: 'emp-5', name: 'Waiter Jane', role: 'waiter', email: 'jane@palace.com' },
-    { id: 'emp-6', name: 'Cashier Alice', role: 'waiter', email: 'alice@palace.com' }
-  ];
-  employees.forEach((emp) => {
-    const ref = doc(db, 'restaurants', tenantId, 'employees', emp.id);
-    batch.set(ref, {
-      ...emp,
-      phone: '123-456-7890',
-      status: 'active',
-      tenantId,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    });
-  });
-
-  // Seed 10 Sample Orders
-  const sampleOrders = [
-    { customerName: 'John Diner', tableNumber: '1', items: [{ itemId: 'MENU-004', name: 'French Fries', count: 1, pricePerUnit: 450, notes: '' }], quantity: 1, total: 450, status: 'Preparing', internalStatus: 'PLACED' },
-    { customerName: 'Sophia Foodie', tableNumber: '2', items: [{ itemId: 'MENU-006', name: 'Butter Chicken', count: 1, pricePerUnit: 1850, notes: 'Spicy' }], quantity: 1, total: 1850, status: 'Cooking', internalStatus: 'PREPARING' },
-    { customerName: 'Liam Green', tableNumber: '3', items: [{ itemId: 'MENU-001', name: 'Veg Spring Rolls', count: 2, pricePerUnit: 650, notes: '' }], quantity: 2, total: 1300, status: 'Ready', internalStatus: 'READY' },
-    { customerName: 'Emma Sweet', tableNumber: '5', items: [{ itemId: 'MENU-023', name: 'Brownie', count: 1, pricePerUnit: 750, notes: '' }], quantity: 1, total: 750, status: 'Served', internalStatus: 'DELIVERED' },
-    { customerName: 'Noah Fast', tableNumber: '4', items: [{ itemId: 'MENU-016', name: 'Veg Burger', count: 1, pricePerUnit: 950, notes: 'No onion' }], quantity: 1, total: 950, status: 'Preparing', internalStatus: 'PLACED' },
-    { customerName: 'Olivia Pizza', tableNumber: '6', items: [{ itemId: 'MENU-013', name: 'Margherita', count: 1, pricePerUnit: 1400, notes: '' }], quantity: 1, total: 1400, status: 'Cooking', internalStatus: 'PREPARING' },
-    { customerName: 'Ava Drink', tableNumber: '7', items: [{ itemId: 'MENU-018', name: 'Coke', count: 2, pricePerUnit: 250, notes: 'With ice' }], quantity: 2, total: 500, status: 'Ready', internalStatus: 'READY' },
-    { customerName: 'William Feast', tableNumber: '8', items: [{ itemId: 'MENU-007', name: 'Chicken Biryani', count: 1, pricePerUnit: 1950, notes: '' }], quantity: 1, total: 1950, status: 'Served', internalStatus: 'DELIVERED' },
-    { customerName: 'James Sweet', tableNumber: '2', items: [{ itemId: 'MENU-025', name: 'Gulab Jamun', count: 2, pricePerUnit: 650, notes: '' }], quantity: 2, total: 1300, status: 'Preparing', internalStatus: 'PLACED' },
-    { customerName: 'Isabella Paneer', tableNumber: '3', items: [{ itemId: 'MENU-009', name: 'Paneer Butter Masala', count: 1, pricePerUnit: 1550, notes: '' }], quantity: 1, total: 1550, status: 'Cooking', internalStatus: 'PREPARING' }
-  ];
-
-  sampleOrders.forEach((o, index) => {
-    const orderId = `ORD-SEED-${(index + 1).toString().padStart(3, '0')}`;
-    const ref = doc(db, 'restaurants', tenantId, 'orders', orderId);
-    batch.set(ref, {
-      orderId,
-      customerName: o.customerName,
-      tableNumber: o.tableNumber,
-      items: o.items,
-      quantity: o.quantity,
-      subtotal: o.total,
-      tax: Math.round(o.total * 0.08),
-      total: o.total + Math.round(o.total * 0.08),
-      status: o.internalStatus,
-      statusText: o.status,
-      tenantId,
-      createdAt: new Date().toISOString()
-    });
-  });
 
   // Seed 20 Inventory Records
   const inventoryItems = [

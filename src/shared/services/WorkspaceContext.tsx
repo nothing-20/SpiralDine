@@ -313,7 +313,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             });
 
             if (activeBranchDocs.length > 0) {
-              // Resolve to the restaurant's active branch (e.g. branch-1 "Downtown Branch")
+              // Resolve to the restaurant's active primary branch
               const primaryBranchDoc = activeBranchDocs[0];
               branchData = { id: primaryBranchDoc.id, ...primaryBranchDoc.data() };
               branchId = primaryBranchDoc.id;
@@ -346,6 +346,13 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               status: 'active'
             };
             branchId = 'main';
+
+            // Self-heal: reset any stale mock or invalid branchId to 'main'
+            if (user.uid && userData.branchId && userData.branchId !== 'main') {
+              try {
+                await setDoc(doc(db, 'users', user.uid), { branchId: 'main' }, { merge: true });
+              } catch (_e) {}
+            }
           }
         } catch (err) {
           console.warn('[WorkspaceValidation] Error querying restaurant branches subcollection:', err);
