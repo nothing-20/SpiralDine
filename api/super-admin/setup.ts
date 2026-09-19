@@ -7,6 +7,7 @@ import {
 } from '../_lib/firebaseAdminAuth.js';
 import { 
   db as serverDb, 
+  auth as serverAuth,
   doc as serverDoc, 
   getDoc as serverGetDoc, 
   setDoc as serverSetDoc,
@@ -14,7 +15,9 @@ import {
   query as serverQuery, 
   where as serverWhere, 
   getDocs as serverGetDocs, 
-  ensureServerAuth
+  ensureServerAuth,
+  createUserWithEmailAndPassword,
+  updateProfile
 } from '../_lib/firebaseServer.js';
 
 /**
@@ -28,8 +31,8 @@ import {
  * 1. Verification of server-side SUPER_ADMIN_SETUP_SECRET.
  * 2. Atomic/transactional race-condition check ensuring only the FIRST Super Admin can be created.
  * 3. Validation of input parameters (name, email, password strength, setup key).
- * 4. User creation via Firebase Authentication API.
- * 5. Custom claims assignment: { role: 'super_admin', super_admin: true }.
+ * 4. User creation via Firebase Authentication.
+ * 5. Custom claims assignment: { role: 'super_admin', super_admin: true } when service account is available.
  * 6. Profile creation in Firestore users/{uid} conforming to canonical schema.
  * 7. Permanent closure of first-time setup once completed.
  * 8. Zero mock data creation.
@@ -138,21 +141,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 
-  // 3. Verify Server-side Firebase credentials
-  const creds = getServiceAccountCredentials();
-  if (!creds) {
-    console.error('[super-admin/setup:POST] FIREBASE_SERVICE_ACCOUNT is not configured in server environment.');
-    return res.status(500).json({
-      error: 'Firebase Admin credentials missing. FIREBASE_SERVICE_ACCOUNT must be configured in Vercel environment variables.',
-    });
-  }
-
   const now = new Date().toISOString();
 
   try {
     await ensureServerAuth();
 
-    // 4. Check existing real human Super Admins before proceeding
+    // 3. Check existing real human Super Admins before proceeding
     const q1 = serverQuery(serverCollection(serverDb, 'users'), serverWhere('role', '==', 'super_admin'));
     const q2 = serverQuery(serverCollection(serverDb, 'users'), serverWhere('role', '==', 'super-admin'));
     const [existing1, existing2] = await Promise.all([serverGetDocs(q1), serverGetDocs(q2)]);
@@ -181,33 +175,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       syncedFromUserCheck: false,
     }, { merge: true });
 
-    // 5. Check if email already has super admin claim in Firebase Auth
-    const existingUser = await lookupFirebaseAuthUser(creds, cleanEmail);
-    if (existingUser?.customAttributes?.role === 'super_admin' || existingUser?.customAttributes?.super_admin === true) {
-      return res.status(409).json({
-        error: 'Super Admin setup has already been completed.',
+    // 4. Create user in Firebase Authentication
+    let createdUid = '';
+    const creds = getServiceAccountCredentials();
+
+    if (creds) {
+      // Use Admin REST API
+      const existingUser = await lookupFirebaseAuthUser(creds, cleanEmail);
+      if (existingUser?.customAttributes?.role === 'super_admin' || existingUser?.customAttributes?.super_admin === true) {
+        return res.status(409).json({
+          error: 'Super Admin setup has already been completed.',
+        });
+      }
+
+      const userRecord = await createFirebaseAuthUser(creds, {
+        email: cleanEmail,
+        password: password,
+        displayName: fullName.trim(),
       });
+      createdUid = userRecord.uid;
+
+      // Assign Canonical Super Admin Custom Claims
+      const existingClaims = existingUser?.customAttributes || {};
+      await setFirebaseAuthCustomClaims(creds, createdUid, {
+        ...existingClaims,
+        role: 'super_admin',
+        super_admin: true,
+      });
+    } else {
+      // Fallback: Create via Firebase Client Auth SDK in serverless function
+      try {
+        const userCred = await createUserWithEmailAndPassword(serverAuth, cleanEmail, password);
+        createdUid = userCred.user.uid;
+        await updateProfile(userCred.user, { displayName: fullName.trim() });
+      } catch (authErr: any) {
+        if (authErr.code === 'auth/email-already-in-use') {
+          // Attempt to sign in to verify identity and get UID
+          try {
+            const existingCred = await signInWithEmailAndPassword(serverAuth, cleanEmail, password);
+            createdUid = existingCred.user.uid;
+          } catch {
+            return res.status(400).json({
+              error: 'An account with this email address already exists in Firebase Auth with a different password.',
+            });
+          }
+        } else {
+          throw authErr;
+        }
+      }
     }
 
-    // 6. Create or update user in Firebase Authentication
-    const userRecord = await createFirebaseAuthUser(creds, {
-      email: cleanEmail,
-      password: password,
-      displayName: fullName.trim(),
-    });
-
-    // 7. Assign Canonical Super Admin Custom Claims
-    const existingClaims = existingUser?.customAttributes || {};
-    await setFirebaseAuthCustomClaims(creds, userRecord.uid, {
-      ...existingClaims,
-      role: 'super_admin',
-      super_admin: true,
-    });
-
-    // 8. Create/Update Firestore users/{uid} profile
-    const userDocRef = serverDoc(serverDb, 'users', userRecord.uid);
+    // 5. Create/Update Firestore users/{uid} profile
+    const userDocRef = serverDoc(serverDb, 'users', createdUid);
     await serverSetDoc(userDocRef, {
-      uid: userRecord.uid,
+      uid: createdUid,
       email: cleanEmail,
       displayName: fullName.trim(),
       role: 'super_admin',
@@ -220,11 +241,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       updatedAt: now,
     }, { merge: true });
 
-    // 9. Finalize setup lock with created UID
+    // 6. Finalize setup lock with created UID
     await serverSetDoc(lockRef, {
       isSetupComplete: true,
       completedAt: now,
-      superAdminUid: userRecord.uid,
+      superAdminUid: createdUid,
       superAdminEmail: cleanEmail,
       syncedFromUserCheck: false,
     }, { merge: true });

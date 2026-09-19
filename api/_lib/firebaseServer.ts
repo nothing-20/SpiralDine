@@ -12,7 +12,7 @@ import {
   getDocs, 
   limit 
 } from 'firebase/firestore';
-import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 
 const firebaseConfig = {
   apiKey: process.env.VITE_FIREBASE_API_KEY || 'AIzaSyCKE7c57Boi_5dpK53FaZOtTu6m6Kz1vHg',
@@ -59,5 +59,7 @@ export {
   query,
   where,
   getDocs,
-  limit
+  limit,
+  createUserWithEmailAndPassword,
+  updateProfile
 };
