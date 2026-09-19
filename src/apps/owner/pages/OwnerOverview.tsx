@@ -65,6 +65,48 @@ import {
   Wallet,
   Calendar
 } from 'lucide-react';
+import { cn } from '../../../utils/cn';
+
+/**
+ * Transforms raw telemetry keys into human-readable labels and formatted values.
+ */
+const formatMetricBadge = (key: string, value: any): { label: string; display: string } | null => {
+  const labelMap: Record<string, string> = {
+    recentOrders: 'Orders',
+    recentGross: 'Gross Revenue',
+    aov: 'Average Order Value',
+    activeDays: 'Active Days',
+    totalOrders: 'Total Orders',
+    completedCount: 'Completed',
+    cancelledCount: 'Cancelled',
+    delayedActiveOrders: 'Delayed Orders',
+    reviewCount: 'Reviews',
+    totalItems: 'Inventory Items',
+    avgPrepMins: 'Average Prep Time',
+    timedOrdersCount: 'Timed Orders',
+    lowStockCount: 'Low Stock',
+    outOfStockCount: 'Out of Stock',
+    completionRate: 'Completion Rate',
+    cancellationRate: 'Cancellation Rate',
+    withinSlaCount: 'Within SLA',
+    pctWithinSla: 'Within SLA %',
+  };
+
+  const label = labelMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+
+  let display = String(value);
+  if (key === 'recentGross' || key === 'aov') {
+    display = formatPrice(Number(value));
+  } else if (key === 'avgPrepMins') {
+    display = `${Number(value).toFixed(1)} min`;
+  } else if (key === 'cancellationRate' || key === 'completionRate' || key === 'pctWithinSla') {
+    display = `${Number(value).toFixed(1)}%`;
+  } else if (typeof value === 'number') {
+    display = value.toLocaleString();
+  }
+
+  return { label, display };
+};
 
 export const OwnerOverview: React.FC = () => {
   const { user } = useAuth();
@@ -3394,123 +3436,157 @@ export const OwnerOverview: React.FC = () => {
         isOpen={isHealthModalOpen}
         onClose={() => setIsHealthModalOpen(false)}
         title="Business Health Architecture & Scoring Breakdown"
-        size="2xl"
+        className="w-full max-w-[760px]"
+        closeAriaLabel="Close Business Health Details"
+        footer={
+          <Button
+            type="button"
+            onClick={() => setIsHealthModalOpen(false)}
+            className="bg-[#12352D] text-white hover:bg-[#0E2822] font-semibold text-xs px-5 py-2.5 rounded-xl transition-all shadow-sm cursor-pointer"
+          >
+            Close Details
+          </Button>
+        }
       >
-        <div className="space-y-4 text-left text-xs max-h-[75vh] overflow-y-auto pr-1">
-          {/* Top Banner */}
-          <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
-            <div className="space-y-1">
-              <div className="flex items-center space-x-2">
-                <span className="text-2xl font-black text-white">
-                  {businessHealthReport.overallScore !== null ? `${businessHealthReport.overallScore} / 100` : 'Limited Data'}
+        <div className="space-y-4 text-left">
+          {/* Top Summary Card */}
+          <div className="p-4 sm:p-5 rounded-2xl bg-[#12352D] text-white shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-300/90 block">
+                Business Health
+              </span>
+              <div className="flex items-baseline gap-3">
+                <span className="text-3xl sm:text-4xl font-black text-white font-display">
+                  {businessHealthReport.overallScore !== null ? businessHealthReport.overallScore : '—'}
+                  <span className="text-lg sm:text-xl font-medium text-emerald-200/70 ml-1">/ 100</span>
                 </span>
-                <span
-                  className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
-                  style={{
-                    backgroundColor: businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 80 ? 'rgba(22,132,91,0.15)' :
-                                     businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 65 ? 'rgba(46,125,50,0.15)' :
-                                     businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 50 ? 'rgba(217,119,6,0.15)' : 'rgba(214,69,69,0.15)',
-                    color: businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 80 ? '#10B981' :
-                           businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 65 ? '#4ADE80' :
-                           businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 50 ? '#FBBF24' : '#F87171',
-                  }}
-                >
+                <span className="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
                   {businessHealthReport.label}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">
-                Calculated strictly from live Firestore operations ({businessHealthReport.dataCoveragePercentage}% data coverage).
-              </p>
+              <div className="text-xs text-emerald-100/85 flex items-center gap-1.5 pt-0.5 font-medium">
+                <Activity className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                <span><strong>{businessHealthReport.dataCoveragePercentage}%</strong> data coverage from live operations</span>
+              </div>
             </div>
-            <div className="text-right text-[11px] text-slate-400">
-              <div className="font-semibold text-slate-300">Trend Status</div>
-              <div>{businessHealthReport.trendText}</div>
+
+            <div className="sm:text-right border-t sm:border-t-0 sm:border-l border-emerald-800/60 pt-3 sm:pt-0 sm:pl-5 space-y-1">
+              <span className="text-[11px] font-semibold text-emerald-200/80 uppercase tracking-wider block">
+                Historical Trend
+              </span>
+              <div className="text-xs font-bold text-white">
+                {businessHealthReport.trendText || 'No prior trend available'}
+              </div>
+              <div className="text-[11px] text-emerald-200/70">
+                {businessHealthReport.trendExplanation || 'Paced against recent operational activity'}
+              </div>
             </div>
           </div>
 
-          {/* Explainability Note */}
-          <div className="p-3 bg-blue-950/30 border border-blue-900/40 rounded-xl flex items-start space-x-2.5">
-            <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
-            <p className="text-[11px] text-blue-200/90 leading-relaxed">
+          {/* Explanation Banner */}
+          <div className="p-4 bg-[#EBF3FB] border border-[#C5DCF4] rounded-2xl flex items-start gap-3">
+            <div className="w-7 h-7 rounded-lg bg-[#D6E7F8] flex items-center justify-center shrink-0 mt-0.5">
+              <Info className="w-4 h-4 text-[#1D5D9B]" />
+            </div>
+            <p className="text-xs leading-relaxed text-[#173C6A] font-medium">
               Business Health scores restaurant operating vigor across 5 distinct operational pillars. 
               Dimensions with insufficient historical activity are marked <strong>Insufficient Data</strong> and excluded from penalizing your score, with remaining weights dynamically renormalized.
             </p>
           </div>
 
-          {/* 5 Dimensions List */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+          {/* 5 Operational Dimensions */}
+          <div className="space-y-3 pt-1">
+            <h4 className="text-xs font-bold text-[#52606D] uppercase tracking-wider">
               Operational Dimensions ({businessHealthReport.dimensions.length})
             </h4>
 
             {businessHealthReport.dimensions.map((dim) => {
               const isAvailable = dim.status === 'available';
               return (
-                <div key={dim.id} className="p-3.5 bg-slate-900/60 border border-slate-850 rounded-xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <span className="font-bold text-slate-200 text-sm">{dim.title}</span>
-                      <span className="text-[10px] text-slate-400">
-                        (Baseline Weight: {dim.weight}%)
-                      </span>
+                <div 
+                  key={dim.id} 
+                  className="p-4 sm:p-5 bg-white border border-[#E5E0D9] rounded-2xl space-y-3.5 shadow-xs hover:border-[#16845B]/30 transition-all"
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <h4 className="font-bold text-[#17202A] text-sm sm:text-base">{dim.title}</h4>
+                      <div className="text-[11px] text-[#52606D] pt-0.5">
+                        Baseline Weight: <strong>{dim.weight}%</strong>
+                      </div>
                     </div>
+
                     {isAvailable && dim.score !== null ? (
-                      <div className="flex items-center space-x-2">
-                        <span className="text-sm font-extrabold text-white">{dim.score} / 100</span>
-                        <span
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded"
-                          style={{
-                            backgroundColor: dim.score >= 80 ? 'rgba(16,185,129,0.15)' : dim.score >= 60 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
-                            color: dim.score >= 80 ? '#34D399' : dim.score >= 60 ? '#FBBF24' : '#F87171'
-                          }}
-                        >
+                      <div className="flex items-center space-x-2.5">
+                        <span className="text-base sm:text-lg font-black text-[#17202A] font-display">
+                          {dim.score} <span className="text-xs font-normal text-[#7B8794]">/ 100</span>
+                        </span>
+                        <span className={cn(
+                          "text-xs font-bold px-2.5 py-0.5 rounded-full border",
+                          dim.score >= 80 ? "bg-[#E8F5EF] text-[#16845B] border-[#C6E7D8]" :
+                          dim.score >= 60 ? "bg-[#FFF4DC] text-[#D98B00] border-[#FDE6B0]" :
+                          "bg-[#FBEAE5] text-[#D64545] border-[#F5CBC4]"
+                        )}>
                           {dim.score >= 80 ? 'Optimal' : dim.score >= 60 ? 'Fair' : 'Needs Attention'}
                         </span>
                       </div>
                     ) : (
-                      <span className="text-[10px] font-bold text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded">
+                      <span className="text-xs font-semibold text-[#52606D] bg-[#F0EDE8] border border-[#E5E0D9] px-2.5 py-0.5 rounded-full w-fit">
                         Insufficient Data
                       </span>
                     )}
                   </div>
 
-                  {/* Progress bar */}
-                  {isAvailable && dim.score !== null && (
-                    <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                  {/* Progress Bar */}
+                  {isAvailable && dim.score !== null ? (
+                    <div className="w-full bg-[#E5E0D9]/70 rounded-full h-2 overflow-hidden">
                       <div
-                        className="h-full rounded-full transition-all duration-500"
-                        style={{
-                          width: `${Math.min(100, Math.max(0, dim.score))}%`,
-                          backgroundColor: dim.score >= 80 ? '#10B981' : dim.score >= 60 ? '#F59E0B' : '#EF4444'
-                        }}
+                        className={cn(
+                          "h-full rounded-full transition-all duration-500",
+                          dim.score >= 80 ? "bg-[#16845B]" :
+                          dim.score >= 60 ? "bg-[#D98B00]" :
+                          "bg-[#D64545]"
+                        )}
+                        style={{ width: `${Math.min(100, Math.max(0, dim.score))}%` }}
                       />
                     </div>
+                  ) : (
+                    <div 
+                      className="w-full bg-[#F0EDE8] rounded-full h-2 border border-dashed border-[#E5E0D9]" 
+                      title="No progress bar for insufficient data" 
+                    />
                   )}
 
                   {/* Explanation text */}
-                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                  <p className="text-xs text-[#52606D] leading-relaxed">
                     {dim.explanation}
                   </p>
 
-                  {/* Metrics chips */}
+                  {/* Supporting Metrics Information Badges */}
                   {dim.metrics && Object.keys(dim.metrics).length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {Object.entries(dim.metrics).map(([k, v]) => (
-                        <span key={k} className="text-[10px] bg-slate-800/70 border border-slate-700/60 rounded px-2 py-0.5 text-slate-300">
-                          <span className="text-slate-400">{k}:</span> {typeof v === 'number' ? v : String(v)}
-                        </span>
-                      ))}
+                    <div className="pt-2 border-t border-[#F0EDE8]">
+                      <span className="text-[10px] uppercase font-bold tracking-wider text-[#7B8794] block mb-1.5">
+                        Supporting Metrics
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        {Object.entries(dim.metrics).map(([k, v]) => {
+                          const badge = formatMetricBadge(k, v);
+                          if (!badge) return null;
+                          return (
+                            <div
+                              key={k}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#F8F6F2] border border-[#E5E0D9] text-xs shadow-2xs"
+                            >
+                              <span className="text-[#52606D] text-[11px] font-medium">{badge.label}:</span>
+                              <span className="font-bold text-[#17202A]">{badge.display}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
               );
             })}
-          </div>
-
-          <div className="flex justify-end pt-2">
-            <Button onClick={() => setIsHealthModalOpen(false)} className="bg-slate-800 text-white hover:bg-slate-700 font-semibold text-xs px-4 py-2">
-              Close Details
-            </Button>
           </div>
         </div>
       </Modal>

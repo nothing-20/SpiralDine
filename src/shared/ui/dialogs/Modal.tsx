@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { cn } from '../../../utils/cn';
 
@@ -7,8 +7,11 @@ export interface IModalProps {
   onClose: () => void;
   title?: string;
   children: React.ReactNode;
+  footer?: React.ReactNode;
   className?: string;
+  contentClassName?: string;
   size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl' | '6xl' | '7xl' | 'max';
+  closeAriaLabel?: string;
 }
 
 export const Modal: React.FC<IModalProps> = ({
@@ -16,9 +19,31 @@ export const Modal: React.FC<IModalProps> = ({
   onClose,
   title,
   children,
+  footer,
   className,
-  size = 'lg'
+  contentClassName,
+  size = 'lg',
+  closeAriaLabel = 'Close dialog'
 }) => {
+  // Prevent background scrolling while modal is open & listen for Escape key
+  useEffect(() => {
+    if (!isOpen) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const sizeClasses = {
@@ -36,7 +61,7 @@ export const Modal: React.FC<IModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-x-hidden overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 overflow-hidden">
       {/* Background Overlay */}
       <div 
         className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm transition-opacity" 
@@ -45,30 +70,41 @@ export const Modal: React.FC<IModalProps> = ({
 
       {/* Modal Dialog Content */}
       <div 
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={title ? "modal-dialog-title" : undefined}
         className={cn(
-          "w-full bg-slate-900 border border-slate-800 backdrop-blur-md shadow-2xl rounded-2xl relative z-10 flex flex-col p-6 animate-in fade-in zoom-in-95 duration-200",
+          "w-full bg-slate-900 border border-slate-800 backdrop-blur-md shadow-2xl rounded-2xl relative z-10 flex flex-col max-h-[min(88vh,820px)] animate-in fade-in zoom-in-95 duration-200 overflow-hidden",
           sizeClasses[size] || 'max-w-lg',
           className
         )}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-slate-800/60 mb-4">
-          <h3 className="font-display font-bold text-base text-textPearl">
+        {/* Fixed Header */}
+        <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-slate-800/60 shrink-0">
+          <h3 id="modal-dialog-title" className="font-display font-bold text-base sm:text-lg text-textPearl pr-3">
             {title || 'Dialog'}
           </h3>
           <button 
+            type="button"
             onClick={onClose}
-            className="p-1.5 text-mutedAsh hover:text-textPearl hover:bg-slate-800 rounded-lg transition-all"
-            aria-label="Close dialog"
+            className="w-11 h-11 min-w-[44px] min-h-[44px] flex items-center justify-center text-mutedAsh hover:text-textPearl hover:bg-slate-800/80 rounded-xl transition-all cursor-pointer"
+            aria-label={closeAriaLabel}
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Content body */}
-        <div className="flex-1 text-sm text-slate-300">
+        {/* Scrollable Content Body */}
+        <div className={cn("flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-4 text-sm text-slate-300 overscroll-contain", contentClassName)}>
           {children}
         </div>
+
+        {/* Fixed Footer */}
+        {footer && (
+          <div className="flex items-center justify-end px-5 sm:px-6 py-3.5 border-t border-slate-800/60 shrink-0 bg-slate-900/50">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );
