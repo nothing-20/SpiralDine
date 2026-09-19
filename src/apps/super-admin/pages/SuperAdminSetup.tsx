@@ -39,7 +39,7 @@ export const SuperAdminSetup: React.FC = () => {
     let isMounted = true;
     const checkStatus = async () => {
       try {
-        const res = await fetch('/api/super-admin/status');
+        const res = await fetch('/api/super-admin/setup');
         if (res.ok) {
           const data = await res.json();
           if (isMounted && data.isSetupComplete) {

@@ -12,6 +12,10 @@
       "destination": "/api/payments/verify"
     },
     {
+      "source": "/api/super-admin/status",
+      "destination": "/api/super-admin/setup"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },
