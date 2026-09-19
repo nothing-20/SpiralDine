@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import { authService } from '../../../services/authService';
-import Button from '../../../components/ui/Button/Button';
 import { useToastStore } from '../../../components/ui/Toast/Toast';
+import SharedAuthLayout from '../../../shared/ui/auth/SharedAuthLayout';
+import { Mail, CheckCircle2, ArrowRight } from 'lucide-react';
 
 export const VerifyEmail: React.FC = () => {
   const { firebaseUser, logout } = useAuth();
@@ -39,40 +40,50 @@ export const VerifyEmail: React.FC = () => {
   };
 
   return (
-    <div className="space-y-5 text-center">
-      <h2 className="text-lg font-display font-bold text-textPearl">Verify Your Email</h2>
-      <p className="text-xs text-slate-400">
-        We have sent a verification link to <strong className="text-textPearl font-semibold">{firebaseUser?.email}</strong>.
-        Please click the link in your email to enable workspace functions.
-      </p>
+    <SharedAuthLayout
+      roleVariant="default"
+      badgeLabel="Email Verification"
+      pageTitle="Verify Your Email"
+      pageSubtitle={`We sent a confirmation link to ${firebaseUser?.email || 'your registered email'}.`}
+      icon={<Mail className="w-7 h-7 text-[#D65336]" />}
+      cardMaxWidth="max-w-[480px]"
+    >
+      <div className="space-y-4 text-center">
+        <p className="text-xs text-[#667085] leading-relaxed">
+          Please click the verification link in your email to enable full workspace permissions and features.
+        </p>
 
-      <div className="space-y-2 pt-2">
-        <Button 
-          type="button" 
-          className="w-full" 
-          onClick={checkVerificationStatus}
-        >
-          I've Verified My Email
-        </Button>
-        
-        <Button 
-          type="button" 
-          variant="secondary" 
-          className="w-full" 
-          onClick={handleResend}
-          isLoading={isSending}
-        >
-          Resend Verification Email
-        </Button>
+        <div className="space-y-2.5 pt-2">
+          <button 
+            type="button" 
+            className="w-full h-12 bg-[#D65336] hover:bg-[#B9432D] text-white font-bold text-xs rounded-xl flex items-center justify-center space-x-1.5 shadow-xs cursor-pointer" 
+            onClick={checkVerificationStatus}
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span>I've Verified My Email</span>
+          </button>
+          
+          <button 
+            type="button" 
+            className="w-full h-12 bg-[#FCFAF7] hover:bg-[#F5ECE4] border border-[#E8DED6] text-[#17202A] font-bold text-xs rounded-xl transition-all cursor-pointer" 
+            onClick={handleResend}
+            disabled={isSending}
+          >
+            {isSending ? 'Sending Link...' : 'Resend Verification Email'}
+          </button>
+        </div>
+
+        <div className="pt-4 border-t border-[#E8DED6]">
+          <button 
+            onClick={logout} 
+            className="text-xs text-[#8A817A] hover:text-[#17202A] hover:underline font-medium cursor-pointer"
+          >
+            Sign in with a different account
+          </button>
+        </div>
       </div>
-
-      <button 
-        onClick={logout} 
-        className="text-xs text-slate-500 hover:text-textPearl hover:underline mt-4"
-      >
-        Sign in with a different account
-      </button>
-    </div>
+    </SharedAuthLayout>
   );
 };
+
 export default VerifyEmail;
