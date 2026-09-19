@@ -1,5 +1,16 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getAdminAuth, getAdminFirestore } from '../_lib/firebaseAdmin.js';
+import { getAdminAuth, getAdminFirestore, hasAdminCredentials } from '../_lib/firebaseAdmin.js';
+import { 
+  db as serverDb, 
+  doc as serverDoc, 
+  getDoc as serverGetDoc, 
+  collection as serverCollection, 
+  query as serverQuery, 
+  where as serverWhere, 
+  getDocs as serverGetDocs, 
+  limit as serverLimit,
+  ensureServerAuth
+} from '../_lib/firebaseServer.js';
 
 /**
  * /api/super-admin/setup
@@ -28,52 +39,68 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // -------------------------------------------------------------
   if (req.method === 'GET') {
     try {
-      const db = getAdminFirestore();
+      let isSetupComplete = false;
 
-      // 1. Check atomic setup lock in Firestore
-      const lockRef = db.collection('systemSettings').doc('platformAdminLock');
-      const lockSnap = await lockRef.get();
+      if (hasAdminCredentials()) {
+        const db = getAdminFirestore();
+        const lockRef = db.collection('systemSettings').doc('platformAdminLock');
+        const lockSnap = await lockRef.get();
 
-      if (lockSnap.exists && lockSnap.data()?.isSetupComplete === true) {
-        return res.status(200).json({
-          isSetupComplete: true,
-          message: 'Super Admin setup has already been completed.',
-        });
-      }
+        if (lockSnap.exists && lockSnap.data()?.isSetupComplete === true) {
+          isSetupComplete = true;
+        } else {
+          const usersRef = db.collection('users');
+          const [superAdminSnap, legacySnap] = await Promise.all([
+            usersRef.where('role', '==', 'super_admin').limit(1).get(),
+            usersRef.where('role', '==', 'super-admin').limit(1).get(),
+          ]);
 
-      // 2. Query users collection for any existing super_admin
-      const usersRef = db.collection('users');
-      const [superAdminSnap, legacySnap] = await Promise.all([
-        usersRef.where('role', '==', 'super_admin').limit(1).get(),
-        usersRef.where('role', '==', 'super-admin').limit(1).get(),
-      ]);
-
-      if (!superAdminSnap.empty || !legacySnap.empty) {
-        try {
-          await lockRef.set({
-            isSetupComplete: true,
-            completedAt: new Date().toISOString(),
-            syncedFromUserCheck: true,
-          }, { merge: true });
-        } catch {
-          // Non-critical background sync
+          if (!superAdminSnap.empty || !legacySnap.empty) {
+            isSetupComplete = true;
+            try {
+              await lockRef.set({
+                isSetupComplete: true,
+                completedAt: new Date().toISOString(),
+                syncedFromUserCheck: true,
+              }, { merge: true });
+            } catch {
+              // Non-critical background sync
+            }
+          }
         }
+      } else {
+        // Fallback using server Firestore connection
+        await ensureServerAuth();
+        const lockSnap = await serverGetDoc(serverDoc(serverDb, 'systemSettings', 'platformAdminLock'));
+        if (lockSnap.exists() && lockSnap.data()?.isSetupComplete === true) {
+          isSetupComplete = true;
+        } else {
+          const q1 = serverQuery(serverCollection(serverDb, 'users'), serverWhere('role', '==', 'super_admin'), serverLimit(1));
+          const q2 = serverQuery(serverCollection(serverDb, 'users'), serverWhere('role', '==', 'super-admin'), serverLimit(1));
+          const [snap1, snap2] = await Promise.all([serverGetDocs(q1), serverGetDocs(q2)]);
+          if (!snap1.empty || !snap2.empty) {
+            isSetupComplete = true;
+          }
+        }
+      }
 
+      if (isSetupComplete) {
         return res.status(200).json({
           isSetupComplete: true,
           message: 'Super Admin setup has already been completed.',
         });
       }
 
-      // First-time setup is available
       return res.status(200).json({
         isSetupComplete: false,
         message: 'Initial platform Super Admin setup is available.',
       });
     } catch (error: any) {
       console.error('[super-admin/setup:GET] Error checking status:', error?.message);
-      return res.status(500).json({
-        error: 'Failed to verify Super Admin setup status.',
+      // Fail closed / gracefully report status error
+      return res.status(200).json({
+        isSetupComplete: false,
+        warning: 'Could not connect to database to check lock status.',
       });
     }
   }
@@ -129,12 +156,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 
+  // 3. Verify Server-side Firebase Admin credentials
+  if (!hasAdminCredentials()) {
+    console.error('[super-admin/setup:POST] FIREBASE_SERVICE_ACCOUNT is not configured in server environment.');
+    return res.status(500).json({
+      error: 'Firebase Admin credentials missing. FIREBASE_SERVICE_ACCOUNT must be configured in Vercel environment variables.',
+    });
+  }
+
   const auth = getAdminAuth();
   const db = getAdminFirestore();
   const now = new Date().toISOString();
 
   try {
-    // 3. Check existing Super Admins before initiating transaction
+    // 4. Check existing Super Admins before initiating transaction
     const usersRef = db.collection('users');
     const [existingSuperAdmin1, existingSuperAdmin2] = await Promise.all([
       usersRef.where('role', '==', 'super_admin').limit(1).get(),
@@ -147,7 +182,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // 4. Atomic Race-Condition Lock via Firestore Transaction
+    // 5. Atomic Race-Condition Lock via Firestore Transaction
     const lockRef = db.collection('systemSettings').doc('platformAdminLock');
     await db.runTransaction(async (transaction) => {
       const lockDoc = await transaction.get(lockRef);
@@ -163,7 +198,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }, { merge: true });
     });
 
-    // 5. Create or retrieve Firebase Authentication user via Firebase Admin SDK
+    // 6. Create or retrieve Firebase Authentication user via Firebase Admin SDK
     let userRecord;
     try {
       userRecord = await auth.createUser({
@@ -199,7 +234,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // 6. Assign Canonical Super Admin Custom Claims
+    // 7. Assign Canonical Super Admin Custom Claims
     const existingClaims = userRecord.customClaims || {};
     await auth.setCustomUserClaims(userRecord.uid, {
       ...existingClaims,
@@ -207,7 +242,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       super_admin: true,
     });
 
-    // 7. Create/Update Firestore users/{uid} profile
+    // 8. Create/Update Firestore users/{uid} profile
     const userDocRef = db.collection('users').doc(userRecord.uid);
     await userDocRef.set({
       uid: userRecord.uid,
@@ -223,7 +258,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       updatedAt: now,
     }, { merge: true });
 
-    // 8. Finalize setup lock with created UID
+    // 9. Finalize setup lock with created UID
     await lockRef.set({
       isSetupComplete: true,
       completedAt: now,

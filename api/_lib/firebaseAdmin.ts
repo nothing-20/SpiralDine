@@ -1,4 +1,6 @@
-import admin from 'firebase-admin';
+import { initializeApp, getApps, getApp, cert } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
 import fs from 'fs';
 import path from 'path';
 
@@ -10,11 +12,19 @@ import path from 'path';
  * NEVER exposes credentials to client bundles.
  */
 
-let isInitialized = false;
+export function hasAdminCredentials(): boolean {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) return true;
+  if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) return true;
+  const localPaths = [
+    path.resolve(process.cwd(), 'serviceAccountKey.json'),
+    path.resolve(process.cwd(), 'service-account.json'),
+  ];
+  return localPaths.some(p => fs.existsSync(p));
+}
 
 function initFirebaseAdmin() {
-  if (admin.apps.length > 0) {
-    return admin.app();
+  if (getApps().length > 0) {
+    return getApp();
   }
 
   const projectId = 
@@ -22,7 +32,7 @@ function initFirebaseAdmin() {
     process.env.VITE_FIREBASE_PROJECT_ID || 
     'spiral-restaurant-saas-v1';
 
-  let credential: admin.credential.Credential | null = null;
+  let credential = null;
 
   // 1. Check FIREBASE_SERVICE_ACCOUNT (raw JSON or base64 encoded JSON)
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
@@ -30,11 +40,11 @@ function initFirebaseAdmin() {
       let raw = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
       if (raw.startsWith('{')) {
         const parsed = JSON.parse(raw);
-        credential = admin.credential.cert(parsed);
+        credential = cert(parsed);
       } else {
         const decoded = Buffer.from(raw, 'base64').toString('utf-8');
         const parsed = JSON.parse(decoded);
-        credential = admin.credential.cert(parsed);
+        credential = cert(parsed);
       }
     } catch (err: any) {
       console.warn('[firebaseAdmin] Failed to parse FIREBASE_SERVICE_ACCOUNT:', err?.message);
@@ -45,7 +55,7 @@ function initFirebaseAdmin() {
   if (!credential && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
     try {
       const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
-      credential = admin.credential.cert({
+      credential = cert({
         projectId,
         clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
         privateKey,
@@ -66,7 +76,7 @@ function initFirebaseAdmin() {
       if (fs.existsSync(p)) {
         try {
           const fileData = JSON.parse(fs.readFileSync(p, 'utf-8'));
-          credential = admin.credential.cert(fileData);
+          credential = cert(fileData);
           break;
         } catch {
           // continue
@@ -77,24 +87,19 @@ function initFirebaseAdmin() {
 
   // 4. Initialize app
   if (credential) {
-    admin.initializeApp({ credential, projectId });
+    return initializeApp({ credential, projectId });
   } else {
-    // Default application credentials / environment credentials
-    admin.initializeApp({ projectId });
+    // Default application credentials / project fallback
+    return initializeApp({ projectId });
   }
-
-  isInitialized = true;
-  return admin.app();
 }
 
 export function getAdminAuth() {
-  initFirebaseAdmin();
-  return admin.auth();
+  const app = initFirebaseAdmin();
+  return getAuth(app);
 }
 
 export function getAdminFirestore() {
-  initFirebaseAdmin();
-  return admin.firestore();
+  const app = initFirebaseAdmin();
+  return getFirestore(app);
 }
-
-export { admin };
