@@ -79,6 +79,7 @@ const WaiterBillingPage = React.lazy(() => import('../apps/owner/waiter/WaiterBi
 // Super Admin
 const SuperAdminLayout = React.lazy(() => import('../apps/super-admin/layouts/SuperAdminLayout'));
 const SuperAdminLogin = React.lazy(() => import('../apps/super-admin/pages/SuperAdminLogin'));
+const SuperAdminSetup = React.lazy(() => import('../apps/super-admin/pages/SuperAdminSetup'));
 const SuperAdminOverview = React.lazy(() => import('../apps/super-admin/pages/SuperAdminOverview'));
 const SuperAdminRestaurants = React.lazy(() => import('../apps/super-admin/pages/SuperAdminRestaurants'));
 const SuperAdminOwners = React.lazy(() => import('../apps/super-admin/pages/SuperAdminOwners'));
@@ -278,8 +279,9 @@ export const AppRoutes: React.FC = () => {
         <Route path="/cashier/login" element={<Navigate to="/staff/login" replace />} />
         <Route path="/admin/login" element={<Navigate to="/staff/login" replace />} />
 
-        {/* Super Admin Direct Administrative Login */}
+        {/* Super Admin Direct Administrative Login & Controlled Setup */}
         <Route path="/super-admin/login" element={<SuperAdminLogin />} />
+        <Route path="/super-admin/setup" element={<SuperAdminSetup />} />
 
         <Route path="/unauthorized" element={<Unauthorized />} />
         <Route path="/workspace-error" element={<WorkspaceError />} />
