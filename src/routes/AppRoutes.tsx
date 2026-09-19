@@ -77,8 +77,16 @@ const WaiterShiftReportPage = React.lazy(() => import('../apps/owner/waiter/Wait
 const WaiterBillingPage = React.lazy(() => import('../apps/owner/waiter/WaiterBillingPage'));
 
 // Super Admin
+const SuperAdminLayout = React.lazy(() => import('../apps/super-admin/layouts/SuperAdminLayout'));
+const SuperAdminLogin = React.lazy(() => import('../apps/super-admin/pages/SuperAdminLogin'));
 const SuperAdminOverview = React.lazy(() => import('../apps/super-admin/pages/SuperAdminOverview'));
-const SuperAdminTenants = React.lazy(() => import('../apps/super-admin/pages/SuperAdminTenants'));
+const SuperAdminRestaurants = React.lazy(() => import('../apps/super-admin/pages/SuperAdminRestaurants'));
+const SuperAdminOwners = React.lazy(() => import('../apps/super-admin/pages/SuperAdminOwners'));
+const SuperAdminCustomers = React.lazy(() => import('../apps/super-admin/pages/SuperAdminCustomers'));
+const SuperAdminStaff = React.lazy(() => import('../apps/super-admin/pages/SuperAdminStaff'));
+const SuperAdminOrders = React.lazy(() => import('../apps/super-admin/pages/SuperAdminOrders'));
+const SuperAdminPayments = React.lazy(() => import('../apps/super-admin/pages/SuperAdminPayments'));
+const SuperAdminComingSoon = React.lazy(() => import('../apps/super-admin/pages/SuperAdminComingSoon'));
 
 // Customer
 const CustomerHome = React.lazy(() => import('../apps/customer/pages/CustomerHome'));
@@ -270,6 +278,9 @@ export const AppRoutes: React.FC = () => {
         <Route path="/cashier/login" element={<Navigate to="/staff/login" replace />} />
         <Route path="/admin/login" element={<Navigate to="/staff/login" replace />} />
 
+        {/* Super Admin Direct Administrative Login */}
+        <Route path="/super-admin/login" element={<SuperAdminLogin />} />
+
         <Route path="/unauthorized" element={<Unauthorized />} />
         <Route path="/workspace-error" element={<WorkspaceError />} />
 
@@ -392,13 +403,22 @@ export const AppRoutes: React.FC = () => {
           </Route>
         </Route>
 
-        {/* 5. Protected SaaS Super Admin routes gated by Workspace Validation */}
+        {/* 5. Protected SaaS Super Admin routes */}
         <Route element={<AdminGuard />}>
-          <Route element={<WorkspaceGuard />}>
-            <Route element={<DashboardLayout />}>
-              <Route path="/super-admin" element={<SuperAdminOverview />} />
-              <Route path="/super-admin/tenants" element={<SuperAdminTenants />} />
-            </Route>
+          <Route element={<SuperAdminLayout />}>
+            <Route path="/super-admin" element={<Navigate to="/super-admin/dashboard" replace />} />
+            <Route path="/super-admin/dashboard" element={<SuperAdminOverview />} />
+            <Route path="/super-admin/restaurants" element={<SuperAdminRestaurants />} />
+            <Route path="/super-admin/tenants" element={<Navigate to="/super-admin/restaurants" replace />} />
+            <Route path="/super-admin/owners" element={<SuperAdminOwners />} />
+            <Route path="/super-admin/customers" element={<SuperAdminCustomers />} />
+            <Route path="/super-admin/staff" element={<SuperAdminStaff />} />
+            <Route path="/super-admin/orders" element={<SuperAdminOrders />} />
+            <Route path="/super-admin/payments" element={<SuperAdminPayments />} />
+            <Route path="/super-admin/reports" element={<SuperAdminComingSoon title="Platform Reports" description="Comprehensive cross-tenant financial, operational, and inventory performance reports." />} />
+            <Route path="/super-admin/analytics" element={<SuperAdminComingSoon title="Platform Analytics" description="System-wide performance benchmarks, tenant retention, MRR, and platform metrics." />} />
+            <Route path="/super-admin/audit-logs" element={<SuperAdminComingSoon title="Security Audit Logs" description="Immutable security audit trail of privileged administrative events and access." />} />
+            <Route path="/super-admin/settings" element={<SuperAdminComingSoon title="Platform Settings" description="Global platform configuration, system feature flags, and global gateway settings." />} />
           </Route>
         </Route>
 

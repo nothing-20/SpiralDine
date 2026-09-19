@@ -6,7 +6,12 @@ import { useAuth } from '../context/AuthContext';
 export const WorkspaceGuard: React.FC = () => {
   const { workspace, isLoading, validationError } = useWorkspace();
   const { user, role, authStatus, isLoading: authLoading } = useAuth();
+  const isSuperAdmin = role === 'super_admin' || role === 'super-admin' || user?.role === 'super_admin' || user?.role === 'super-admin';
   const isOwner = role === 'owner' || workspace?.role === 'owner' || user?.role === 'owner';
+
+  if (isSuperAdmin) {
+    return <Outlet />;
+  }
 
   if (isLoading || authLoading || authStatus === 'AUTH_LOADING' || authStatus === 'PROFILE_LOADING') {
     return (

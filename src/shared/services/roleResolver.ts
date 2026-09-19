@@ -33,6 +33,30 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
 
   console.log('[AUTH ROLE RESOLVER] Resolving profile for UID:', fUser.uid, 'Email:', cleanEmail);
 
+  // Check Firebase Auth Custom Claims first for authoritative Super Admin privilege
+  try {
+    const tokenResult = await fUser.getIdTokenResult();
+    const claimRole = tokenResult?.claims?.role;
+    const isSuperAdminClaim = claimRole === 'super_admin' || claimRole === 'super-admin' || tokenResult?.claims?.super_admin === true;
+    if (isSuperAdminClaim) {
+      console.log('[AUTH ROLE RESOLVER] Authoritative super_admin claim detected for UID:', fUser.uid);
+      return {
+        uid: fUser.uid,
+        email: cleanEmail,
+        displayName: fUser.displayName || cleanEmail.split('@')[0] || 'Super Admin',
+        role: 'super_admin',
+        tenantId: '',
+        branchId: '',
+        department: 'Platform Administration',
+        status: 'active',
+        phoneNumber: fUser.phoneNumber || '',
+        createdAt: fUser.metadata.creationTime || new Date().toISOString()
+      };
+    }
+  } catch (claimErr) {
+    console.warn('[AUTH ROLE RESOLVER] Unable to inspect token claims:', claimErr);
+  }
+
   let userSnap;
   try {
     userSnap = await getDoc(userDocRef);
@@ -79,11 +103,14 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
       return null;
     }
 
+    const rawRole = data.role;
+    const resolvedRole: TUserRole = (rawRole === 'super-admin' ? 'super_admin' : rawRole) as TUserRole;
+
     const resolved: IResolvedUserProfile = {
       uid: fUser.uid,
       email: cleanEmail || data.email || '',
       displayName: data.fullName || data.displayName || fUser.displayName || cleanEmail.split('@')[0] || 'User',
-      role: data.role as TUserRole,
+      role: resolvedRole,
       tenantId: data.tenantId || data.restaurantId || '',
       branchId: data.branchId || '',
       department: data.department || '',

@@ -14,7 +14,7 @@ export function getDashboardRoute(role: TUserRole | string | null | undefined): 
   switch (normalizedRole) {
     case 'super-admin':
     case 'superadmin':
-      return '/super-admin';
+      return '/super-admin/dashboard';
 
     case 'owner':
     case 'admin':

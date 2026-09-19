@@ -17,9 +17,21 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    // Helper to check if user is an authorized Super Admin (via custom claim or profile doc)
+    function isSuperAdmin() {
+      return isAuth() && (
+        request.auth.token.get('role', '') in ['super_admin', 'super-admin'] ||
+        request.auth.token.get('super_admin', false) == true ||
+        (userExists() && getUserData().get('role', '') in ['super_admin', 'super-admin'])
+      );
+    }
+
     // Helper to check role matching safely
     function hasRole(role) {
-      return userExists() && getUserData().get('role', '') == role;
+      return userExists() && (
+        getUserData().get('role', '') == role ||
+        (role in ['super_admin', 'super-admin'] && isSuperAdmin())
+      );
     }
 
     // Helper to check tenant alignment safely
@@ -30,18 +42,18 @@ service cloud.firestore {
     // Helper to check if user is authorized staff for a tenant
     function isTenantStaff(tenantId) {
       return isAuth() && (
-        request.auth.token.role == 'super-admin' ||
+        isSuperAdmin() ||
         (userExists() && getUserData().get('tenantId', '') == tenantId && 
-         getUserData().get('role', '') in ['super-admin', 'owner', 'admin', 'manager', 'waiter', 'cashier', 'reception', 'kitchen'])
+         getUserData().get('role', '') in ['super_admin', 'super-admin', 'owner', 'admin', 'manager', 'waiter', 'cashier', 'reception', 'kitchen'])
       );
     }
 
     // Helper to check if user is management staff for a tenant
     function isTenantManager(tenantId) {
       return isAuth() && (
-        request.auth.token.role == 'super-admin' ||
+        isSuperAdmin() ||
         (userExists() && getUserData().get('tenantId', '') == tenantId && 
-         getUserData().get('role', '') in ['super-admin', 'owner', 'admin', 'manager'])
+         getUserData().get('role', '') in ['super_admin', 'super-admin', 'owner', 'admin', 'manager'])
       );
     }
 
@@ -170,11 +182,11 @@ service cloud.firestore {
       allow read: if isAuth();
       allow write: if isAuth() && (
         request.auth.uid == userId ||
-        request.auth.token.role == 'super-admin'
+        isSuperAdmin()
       );
 
       match /{subcollection}/{docId} {
-        allow read, write: if isAuth() && request.auth.uid == userId;
+        allow read, write: if isAuth() && (request.auth.uid == userId || isSuperAdmin());
       }
     }
 
@@ -182,25 +194,25 @@ service cloud.firestore {
     match /customers/{customerUid} {
       allow read: if isAuth() && (
         request.auth.uid == customerUid ||
-        request.auth.token.role == 'super-admin' ||
-        getUserData().get('role', '') in ['super-admin', 'admin', 'owner']
+        isSuperAdmin() ||
+        getUserData().get('role', '') in ['super_admin', 'super-admin', 'admin', 'owner']
       );
       allow write: if isAuth() && (
         request.auth.uid == customerUid ||
-        request.auth.token.role == 'super-admin' ||
-        getUserData().get('role', '') in ['super-admin', 'admin', 'owner']
+        isSuperAdmin() ||
+        getUserData().get('role', '') in ['super_admin', 'super-admin', 'admin', 'owner']
       );
 
       // Customer reservations subcollection: customer can read/write; restaurant staff can update reservation status
       match /reservations/{reservationId} {
         allow read: if isAuth() && (
           request.auth.uid == customerUid ||
-          request.auth.token.role == 'super-admin' ||
-          getUserData().get('role', '') in ['super-admin', 'admin']
+          isSuperAdmin() ||
+          getUserData().get('role', '') in ['super_admin', 'super-admin', 'admin']
         );
         allow write: if isAuth() && (
           request.auth.uid == customerUid ||
-          request.auth.token.role == 'super-admin' ||
+          isSuperAdmin() ||
           userExists()
         );
       }
@@ -209,8 +221,8 @@ service cloud.firestore {
       match /{subcollection}/{docId} {
         allow read, write: if isAuth() && (
           request.auth.uid == customerUid ||
-          request.auth.token.role == 'super-admin' ||
-          getUserData().get('role', '') in ['super-admin', 'admin']
+          isSuperAdmin() ||
+          getUserData().get('role', '') in ['super_admin', 'super-admin', 'admin']
         );
       }
     }
@@ -235,8 +247,8 @@ service cloud.firestore {
     // Merchant Restaurant hierarchy (scoping subcollections)
     match /restaurants/{tenantId} {
       allow get: if true;
-      allow list: if hasRole('super-admin') || (isAuth() && (resource.data.ownerUid == request.auth.uid || resource.data.ownerId == request.auth.uid));
-      allow write: if isAuth() && (hasRole('super-admin') || isTenantManager(tenantId) || request.resource.data.ownerUid == request.auth.uid);
+      allow list: if isSuperAdmin() || (isAuth() && (resource.data.ownerUid == request.auth.uid || resource.data.ownerId == request.auth.uid));
+      allow write: if isAuth() && (isSuperAdmin() || isTenantManager(tenantId) || request.resource.data.ownerUid == request.auth.uid);
 
       // Public & Customer readable subcollections (branches, tables)
       match /branches/{branchId} {
@@ -329,7 +341,7 @@ service cloud.firestore {
 
       // Universal rule for other management subcollections inside tenant workspace
       match /{subcollection}/{docId} {
-        allow read: if isAuth() && (isTenant(tenantId) || hasRole('super-admin'));
+        allow read: if isAuth() && (isTenant(tenantId) || isSuperAdmin());
         allow write: if isTenantStaff(tenantId);
       }
     }

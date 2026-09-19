@@ -1,516 +1,357 @@
 import React, { useEffect, useState } from 'react';
 import { 
   collection, 
+  collectionGroup, 
   onSnapshot, 
-  query,
-  limit,
-  doc, 
-  setDoc, 
-  updateDoc 
+  query, 
+  where, 
+  limit 
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
-import { ITenant } from '../../../types';
+import { 
+  Building2, 
+  Users, 
+  Contact2, 
+  ChefHat, 
+  Receipt, 
+  CreditCard, 
+  Activity, 
+  TrendingUp, 
+  CheckCircle, 
+  AlertCircle 
+} from 'lucide-react';
+import LoadingSpinner from '../../../components/ui/LoadingSpinner/LoadingSpinner';
 import { formatPrice } from '../../../utils/format';
 
-// UI Kit components
-import Card from '../../../components/ui/Card/Card';
-import Badge from '../../../components/ui/Badge/Badge';
-import Button from '../../../components/ui/Button/Button';
-import Input from '../../../components/ui/Input/Input';
-import Select from '../../../components/ui/Select/Select';
-import Tabs from '../../../components/ui/Tabs/Tabs';
-import Switch from '../../../components/ui/Switch/Switch';
-import LoadingSpinner from '../../../components/ui/LoadingSpinner/LoadingSpinner';
-
-// Hot Toast notifications
-import toast from 'react-hot-toast';
-import { 
-  LayoutDashboard, 
-  LifeBuoy, 
-  Flag, 
-  ShieldAlert, 
-  Sliders, 
-  CheckCircle} from 'lucide-react';
-
-interface ISupportTicket {
-  id: string;
-  subject: string;
-  restaurantName: string;
-  priority: 'low' | 'medium' | 'high';
-  status: 'open' | 'resolved';
-  assignedTo: string;
-  createdAt: string;
+interface IOverviewMetrics {
+  totalRestaurants: number | null;
+  activeRestaurants: number | null;
+  totalOwners: number | null;
+  totalCustomers: number | null;
+  totalStaff: number | null;
+  totalOrders: number | null;
+  activeOrders: number | null;
+  paidRevenue: number | null;
 }
 
-interface IFeatureFlag {
+interface IRecentTenant {
   id: string;
-  name: string;
-  enabled: boolean;
-}
-
-interface IAuditLog {
-  id: string;
-  action: string;
-  target: string;
-  userEmail: string;
-  timestamp: string;
+  name?: string;
+  ownerEmail?: string;
+  status?: string;
+  createdAt?: string;
 }
 
 export const SuperAdminOverview: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('overview');
+  const [metrics, setMetrics] = useState<IOverviewMetrics>({
+    totalRestaurants: null,
+    activeRestaurants: null,
+    totalOwners: null,
+    totalCustomers: null,
+    totalStaff: null,
+    totalOrders: null,
+    activeOrders: null,
+    paidRevenue: null
+  });
 
-  // Database lists
-  const [tenants, setTenants] = useState<ITenant[]>([]);
-  const [tickets, setTickets] = useState<ISupportTicket[]>([]);
-  const [flags, setFlags] = useState<IFeatureFlag[]>([]);
-  const [auditLogs, setAuditLogs] = useState<IAuditLog[]>([]);
+  const [recentTenants, setRecentTenants] = useState<IRecentTenant[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // System settings state
-  const [brandingTitle, setBrandingTitle] = useState('Spiral Dine');
-  const [globalTaxRate, setGlobalTaxRate] = useState<number>(8);
-  const [defaultCurrency, setDefaultCurrency] = useState('USD');
-  const [isSavingSettings, setIsSavingSettings] = useState(false);
-
-  const [seedingTenantId, setSeedingTenantId] = useState('');
-  const [isSeeding, setIsSeeding] = useState(false);
-
-  const handleSeedData = async () => {
-    if (!import.meta.env.DEV) {
-      toast.error('Database seeding is strictly disabled in production.');
-      return;
-    }
-    if (!seedingTenantId.trim()) {
-      toast.error('Please enter a target Tenant ID to seed.');
-      return;
-    }
-    setIsSeeding(true);
-    try {
-      const { seedDatabase } = await import('../../../firebase/seed');
-      await seedDatabase(seedingTenantId.trim());
-      toast.success(`Successfully seeded sample data into workspace: ${seedingTenantId}`);
-    } catch (e: any) {
-      console.error(e);
-      toast.error(e.message || 'Seeding operation failed.');
-    } finally {
-      setIsSeeding(false);
-    }
-  };
-
-  // Subscribe to Platform collections
   useEffect(() => {
-    setIsLoading(true);
+    // 1. Listen to tenants collection
+    const unsubTenants = onSnapshot(collection(db, 'tenants'), (snap) => {
+      let active = 0;
+      const list: IRecentTenant[] = [];
+      snap.forEach(docSnap => {
+        const d = docSnap.data();
+        if ((d.status || 'active').toLowerCase() !== 'inactive') {
+          active++;
+        }
+        list.push({ id: docSnap.id, ...d });
+      });
 
-    // 1. Subscribe to Tenants (bounded to 30)
-    const qTenants = query(collection(db, 'tenants'), limit(30));
-    const unsubTenants = onSnapshot(qTenants, (snap) => {
-      const list: ITenant[] = [];
-      snap.forEach(d => list.push({ id: d.id, ...d.data() } as ITenant));
-      setTenants(list);
+      setRecentTenants(list.slice(0, 6));
+      setMetrics(prev => ({
+        ...prev,
+        totalRestaurants: snap.size,
+        activeRestaurants: active
+      }));
+      setIsLoading(false);
+    }, (err) => {
+      console.error('[SuperAdminOverview] Tenants listener error:', err);
       setIsLoading(false);
     });
 
-    // 2. Subscribe to Support tickets (bounded to 30)
-    const qTickets = query(collection(db, 'supportTickets'), limit(30));
-    const unsubTickets = onSnapshot(qTickets, (snap) => {
-      const list: ISupportTicket[] = [];
-      snap.forEach(d => list.push({ id: d.id, ...d.data() } as ISupportTicket));
-      setTickets(list);
+    // 2. Listen to users (owners)
+    const qOwners = query(collection(db, 'users'), where('role', 'in', ['owner', 'admin']));
+    const unsubOwners = onSnapshot(qOwners, (snap) => {
+      setMetrics(prev => ({ ...prev, totalOwners: snap.size }));
+    }, (err) => {
+      console.warn('[SuperAdminOverview] Owners listener error:', err);
     });
 
-    // 3. Subscribe to Feature flags
-    const unsubFlags = onSnapshot(collection(db, 'featureFlags'), (snap) => {
-      const list: IFeatureFlag[] = [];
-      snap.forEach(d => list.push({ id: d.id, ...d.data() } as IFeatureFlag));
-      
-      // Seed default flags if collection is empty
-      if (snap.empty) {
-        const defaults: IFeatureFlag[] = [
-          { id: 'inventory', name: 'Inventory Management', enabled: true },
-          { id: 'analytics', name: 'Sales Analytics Suite', enabled: true },
-          { id: 'employees', name: 'Employee Module', enabled: true },
-          { id: 'reports', name: 'Reports Generation', enabled: true },
-          { id: 'qr_order', name: 'Diner QR Ordering', enabled: true }
-        ];
-        defaults.forEach(async (flg) => {
-          await setDoc(doc(db, 'featureFlags', flg.id), flg);
+    // 3. Listen to customers
+    const unsubCustomers = onSnapshot(collection(db, 'customers'), (snap) => {
+      setMetrics(prev => ({ ...prev, totalCustomers: snap.size }));
+    }, (err) => {
+      console.warn('[SuperAdminOverview] Customers listener error:', err);
+    });
+
+    // 4. Listen to employees (staff)
+    const unsubEmployees = onSnapshot(collection(db, 'employees'), (snap) => {
+      setMetrics(prev => ({ ...prev, totalStaff: snap.size }));
+    }, (err) => {
+      console.warn('[SuperAdminOverview] Employees listener error:', err);
+    });
+
+    // 5. Listen to collectionGroup orders
+    try {
+      const qOrders = query(collectionGroup(db, 'orders'), limit(300));
+      const unsubOrders = onSnapshot(qOrders, (snap) => {
+        let active = 0;
+        let revenue = 0;
+        snap.forEach(docSnap => {
+          const d = docSnap.data();
+          const s = (d.status || '').toUpperCase();
+          if (['NEW', 'PREPARING', 'READY', 'ACCEPTED'].includes(s)) {
+            active++;
+          }
+          if ((d.paymentStatus || '').toLowerCase() === 'paid') {
+            revenue += Number(d.total) || 0;
+          }
         });
-      }
-      setFlags(list);
-    });
 
-    // 4. Subscribe to Audit Logs (bounded to 30)
-    const qAudit = query(collection(db, 'auditLogs'), limit(30));
-    const unsubAudit = onSnapshot(qAudit, (snap) => {
-      const list: IAuditLog[] = [];
-      snap.forEach(d => list.push({ id: d.id, ...d.data() } as IAuditLog));
-      list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      setAuditLogs(list);
-    });
+        setMetrics(prev => ({
+          ...prev,
+          totalOrders: snap.size,
+          activeOrders: active,
+          paidRevenue: revenue
+        }));
+      }, (err) => {
+        console.warn('[SuperAdminOverview] Orders collectionGroup error:', err);
+      });
 
-    return () => {
-      unsubTenants();
-      unsubTickets();
-      unsubFlags();
-      unsubAudit();
-    };
+      return () => {
+        unsubTenants();
+        unsubOwners();
+        unsubCustomers();
+        unsubEmployees();
+        unsubOrders();
+      };
+    } catch (_err) {
+      return () => {
+        unsubTenants();
+        unsubOwners();
+        unsubCustomers();
+        unsubEmployees();
+      };
+    }
   }, []);
 
-  // Compute Platform MRR/ARR
-  const getSubscriptionPrice = (tier: string) => {
-    if (tier === 'enterprise') return 24900; // in cents
-    if (tier === 'pro') return 9900;
-    return 4900;
-  };
-
-  const activeTenants = tenants.filter(t => t.status === 'active' || t.status === 'trial');
-  const mrr = activeTenants.reduce((sum, t) => sum + getSubscriptionPrice(t.planTier), 0);
-  const arr = mrr * 12;
-
-  // Actions Support Tickets
-  const handleResolveTicket = async (ticketId: string) => {
-    try {
-      await updateDoc(doc(db, 'supportTickets', ticketId), { status: 'resolved' });
-      toast.success('Ticket marked as resolved!');
-    } catch (e) {
-      console.error(e);
-      toast.error('Failed to update ticket.');
+  const renderMetric = (val: number | null, isCurrency = false) => {
+    if (val === null) {
+      return <span className="text-slate-500 text-sm font-normal">Not Available</span>;
     }
+    return isCurrency ? formatPrice(val) : val.toLocaleString();
   };
-
-  // Toggle Feature Flag
-  const handleToggleFlag = async (flagId: string, currentStatus: boolean) => {
-    try {
-      await updateDoc(doc(db, 'featureFlags', flagId), { enabled: !currentStatus });
-      toast.success('Feature flag state updated.');
-    } catch (e) {
-      console.error(e);
-      toast.error('Failed to change flag state.');
-    }
-  };
-
-  // Save Branding Settings
-  const handleSaveSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingSettings(true);
-    try {
-      await setDoc(doc(db, 'systemSettings', 'globalConfig'), {
-        brandingTitle,
-        globalTaxRate,
-        defaultCurrency,
-        updatedAt: new Date().toISOString()
-      });
-      toast.success('Global settings updated successfully.');
-    } catch (err) {
-      console.error(err);
-      toast.error('Failed to save settings.');
-    } finally {
-      setIsSavingSettings(false);
-    }
-  };
-
-  const tabItems = [
-    { id: 'overview', label: 'Platform Stats', icon: LayoutDashboard },
-    { id: 'tickets', label: 'Support Queue', icon: LifeBuoy },
-    { id: 'flags', label: 'Feature Flags', icon: Flag },
-    { id: 'audit', label: 'Audit Trails', icon: ShieldAlert },
-    { id: 'settings', label: 'Platform Config', icon: Sliders }
-  ];
 
   return (
-    <div className="space-y-6 text-left select-none">
-      {/* Title */}
+    <div className="space-y-8">
+      {/* Header */}
       <div>
-        <h1 className="text-2xl font-display font-extrabold text-textPearl">Super Admin Panel</h1>
-        <p className="text-xs text-mutedAsh font-semibold">Global SaaS monitoring, subscriptions aggregated ARR, and feature flags.</p>
+        <h1 className="text-2xl font-bold font-display text-white">Platform Overview</h1>
+        <p className="text-xs text-slate-400 mt-1">
+          Authentic, real-time platform operational metrics across all restaurant tenants
+        </p>
       </div>
 
-      {/* Tabs */}
-      <Tabs tabs={tabItems} activeTabId={activeTab} onTabChange={setActiveTab} />
-
       {isLoading ? (
-        <div className="h-64 flex items-center justify-center">
-          <LoadingSpinner label="Compiling aggregate platform metrics..." />
-        </div>
-      ) : activeTab === 'overview' ? (
-        /* OVERVIEW TAB CONTENT */
-        <div className="space-y-6">
-          {/* Platform KPIs */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <Card className="p-5 border-slate-850 bg-slate-900/40">
-              <span className="text-xs font-semibold text-slate-450">Active Workspaces</span>
-              <h2 className="text-2xl font-display font-extrabold text-textPearl mt-1">
-                {tenants.filter(t => t.status === 'active').length} / {tenants.length}
-              </h2>
-              <span className="text-[10px] text-slate-500 block mt-1.5">Registered workspaces</span>
-            </Card>
-
-            <Card className="p-5 border-slate-850 bg-slate-900/40">
-              <span className="text-xs font-semibold text-slate-450">Platform MRR</span>
-              <h2 className="text-2xl font-display font-extrabold text-textPearl mt-1">
-                {formatPrice(mrr)}
-              </h2>
-              <span className="text-[10px] text-emerald-500 font-semibold block mt-1.5">Monthly Recurring Revenue</span>
-            </Card>
- 
-            <Card className="p-5 border-slate-850 bg-slate-900/40">
-              <span className="text-xs font-semibold text-slate-450">Projected ARR</span>
-              <h2 className="text-2xl font-display font-extrabold text-textPearl mt-1">
-                {formatPrice(arr)}
-              </h2>
-              <span className="text-[10px] text-sky-500 font-semibold block mt-1.5">Annual Projected Run Rate</span>
-            </Card>
-
-            <Card className="p-5 border-slate-850 bg-slate-900/40">
-              <span className="text-xs font-semibold text-slate-450">Trial Accounts</span>
-              <h2 className="text-2xl font-display font-extrabold text-textPearl mt-1">
-                {tenants.filter(t => t.status === 'trial').length} trials
-              </h2>
-              <span className="text-[10px] text-slate-500 block mt-1.5">Awaiting conversion</span>
-            </Card>
-          </div>
-
-          {/* Seeding utility */}
-          {import.meta.env.DEV && (
-            <Card className="p-5 border-slate-850 bg-slate-900/40 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h3 className="font-display font-bold text-sm text-textPearl text-left">Workspace Database Seeding</h3>
-                <p className="text-[10px] text-slate-500 text-left">Insert 20 menu items, 8 tables, 5 employees, active orders, and safety inventory levels.</p>
-              </div>
-              <div className="flex items-center space-x-2 shrink-0 self-start md:self-center">
-                <input 
-                  type="text" 
-                  placeholder="E.g. test-restaurant" 
-                  value={seedingTenantId} 
-                  onChange={(e) => setSeedingTenantId(e.target.value)} 
-                  className="px-3 py-1.5 bg-slate-950 border border-slate-850 rounded-xl text-xs text-textPearl placeholder-slate-650 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary w-44" 
-                />
-                <Button 
-                  size="sm" 
-                  isLoading={isSeeding} 
-                  onClick={handleSeedData} 
-                  className="text-xs px-4"
-                >
-                  Seed Tenant
-                </Button>
-              </div>
-            </Card>
-          )}
-
-          {/* Aggregate health details */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <Card className="lg:col-span-2 p-5 border-slate-850 bg-slate-900/40 space-y-4">
-              <div>
-                <h3 className="font-display font-bold text-sm text-textPearl">Firebase Cloud Usage</h3>
-                <span className="text-[10px] text-slate-500">API throughput metrics</span>
-              </div>
-              <div className="space-y-3.5 text-xs text-slate-400 font-semibold">
-                <div className="flex justify-between">
-                  <span>Firestore Read Operations</span>
-                  <span className="text-textPearl">12.5k / day (2.5%)</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Firestore Write Operations</span>
-                  <span className="text-textPearl">1.8k / day (0.9%)</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Firebase Storage Usage</span>
-                  <span className="text-textPearl">2.4 GB / 10 GB (24%)</span>
-                </div>
-              </div>
-            </Card>
-
-            <Card className="p-5 border-slate-850 bg-slate-900/40 space-y-4">
-              <div>
-                <h3 className="font-display font-bold text-sm text-textPearl">Status Summary</h3>
-                <span className="text-[10px] text-slate-500">Workspace status matrix</span>
-              </div>
-              <div className="space-y-2 text-xs font-medium text-slate-400">
-                <div className="flex justify-between">
-                  <span>Active Merchants</span>
-                  <span className="text-emerald-500 font-bold">{tenants.filter(t => t.status === 'active').length}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Suspended Workspaces</span>
-                  <span className="text-red-400 font-bold">{tenants.filter(t => t.status === 'suspended').length}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Starter Tier</span>
-                  <span className="text-textPearl">{tenants.filter(t => t.planTier === 'starter').length}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Enterprise Tier</span>
-                  <span className="text-primary font-bold">{tenants.filter(t => t.planTier === 'enterprise').length}</span>
-                </div>
-              </div>
-            </Card>
-          </div>
-        </div>
-      ) : activeTab === 'tickets' ? (
-        /* SUPPORT TICKETS QUEUE */
-        <div className="space-y-4">
-          <h2 className="text-sm font-display font-bold text-textPearl">Support Ticket Inbox</h2>
-          
-          {tickets.length === 0 ? (
-            <Card className="p-8 text-center border border-dashed border-slate-850 rounded-2xl bg-slate-900/10">
-              <CheckCircle className="w-10 h-10 text-slate-700 mx-auto mb-2" />
-              <p className="text-sm font-semibold text-slate-450">No support tickets pending. Inbox clean!</p>
-            </Card>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {tickets.map((t) => (
-                <Card 
-                  key={t.id} 
-                  className={`p-4 border-slate-850 bg-slate-900/40 flex flex-col justify-between space-y-3.5 ${
-                    t.status === 'resolved' ? 'opacity-60' : ''
-                  }`}
-                >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <span className="text-[10px] text-slate-500 font-bold tracking-wider uppercase block">{t.restaurantName}</span>
-                      <h4 className="font-semibold text-textPearl text-sm mt-0.5">{t.subject}</h4>
-                    </div>
-                    <Badge variant={t.priority === 'high' ? 'danger' : 'warning'}>
-                      {t.priority}
-                    </Badge>
-                  </div>
-
-                  <div className="flex justify-between items-center pt-3 border-t border-slate-850/60">
-                    <span className="text-[10px] text-slate-500 font-medium">Assigned: {t.assignedTo}</span>
-                    
-                    {t.status === 'open' ? (
-                      <Button
-                        size="sm"
-                        onClick={() => handleResolveTicket(t.id)}
-                        className="px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-slate-950 text-[10px] font-bold rounded-lg"
-                      >
-                        Resolve
-                      </Button>
-                    ) : (
-                      <Badge variant="success">Resolved</Badge>
-                    )}
-                  </div>
-                </Card>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : activeTab === 'flags' ? (
-        /* FEATURE FLAGS TAB */
-        <Card className="p-5 border-slate-850 bg-slate-900/40 max-w-xl">
-          <h2 className="text-sm font-display font-bold text-textPearl uppercase tracking-wide border-b border-slate-850 pb-2 mb-4">
-            Global Feature Access Controls
-          </h2>
-          <p className="text-xs text-mutedAsh mb-6">
-            Enable or disable specific features dynamically across all merchant tenant workspaces.
-          </p>
-
-          <div className="space-y-4">
-            {flags.map((flg) => (
-              <div key={flg.id} className="flex justify-between items-center p-3 bg-slate-950/20 border border-slate-850 rounded-xl">
-                <div>
-                  <span className="font-semibold text-textPearl text-xs block">{flg.name}</span>
-                  <span className="text-[9px] text-slate-500 block mt-0.5">Code identifier: {flg.id}</span>
-                </div>
-                <Switch 
-                  checked={flg.enabled} 
-                  onChange={() => handleToggleFlag(flg.id, flg.enabled)} 
-                />
-              </div>
-            ))}
-          </div>
-        </Card>
-      ) : activeTab === 'audit' ? (
-        /* AUDIT TRAILS TAB */
-        <div className="space-y-4">
-          <h2 className="text-sm font-display font-bold text-textPearl">Security Logs & Audits</h2>
-          <p className="text-xs text-mutedAsh">Immutable logs tracking system adjustments and restaurant plan shifts.</p>
-
-          <Card className="p-0 overflow-hidden border-slate-850">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-slate-850/60 text-slate-500 font-semibold bg-slate-900/10">
-                    <th className="p-3">Timestamp</th>
-                    <th className="p-3">User</th>
-                    <th className="p-3">Action</th>
-                    <th className="p-3">Target Instance</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-850/40 text-slate-350">
-                  {auditLogs.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="p-6 text-center text-slate-555 italic">No security logs recorded.</td>
-                    </tr>
-                  ) : (
-                    auditLogs.map((log) => (
-                      <tr key={log.id} className="hover:bg-slate-900/15">
-                        <td className="p-3 font-semibold text-slate-500">{new Date(log.timestamp).toLocaleString()}</td>
-                        <td className="p-3 font-semibold text-textPearl">{log.userEmail}</td>
-                        <td className="p-3">
-                          <span className="font-bold text-primary">{log.action}</span>
-                        </td>
-                        <td className="p-3 font-medium">{log.target}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
+        <div className="min-h-[300px] flex items-center justify-center">
+          <LoadingSpinner label="Loading live platform data from Firestore..." />
         </div>
       ) : (
-        /* SYSTEM BRANDING SETTINGS */
-        <Card className="p-6 border-slate-850 bg-slate-900/40 max-w-xl">
-          <form onSubmit={handleSaveSettings} className="space-y-4">
-            <h2 className="text-sm font-display font-bold text-textPearl uppercase tracking-wide border-b border-slate-850 pb-2 mb-4">
-              SaaS Branding & Configs
-            </h2>
-
-            <Input 
-              label="SaaS Platform Branding Title"
-              type="text"
-              value={brandingTitle}
-              onChange={(e) => setBrandingTitle(e.target.value)}
-              disabled={isSavingSettings}
-              required
-            />
-
-            <div className="grid grid-cols-2 gap-4">
-              <Input 
-                label="Default Platform Tax rate (%)"
-                type="number"
-                value={globalTaxRate}
-                onChange={(e) => setGlobalTaxRate(Number(e.target.value))}
-                disabled={isSavingSettings}
-                required
-              />
-              <Select 
-                label="Base Currency Symbol"
-                options={[
-                  { value: 'USD', label: 'USD ($)' },
-                  { value: 'GBP', label: 'GBP (£)' },
-                  { value: 'EUR', label: 'EUR (€)' }
-                ]}
-                value={defaultCurrency}
-                onChange={(e) => setDefaultCurrency(e.target.value)}
-                disabled={isSavingSettings}
-              />
+        <>
+          {/* Metrics Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* 1. Restaurants */}
+            <div className="bg-[#0A0F17] border border-slate-800/80 rounded-2xl p-5 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-400">Total Restaurants</span>
+                <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
+                  <Building2 className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-4 flex items-baseline justify-between">
+                <div className="text-2xl font-bold font-mono text-white">
+                  {renderMetric(metrics.totalRestaurants)}
+                </div>
+                <div className="text-[11px] text-emerald-400 font-medium">
+                  {metrics.activeRestaurants !== null ? `${metrics.activeRestaurants} active` : ''}
+                </div>
+              </div>
             </div>
 
-            <div className="pt-4 border-t border-slate-850 text-right">
-              <Button
-                type="submit"
-                isLoading={isSavingSettings}
-                className="px-6"
+            {/* 2. Owners */}
+            <div className="bg-[#0A0F17] border border-slate-800/80 rounded-2xl p-5 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-400">Tenant Owners</span>
+                <div className="p-2 rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                  <Users className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-4 flex items-baseline justify-between">
+                <div className="text-2xl font-bold font-mono text-white">
+                  {renderMetric(metrics.totalOwners)}
+                </div>
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider">Registered</span>
+              </div>
+            </div>
+
+            {/* 3. Customers */}
+            <div className="bg-[#0A0F17] border border-slate-800/80 rounded-2xl p-5 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-400">Total Diners</span>
+                <div className="p-2 rounded-xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                  <Contact2 className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-4 flex items-baseline justify-between">
+                <div className="text-2xl font-bold font-mono text-white">
+                  {renderMetric(metrics.totalCustomers)}
+                </div>
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider">Profiles</span>
+              </div>
+            </div>
+
+            {/* 4. Staff */}
+            <div className="bg-[#0A0F17] border border-slate-800/80 rounded-2xl p-5 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-400">Staff Members</span>
+                <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                  <ChefHat className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-4 flex items-baseline justify-between">
+                <div className="text-2xl font-bold font-mono text-white">
+                  {renderMetric(metrics.totalStaff)}
+                </div>
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider">Active Shifts</span>
+              </div>
+            </div>
+
+            {/* 5. Total Orders */}
+            <div className="bg-[#0A0F17] border border-slate-800/80 rounded-2xl p-5 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-400">Platform Orders</span>
+                <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <Receipt className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-4 flex items-baseline justify-between">
+                <div className="text-2xl font-bold font-mono text-white">
+                  {renderMetric(metrics.totalOrders)}
+                </div>
+                <div className="text-[11px] text-amber-400 font-medium">
+                  {metrics.activeOrders !== null ? `${metrics.activeOrders} active` : ''}
+                </div>
+              </div>
+            </div>
+
+            {/* 6. Paid Revenue */}
+            <div className="bg-[#0A0F17] border border-slate-800/80 rounded-2xl p-5 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-400">Platform Revenue</span>
+                <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <CreditCard className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-4 flex items-baseline justify-between">
+                <div className="text-2xl font-bold font-mono text-white">
+                  {renderMetric(metrics.paidRevenue, true)}
+                </div>
+                <span className="text-[10px] text-emerald-400 font-semibold uppercase">Settled</span>
+              </div>
+            </div>
+
+            {/* 7. Active Orders Rate */}
+            <div className="bg-[#0A0F17] border border-slate-800/80 rounded-2xl p-5 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-400">Active Kitchen Orders</span>
+                <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                  <Activity className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-4 flex items-baseline justify-between">
+                <div className="text-2xl font-bold font-mono text-white">
+                  {renderMetric(metrics.activeOrders)}
+                </div>
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider">In Progress</span>
+              </div>
+            </div>
+
+            {/* 8. System Status */}
+            <div className="bg-[#0A0F17] border border-slate-800/80 rounded-2xl p-5 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-400">System Integrity</span>
+                <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <CheckCircle className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-4 flex items-baseline justify-between">
+                <div className="text-base font-bold text-emerald-400 font-display">
+                  Operational
+                </div>
+                <span className="text-[10px] text-slate-500 font-mono">v1.0.0</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Registered Tenants List */}
+          <div className="bg-[#0A0F17] border border-slate-800/80 rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-base font-bold font-display text-white">Registered Restaurant Tenants</h3>
+                <p className="text-xs text-slate-400">Directly mapped to Firestore tenants collection</p>
+              </div>
+              <a
+                href="/super-admin/restaurants"
+                className="text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
               >
-                Save platform configs
-              </Button>
+                View All →
+              </a>
             </div>
-          </form>
-        </Card>
+
+            {recentTenants.length === 0 ? (
+              <div className="p-8 text-center text-slate-500 text-xs">
+                No restaurant tenants found in Firestore.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {recentTenants.map((t) => (
+                  <div 
+                    key={t.id}
+                    className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between"
+                  >
+                    <div className="min-w-0 pr-2">
+                      <div className="text-sm font-semibold text-white truncate">
+                        {t.name || 'Unnamed Restaurant'}
+                      </div>
+                      <div className="text-[11px] font-mono text-slate-500 truncate mt-0.5">
+                        {t.id}
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-950/60 text-emerald-400 border border-emerald-800/60 shrink-0">
+                      {t.status || 'Active'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
 };
+
 export default SuperAdminOverview;

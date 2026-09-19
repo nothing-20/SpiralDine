@@ -16,11 +16,18 @@ export const AdminGuard: React.FC = () => {
   }
 
   if (!user || !role) {
-    return <Navigate to="/staff/login" replace />;
+    return <Navigate to="/super-admin/login" replace />;
   }
 
-  if (role !== 'super-admin') {
+  const isSuperAdmin = role === 'super_admin' || role === 'super-admin';
+
+  if (!isSuperAdmin) {
+    // Authenticated non-super-admin roles (Owner, Waiter, Kitchen, Customer, etc.) are strictly denied
     const destination = getDashboardRoute(role);
+    // Prevent redirect loop if destination ever resolves to super-admin
+    if (destination.startsWith('/super-admin')) {
+      return <Navigate to="/unauthorized" replace />;
+    }
     return <Navigate to={destination} replace />;
   }
 

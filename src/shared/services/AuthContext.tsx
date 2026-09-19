@@ -65,7 +65,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               try {
                 if (userDoc.exists() && (userDoc.data().role || isCustomerProfile)) {
                   const data = userDoc.data();
-                  const resolvedRole = (data.role || (isCustomerProfile ? 'customer' : null)) as TUserRole;
+                  let roleCandidate = data.role || (isCustomerProfile ? 'customer' : null);
+                  try {
+                    const tokenResult = await fUser.getIdTokenResult();
+                    if (tokenResult?.claims?.role === 'super_admin' || tokenResult?.claims?.role === 'super-admin' || tokenResult?.claims?.super_admin === true) {
+                      roleCandidate = 'super_admin';
+                    }
+                  } catch (_e) {}
+                  const resolvedRole = (roleCandidate === 'super-admin' ? 'super_admin' : roleCandidate) as TUserRole;
                   const resolvedUser: IUser = {
                     uid: fUser.uid,
                     email: (fUser.email || data.email || '').toLowerCase(),
@@ -94,14 +101,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   // Document missing or role missing — call authoritative roleResolver
                   const { resolveAuthenticatedUser } = await import('./roleResolver');
                   const profile = await resolveAuthenticatedUser(fUser);
-
                   if (profile && profile.role) {
+                    const resolvedRole = (profile.role === 'super-admin' ? 'super_admin' : profile.role) as TUserRole;
                     const resolvedUser: IUser = {
                       uid: profile.uid,
                       email: profile.email,
                       displayName: profile.displayName,
                       tenantId: profile.tenantId,
-                      role: profile.role,
+                      role: resolvedRole,
                       status: (profile.status === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
                       phoneNumber: profile.phoneNumber || '',
                       createdAt: profile.createdAt

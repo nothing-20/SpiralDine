@@ -18,7 +18,11 @@ export const PublicGuard: React.FC = () => {
 
   // If already authenticated
   if (authStatus === 'AUTHORIZED' && user && role) {
-    const isOwnerOrAdmin = ['owner', 'admin', 'super-admin'].includes(role);
+    if (role === 'super_admin' || role === 'super-admin') {
+      return <Navigate to="/super-admin/dashboard" replace />;
+    }
+
+    const isOwnerOrAdmin = ['owner', 'admin'].includes(role);
     const path = location.pathname;
 
     // If authenticated owner/admin visits owner login, go directly to owner dashboard
