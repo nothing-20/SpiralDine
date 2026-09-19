@@ -23,7 +23,6 @@ const ContactPage = React.lazy(() => import('../features/public-pages/ContactPag
 const NotFoundPage = React.lazy(() => import('../features/public-pages/NotFoundPage'));
 
 // Authentication
-const LoginSelection = React.lazy(() => import('../features/auth/components/LoginSelection'));
 const LoginForm = React.lazy(() => import('../features/auth/components/LoginForm'));
 const StaffLogin = React.lazy(() => import('../features/auth/components/StaffLogin'));
 const StaffActivate = React.lazy(() => import('../features/auth/components/StaffActivate'));
@@ -290,7 +289,7 @@ export const AppRoutes: React.FC = () => {
         {/* 2. Public Auth sub-routes gated by PublicGuard redirect interceptor */}
         <Route element={<PublicGuard />}>
           <Route element={<AuthLayout />}>
-            <Route path="/login" element={<LoginSelection />} />
+            <Route path="/login" element={<LoginForm />} />
             <Route path="/owner/login" element={<LoginForm />} />
             <Route path="/staff/login" element={<StaffLogin />} />
             <Route path="/register" element={<RegisterForm />} />
