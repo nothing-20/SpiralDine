@@ -14,7 +14,6 @@ import {
   query as serverQuery, 
   where as serverWhere, 
   getDocs as serverGetDocs, 
-  limit as serverLimit,
   ensureServerAuth
 } from '../_lib/firebaseServer.js';
 
@@ -47,33 +46,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       await ensureServerAuth();
 
-      // 1. Check lock doc
-      const lockDocRef = serverDoc(serverDb, 'systemSettings', 'platformAdminLock');
-      const lockSnap = await serverGetDoc(lockDocRef);
-
-      if (lockSnap.exists() && lockSnap.data()?.isSetupComplete === true) {
-        return res.status(200).json({
-          isSetupComplete: true,
-          message: 'Super Admin setup has already been completed.',
-        });
-      }
-
-      // 2. Query users for existing super admin
-      const q1 = serverQuery(serverCollection(serverDb, 'users'), serverWhere('role', '==', 'super_admin'), serverLimit(1));
-      const q2 = serverQuery(serverCollection(serverDb, 'users'), serverWhere('role', '==', 'super-admin'), serverLimit(1));
+      // 1. Query users for real human super admins (excluding internal service accounts)
+      const q1 = serverQuery(serverCollection(serverDb, 'users'), serverWhere('role', '==', 'super_admin'));
+      const q2 = serverQuery(serverCollection(serverDb, 'users'), serverWhere('role', '==', 'super-admin'));
       const [snap1, snap2] = await Promise.all([serverGetDocs(q1), serverGetDocs(q2)]);
 
-      if (!snap1.empty || !snap2.empty) {
-        try {
-          await serverSetDoc(lockDocRef, {
-            isSetupComplete: true,
-            completedAt: new Date().toISOString(),
-            syncedFromUserCheck: true,
-          }, { merge: true });
-        } catch {
-          // Non-critical background sync
-        }
+      const humanSuperAdminDocs = [...snap1.docs, ...snap2.docs].filter(d => {
+        const email = (d.data()?.email || '').toLowerCase();
+        return !email.includes('restaurantos.internal') && !email.includes('dev-admin-reset');
+      });
 
+      // 2. Check lock doc
+      const lockDocRef = serverDoc(serverDb, 'systemSettings', 'platformAdminLock');
+      const lockSnap = await serverGetDoc(lockDocRef);
+      const lockData = lockSnap.exists() ? lockSnap.data() : null;
+
+      // Setup is only considered complete if a real human administrator exists
+      // or if the lock was explicitly set with a verified superAdminUid
+      const isActuallyComplete = 
+        humanSuperAdminDocs.length > 0 || 
+        (lockData?.isSetupComplete === true && lockData?.superAdminUid && !lockData?.syncedFromUserCheck);
+
+      if (isActuallyComplete) {
         return res.status(200).json({
           isSetupComplete: true,
           message: 'Super Admin setup has already been completed.',
@@ -158,35 +152,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     await ensureServerAuth();
 
-    // 4. Check existing Super Admins before proceeding
-    const q1 = serverQuery(serverCollection(serverDb, 'users'), serverWhere('role', '==', 'super_admin'), serverLimit(1));
-    const q2 = serverQuery(serverCollection(serverDb, 'users'), serverWhere('role', '==', 'super-admin'), serverLimit(1));
+    // 4. Check existing real human Super Admins before proceeding
+    const q1 = serverQuery(serverCollection(serverDb, 'users'), serverWhere('role', '==', 'super_admin'));
+    const q2 = serverQuery(serverCollection(serverDb, 'users'), serverWhere('role', '==', 'super-admin'));
     const [existing1, existing2] = await Promise.all([serverGetDocs(q1), serverGetDocs(q2)]);
 
-    if (!existing1.empty || !existing2.empty) {
-      return res.status(409).json({
-        error: 'Super Admin setup has already been completed.',
-      });
-    }
+    const humanSuperAdmins = [...existing1.docs, ...existing2.docs].filter(d => {
+      const em = (d.data()?.email || '').toLowerCase();
+      return !em.includes('restaurantos.internal') && !em.includes('dev-admin-reset');
+    });
 
-    // 5. Atomic Race-Condition Lock check & lock initiation
     const lockRef = serverDoc(serverDb, 'systemSettings', 'platformAdminLock');
     const existingLock = await serverGetDoc(lockRef);
-    if (existingLock.exists() && existingLock.data()?.isSetupComplete === true) {
+    const lockData = existingLock.exists() ? existingLock.data() : null;
+
+    if (humanSuperAdmins.length > 0 || (lockData?.isSetupComplete === true && lockData?.superAdminUid && !lockData?.syncedFromUserCheck)) {
       return res.status(409).json({
         error: 'Super Admin setup has already been completed.',
       });
     }
 
-    // Set lock
+    // Set atomic lock
     await serverSetDoc(lockRef, {
       isSetupComplete: true,
       setupInitiatedAt: now,
       superAdminEmail: cleanEmail,
       lockId: 'PLATFORM_SUPER_ADMIN_INITIALIZED',
+      syncedFromUserCheck: false,
     }, { merge: true });
 
-    // 6. Check if email already has super admin claim
+    // 5. Check if email already has super admin claim in Firebase Auth
     const existingUser = await lookupFirebaseAuthUser(creds, cleanEmail);
     if (existingUser?.customAttributes?.role === 'super_admin' || existingUser?.customAttributes?.super_admin === true) {
       return res.status(409).json({
@@ -194,14 +189,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // 7. Create or update user in Firebase Authentication
+    // 6. Create or update user in Firebase Authentication
     const userRecord = await createFirebaseAuthUser(creds, {
       email: cleanEmail,
       password: password,
       displayName: fullName.trim(),
     });
 
-    // 8. Assign Canonical Super Admin Custom Claims
+    // 7. Assign Canonical Super Admin Custom Claims
     const existingClaims = existingUser?.customAttributes || {};
     await setFirebaseAuthCustomClaims(creds, userRecord.uid, {
       ...existingClaims,
@@ -209,7 +204,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       super_admin: true,
     });
 
-    // 9. Create/Update Firestore users/{uid} profile
+    // 8. Create/Update Firestore users/{uid} profile
     const userDocRef = serverDoc(serverDb, 'users', userRecord.uid);
     await serverSetDoc(userDocRef, {
       uid: userRecord.uid,
@@ -225,12 +220,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       updatedAt: now,
     }, { merge: true });
 
-    // 10. Finalize setup lock with created UID
+    // 9. Finalize setup lock with created UID
     await serverSetDoc(lockRef, {
       isSetupComplete: true,
       completedAt: now,
       superAdminUid: userRecord.uid,
       superAdminEmail: cleanEmail,
+      syncedFromUserCheck: false,
     }, { merge: true });
 
     return res.status(201).json({
