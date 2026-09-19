@@ -63,7 +63,9 @@ import {
   Smartphone,
   CreditCard,
   Wallet,
-  Calendar
+  Calendar,
+  CalendarDays,
+  ArrowRight
 } from 'lucide-react';
 import { cn } from '../../../utils/cn';
 
@@ -1510,16 +1512,26 @@ export const OwnerOverview: React.FC = () => {
         </div>
         
         {/* Quick Action buttons */}
-        <div className="flex flex-wrap gap-2.5 shrink-0 self-start md:self-center">
-          <Button 
-            size="sm" 
-            variant="outline" 
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0 w-full sm:w-auto self-start md:self-center">
+          <button
+            type="button"
             onClick={() => setView('reservations')}
-            className="border-[#E5E0D9] text-xs font-semibold text-[#17202A] hover:border-[#C9533B] hover:text-[#C9533B] flex items-center space-x-1.5"
+            aria-label="View Reservations - Check today's bookings"
+            className="group w-full sm:w-[245px] md:w-[255px] min-h-[72px] px-5 py-3.5 bg-[#C9533B] hover:bg-[#B3452F] text-white rounded-[16px] shadow-sm hover:shadow-md transition-all duration-200 flex items-center justify-between gap-3 text-left cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#C9533B] focus:ring-offset-2 active:scale-[0.99]"
           >
-            <Calendar className="w-4 h-4 text-[#D98B00]" />
-            <span>Reservation Manager</span>
-          </Button>
+            <div className="flex items-center gap-3.5 min-w-0">
+              <CalendarDays className="w-6 h-6 text-white shrink-0" aria-hidden="true" />
+              <div className="flex flex-col min-w-0">
+                <span className="text-[16px] font-bold text-white leading-tight tracking-tight">
+                  View Reservations
+                </span>
+                <span className="text-[12px] font-medium text-white/80 leading-normal mt-0.5">
+                  Check today's bookings
+                </span>
+              </div>
+            </div>
+            <ArrowRight className="w-5 h-5 text-white shrink-0 transition-transform duration-200 ease-out group-hover:translate-x-1" aria-hidden="true" />
+          </button>
           {featureFlags.strategy && (
             <Button 
               size="sm" 
