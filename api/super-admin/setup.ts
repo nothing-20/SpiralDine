@@ -16,6 +16,7 @@ import {
   where as serverWhere, 
   getDocs as serverGetDocs, 
   ensureServerAuth,
+  signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   updateProfile
 } from '../_lib/firebaseServer.js';

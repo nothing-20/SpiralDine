@@ -60,6 +60,7 @@ export {
   where,
   getDocs,
   limit,
+  signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   updateProfile
 };
