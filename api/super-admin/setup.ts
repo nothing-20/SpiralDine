@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getAdminAuth, getAdminFirestore } from '../_lib/firebaseAdmin';
+import { getAdminAuth, getAdminFirestore } from '../_lib/firebaseAdmin.js';
 
 /**
  * /api/super-admin/setup
