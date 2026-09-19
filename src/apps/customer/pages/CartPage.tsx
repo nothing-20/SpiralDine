@@ -449,16 +449,36 @@ export const CartPage: React.FC = () => {
         console.warn('[CartPage] Failed to update local recent orders index:', storageErr);
       }
 
-      // Non-blocking update to table status if known
-      if (session?.tableId && tenantId) {
+      // Robust canonical update to table status: transitions table to Occupied
+      if (tenantId && (session?.tableId || tableNumber)) {
         try {
-          const tableRef = doc(db, 'restaurants', tenantId, 'tables', session.tableId);
-          await setDoc(tableRef, {
-            status: 'occupied',
+          const resolvedTableId = session?.tableId || `TBL-${tableNumber}`;
+          const tableRef = doc(db, 'restaurants', tenantId, 'tables', resolvedTableId);
+          const tableSnap = await getDoc(tableRef);
+          let targetRef = tableRef;
+          if (!tableSnap.exists()) {
+            const tablesColRef = collection(db, 'restaurants', tenantId, 'tables');
+            const cleanTableNum = String(tableNumber || '').replace(/^TBL-/i, '');
+            const q1 = query(tablesColRef, where('tableNumber', '==', cleanTableNum));
+            let qSnap = await getDocs(q1);
+            if (qSnap.empty) {
+              const q2 = query(tablesColRef, where('number', '==', cleanTableNum));
+              qSnap = await getDocs(q2);
+            }
+            if (!qSnap.empty) {
+              targetRef = doc(db, 'restaurants', tenantId, 'tables', qSnap.docs[0].id);
+            }
+          }
+          await setDoc(targetRef, {
+            status: 'Occupied',
+            tableStatus: 'Occupied',
             activeOrderId: orderId,
+            currentOrderId: orderId,
             updatedAt: new Date().toISOString()
           }, { merge: true });
-        } catch (_) {}
+        } catch (tableErr) {
+          console.warn('[CartPage] Table status occupation warning:', tableErr);
+        }
       }
 
       toast.success('Order successfully routed to kitchen!');

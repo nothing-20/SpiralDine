@@ -820,15 +820,18 @@ export const CustomerMenu: React.FC = () => {
         console.warn('[CustomerMenu] Failed to update local recent orders index:', storageErr);
       }
 
-      // Non-blocking table status update
+      // Canonical table status update: transitions table to Occupied
       try {
         const tableRef = doc(db, 'restaurants', tenantId, 'tables', resolvedTableId);
-        await updateDoc(tableRef, {
+        await setDoc(tableRef, {
           status: 'Occupied',
+          tableStatus: 'Occupied',
+          activeOrderId: orderId,
+          currentOrderId: orderId,
           updatedAt: new Date().toISOString()
-        });
+        }, { merge: true });
       } catch (err) {
-        console.warn('[CustomerMenu] Table status update ignored:', err);
+        console.warn('[CustomerMenu] Table status update warning:', err);
       }
 
       // Calculate estimated prep time

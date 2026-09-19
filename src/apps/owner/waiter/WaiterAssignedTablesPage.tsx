@@ -526,8 +526,10 @@ export const WaiterAssignedTablesPage: React.FC = () => {
       const batch = writeBatch(db);
       const tableRef = doc(db, 'restaurants', user.tenantId, 'tables', table.id);
       batch.update(tableRef, {
-        status: 'empty',
+        status: 'Available',
+        tableStatus: 'Available',
         activeOrderId: null,
+        currentOrderId: null,
         guestsCount: 0,
         tableNotes: '',
         seatingTime: null

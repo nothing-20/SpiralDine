@@ -17,7 +17,8 @@ import {
   ShieldCheck,
   CreditCard,
   Building,
-  UserCheck
+  UserCheck,
+  Star
 } from 'lucide-react';
 
 interface OrderItem {
@@ -580,13 +581,23 @@ export const CustomerReceiptView: React.FC<CustomerReceiptViewProps> = ({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => navigate('/customer/orders')}
-            className="w-full sm:w-auto px-5 py-2.5 bg-white border border-[#E5DCD5] hover:border-[#C85A3F] text-[#202124] hover:text-[#C85A3F] text-xs font-bold rounded-xl transition-all cursor-pointer text-center shrink-0"
-          >
-            Back to My Orders
-          </button>
+          <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={() => navigate(window.location.pathname)}
+              className="w-full sm:w-auto px-5 py-2.5 bg-[#FFF8F2] border border-[#C85A3F]/30 hover:border-[#C85A3F] text-[#C85A3F] text-xs font-extrabold rounded-xl transition-all cursor-pointer text-center shrink-0 flex items-center justify-center gap-1.5"
+            >
+              <Star className="w-3.5 h-3.5 fill-[#C85A3F]" />
+              <span>Rate Your Experience</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/customer/orders')}
+              className="w-full sm:w-auto px-5 py-2.5 bg-white border border-[#E5DCD5] hover:border-[#C85A3F] text-[#202124] hover:text-[#C85A3F] text-xs font-bold rounded-xl transition-all cursor-pointer text-center shrink-0"
+            >
+              Back to My Orders
+            </button>
+          </div>
         </div>
       </div>
     </div>

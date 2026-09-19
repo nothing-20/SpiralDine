@@ -716,6 +716,7 @@ export const OrderTracking: React.FC = () => {
 
       const feedbackPayload = {
         rating: ratingCategory,
+        starRating: ratingCategory === 'Excellent' ? 5 : ratingCategory === 'Good' ? 4 : ratingCategory === 'Neutral' ? 3 : ratingCategory === 'Needs Attention' ? 2 : 1,
         foodQuality: foodRating,
         serviceSpeed: serviceRating,
         cleanliness: cleanlinessRating,
@@ -754,18 +755,9 @@ export const OrderTracking: React.FC = () => {
         });
       }
 
-      // Restore table status in Firestore to Available / empty
-      const tableId = session?.tableId || (order.tableNumber ? `TBL-${order.tableNumber}` : '');
-      if (tableId) {
-        try {
-          const tableRef = doc(db, 'restaurants', tenantId, 'tables', tableId);
-          await updateDoc(tableRef, {
-            status: 'Available',
-            guestsCount: 0,
-            activeOrderId: ''
-          });
-        } catch (_) {}
-      }
+      // Note: Table status transitions to 'cleaning' on bill settlement and remains
+      // in cleaning until the waiter inspects and confirms the table is sanitized.
+      // Do NOT reset table to Available here.
 
       // Clear local dining session cache
       sessionStorage.removeItem('restaurantos_dining_session');
@@ -994,10 +986,12 @@ export const OrderTracking: React.FC = () => {
     );
   }
 
-  // If order status is COMPLETED and payment is settled, or receipt was explicitly requested, render CustomerReceiptView
-  const isOrderPaid = (order.paymentStatus || '').toLowerCase() === 'paid';
+  // Authoritative Payment Settlement Status
+  const isOrderPaid = (order.paymentStatus || '').toLowerCase() === 'paid' || canonicalBill?.paymentStatus === 'paid';
   const isCompleted = (order.status || '').toUpperCase() === 'COMPLETED' && isOrderPaid;
-  if (isCompleted || isReceiptRequested) {
+
+  // 1. Explicit Receipt View Request (?view=receipt)
+  if (isReceiptRequested) {
     return (
       <CustomerReceiptView
         order={order}
@@ -1007,7 +1001,7 @@ export const OrderTracking: React.FC = () => {
     );
   }
 
-  // Thank You Exit Screen after Feedback Submission
+  // 2. Thank You Exit Screen after Feedback Submission
   if (feedbackSubmitted) {
     return (
       <div className="min-h-screen bg-[#FCFAF7] text-left">
@@ -1023,20 +1017,28 @@ export const OrderTracking: React.FC = () => {
                 Your feedback helps us continually refine our recipes and dining experience. Have a wonderful rest of your day!
               </p>
             </div>
-            <button
-              onClick={() => navigate('/customer/home')}
-              className="w-full text-xs font-bold py-3.5 bg-[#C85A3F] hover:bg-[#A94332] text-white rounded-xl shadow-md transition-all cursor-pointer"
-            >
-              Finish & Return Home
-            </button>
+            <div className="space-y-2.5 pt-2">
+              <button
+                onClick={() => navigate('?view=receipt')}
+                className="w-full text-xs font-bold py-3 bg-[#FCFAF7] border border-[#E5DCD5] hover:bg-[#F3E8DF] text-[#202124] rounded-xl transition-all cursor-pointer"
+              >
+                View Final Receipt
+              </button>
+              <button
+                onClick={() => navigate('/customer/home')}
+                className="w-full text-xs font-bold py-3 bg-[#C85A3F] hover:bg-[#A94332] text-white rounded-xl shadow-md transition-all cursor-pointer"
+              >
+                Finish & Return Home
+              </button>
+            </div>
           </div>
         </div>
       </div>
     );
   }
 
-  // Dining Experience Feedback Loop (Triggered after bill is settled)
-  if (paymentCompleted) {
+  // 3. Post-Payment Dining Experience Feedback Loop (Triggered after bill is settled)
+  if (paymentCompleted || isOrderPaid) {
     return (
       <div className="min-h-screen bg-[#FCFAF7] text-left">
         <CustomerHeader />
@@ -1130,15 +1132,36 @@ export const OrderTracking: React.FC = () => {
               </label>
             </div>
 
-            <button
-              onClick={handleSubmitFeedback}
-              className="w-full text-xs font-extrabold py-3.5 bg-[#C85A3F] hover:bg-[#A94332] text-white rounded-xl shadow-md shadow-[#C85A3F]/20 transition-all cursor-pointer"
-            >
-              Submit Feedback Review
-            </button>
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={handleSubmitFeedback}
+                className="w-full text-xs font-extrabold py-3.5 bg-[#C85A3F] hover:bg-[#A94332] text-white rounded-xl shadow-md shadow-[#C85A3F]/20 transition-all cursor-pointer"
+              >
+                Submit Feedback Review
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('?view=receipt')}
+                className="w-full text-xs font-semibold py-2 text-[#756B64] hover:text-[#202124] transition-colors cursor-pointer"
+              >
+                Skip & View Receipt →
+              </button>
+            </div>
           </div>
         </div>
       </div>
+    );
+  }
+
+  // Fallback for terminal/completed orders where feedback wasn't triggered
+  if (isCompleted) {
+    return (
+      <CustomerReceiptView
+        order={order}
+        restaurantData={restaurantData}
+        tenantId={tenantId}
+      />
     );
   }
 

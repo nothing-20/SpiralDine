@@ -23,6 +23,7 @@ export const TERMINAL_ORDER_STATUSES = [
   'CLOSED',
   'ARCHIVED',
   'CANCELLED',
+  'REFUNDED',
   'PAYMENT_COMPLETED'
 ] as const;
 
@@ -32,18 +33,25 @@ export const TERMINAL_ORDER_STATUSES = [
  * 1. Order is cancelled, refunded, or archived.
  * 2. Order is closed.
  * 3. Both food/service lifecycle is completed (COMPLETED, PAID, PAYMENT_COMPLETED, DINING_COMPLETED, SERVED)
- *    AND payment is settled (paymentStatus === 'paid').
+ *    AND payment is settled (paymentStatus === 'paid' or billStatus === 'paid').
  * 
  * An order whose food was served/prepared but whose payment is still pending
- * is NOT terminal — it must remain active so the customer can pay.
+ * is NOT terminal — it must remain active in Waiter, Kitchen, and Owner portals so the bill can be settled.
  */
-export const isOrderTerminal = (order?: { status?: string; paymentStatus?: string } | null): boolean => {
+export const isOrderTerminal = (order?: { 
+  status?: string; 
+  orderStatus?: string; 
+  paymentStatus?: string; 
+  billStatus?: string;
+  isPaid?: boolean;
+} | null): boolean => {
   if (!order) return false;
-  const status = (order.status || '').toUpperCase().trim();
-  const paymentStatus = (order.paymentStatus || '').toLowerCase().trim();
+  const status = (order.status || order.orderStatus || '').toUpperCase().trim();
+  const paymentStatus = (order.paymentStatus || order.billStatus || '').toLowerCase().trim();
+  const isPaid = paymentStatus === 'paid' || order.isPaid === true;
 
   // Cancelled or refunded orders are always terminal
-  if (status === 'CANCELLED' || paymentStatus === 'refunded' || paymentStatus === 'cancelled') {
+  if (status === 'CANCELLED' || status === 'REFUNDED' || paymentStatus === 'refunded' || paymentStatus === 'cancelled') {
     return true;
   }
 
@@ -51,8 +59,6 @@ export const isOrderTerminal = (order?: { status?: string; paymentStatus?: strin
   if (status === 'ARCHIVED' || status === 'CLOSED') {
     return true;
   }
-
-  const isPaid = paymentStatus === 'paid';
 
   // Explicit terminal status with paid payment
   if ((status === 'PAID' || status === 'PAYMENT_COMPLETED') && isPaid) {
@@ -75,10 +81,40 @@ export const isOrderTerminal = (order?: { status?: string; paymentStatus?: strin
 /**
  * Canonical check to determine if an order is active.
  * An active order is any order currently in progress that has NOT yet reached
- * a terminal status and whose payment is still pending.
+ * a terminal status and whose payment or service is still pending.
  */
-export const isOrderActive = (order?: { status?: string; paymentStatus?: string } | null): boolean => {
+export const isOrderActive = (order?: { 
+  status?: string; 
+  orderStatus?: string; 
+  paymentStatus?: string; 
+  billStatus?: string;
+  isPaid?: boolean;
+} | null): boolean => {
   if (!order) return false;
   return !isOrderTerminal(order);
 };
+
+/**
+ * Returns a human-readable badge label for an order's operational lifecycle.
+ */
+export const getOrderDisplayStatus = (order?: { status?: string; orderStatus?: string; paymentStatus?: string } | null): string => {
+  if (!order) return 'Unknown';
+  const status = (order.status || order.orderStatus || '').toUpperCase().trim();
+  const paymentStatus = (order.paymentStatus || '').toLowerCase().trim();
+  const isPaid = paymentStatus === 'paid';
+
+  if (status === 'CANCELLED') return 'Cancelled';
+  if (status === 'REFUNDED' || paymentStatus === 'refunded') return 'Refunded';
+  if (status === 'NEW' || status === 'PLACED') return 'New';
+  if (status === 'ACCEPTED' || status === 'CHEF_ASSIGNED') return 'Accepted';
+  if (status === 'PREPARING') return 'Preparing';
+  if (status === 'READY') return 'Ready to Serve';
+  if (status === 'SERVED' || status === 'DELIVERED') {
+    return isPaid ? 'Served & Paid' : 'Served (Unpaid)';
+  }
+  if (status === 'BILL_REQUESTED') return 'Bill Requested';
+  if (status === 'PAID' || status === 'COMPLETED' || isPaid) return 'Paid';
+  return status || 'Active';
+};
+
 

@@ -14,7 +14,8 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
-import { generateUniqueOrderId } from '../../../shared/utils/orderUtils';
+import { generateUniqueOrderId, isOrderActive } from '../../../shared/utils/orderUtils';
+import { isTableAvailable, isTableOccupied, isTableCleaning } from '../../../shared/domain/tables/types';
 import { IOrder, ITable, IServiceRequest, ITimelineEvent, IHandoverDoc, ISatisfactionRating } from '../../../types';
 import { formatPrice } from '../../../utils/format';
 import { getMenuItemPath } from '../../../firebase/collections';
@@ -139,7 +140,7 @@ export const WaiterMatrix: React.FC = () => {
   const [managerReviews, setManagerReviews] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const [activeTab, setActiveTab] = useState<TWaiterTab>('command_center');
+  const [activeTab, setActiveTab] = useState<TWaiterTab>('floor_map');
   const [selectedOrder, setSelectedOrder] = useState<IOrder | null>(null);
   const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [isUpdatingBill, setIsUpdatingBill] = useState(false);
@@ -658,7 +659,7 @@ export const WaiterMatrix: React.FC = () => {
     const list: IWaiterTask[] = [];
 
     orders.forEach(o => {
-      if (o.status === 'READY' && o.waiterId === user?.uid) {
+      if (o.status === 'READY' && (o.waiterId === user?.uid || !o.waiterId || isManagerOrOwner)) {
         const tableObj = tables.find(t => t.number === o.tableNumber);
         const section = tableObj?.section || 'Main Room';
         const notes = tableObj?.tableNotes || '';
@@ -968,21 +969,102 @@ export const WaiterMatrix: React.FC = () => {
     setDiscountPercent(0);
   };
 
+  const handleServeFood = async (order: IOrder) => {
+    if (!user?.tenantId || !order.orderId) return;
+    try {
+      const orderRef = doc(db, 'restaurants', user.tenantId, 'orders', order.orderId);
+      const nowIso = new Date().toISOString();
+      const timelineEvent: ITimelineEvent = {
+        type: 'SERVED',
+        title: 'Food Served',
+        description: `Delivered to Table ${order.tableNumber || 'Dine-in'} by ${user.displayName || user.email || 'Waiter'}.`,
+        timestamp: nowIso,
+        performedBy: user.displayName || user.email || 'Waiter'
+      };
+
+      await updateDoc(orderRef, {
+        status: 'SERVED',
+        servedAt: nowIso,
+        deliveredAt: nowIso,
+        waiterId: user.uid,
+        waiterName: user.displayName || user.email || 'Waiter',
+        timeline: arrayUnion(timelineEvent),
+        updatedAt: nowIso
+      });
+
+      // Auto-assign waiter to table if table unassigned
+      const tableObj = tables.find(t => String(t.number) === String(order.tableNumber) || t.activeOrderId === order.orderId);
+      if (tableObj && !tableObj.assignedWaiterId) {
+        try {
+          const tRef = doc(db, 'restaurants', user.tenantId, 'tables', tableObj.id);
+          await updateDoc(tRef, {
+            assignedWaiterId: user.uid,
+            assignedWaiterName: user.displayName || user.email || 'Waiter'
+          });
+        } catch (_) {}
+      }
+
+      setShift(prev => ({
+        ...prev,
+        stats: { ...prev.stats, ordersDelivered: prev.stats.ordersDelivered + 1 }
+      }));
+
+      toast.success(`Food served to Table ${order.tableNumber}!`);
+
+      logEvent(user.tenantId, {
+        eventType: 'Order Delivered',
+        eventCategory: 'Waiter',
+        performedBy: user.displayName || user.email || 'Waiter',
+        performedByRole: user.role || 'waiter',
+        orderId: order.orderId,
+        tableNumber: order.tableNumber,
+        title: 'Food Served',
+        description: `Waiter confirmed food served to Table ${order.tableNumber}.`
+      });
+    } catch (err) {
+      console.error('[WaiterMatrix] Serve food error:', err);
+      toast.error('Failed to update food serving status.');
+    }
+  };
+
+  const handleStartCleaning = async (table: ITable) => {
+    if (!user?.tenantId) return;
+    try {
+      const tableRef = doc(db, 'restaurants', user.tenantId, 'tables', table.id);
+      const nowIso = new Date().toISOString();
+      await updateDoc(tableRef, {
+        status: 'cleaning',
+        tableStatus: 'cleaning',
+        cleaningStartedAt: nowIso,
+        updatedAt: nowIso
+      });
+      toast.success(`Table ${table.number} moved to cleaning queue.`);
+    } catch (err) {
+      console.error('[WaiterMatrix] Start cleaning failed:', err);
+      toast.error('Failed to move table to cleaning.');
+    }
+  };
+
   const handleCompleteCleaningCC = async (table: ITable) => {
     if (!user?.tenantId) return;
     try {
       const batch = writeBatch(db);
       const tableRef = doc(db, 'restaurants', user.tenantId, 'tables', table.id);
+      const nowIso = new Date().toISOString();
       batch.update(tableRef, {
-        status: 'empty',
+        status: 'Available',
+        tableStatus: 'Available',
         activeOrderId: null,
+        currentOrderId: null,
         guestsCount: 0,
-        tableNotes: ''
+        tableNotes: '',
+        cleaningCompletedAt: nowIso,
+        updatedAt: nowIso
       });
 
       if (table.activeOrderId) {
         const orderRef = doc(db, 'restaurants', user.tenantId, 'orders', table.activeOrderId);
-        batch.update(orderRef, { status: 'ARCHIVED' });
+        batch.update(orderRef, { status: 'COMPLETED', isArchived: true });
       }
 
       await batch.commit();
@@ -992,7 +1074,7 @@ export const WaiterMatrix: React.FC = () => {
         stats: { ...prev.stats, cleaningCompleted: prev.stats.cleaningCompleted + 1 }
       }));
 
-      toast.success(`Table ${table.number} sanitized and reset.`);
+      toast.success(`Table ${table.number} sanitized and marked Available!`);
 
       logEvent(user.tenantId, {
         eventType: 'Table Cleaned',
@@ -1006,6 +1088,7 @@ export const WaiterMatrix: React.FC = () => {
       });
     } catch (e) {
       console.error(e);
+      toast.error('Failed to complete cleaning.');
     }
   };
 
@@ -2263,18 +2346,31 @@ export const WaiterMatrix: React.FC = () => {
           {/* ───────────────── FLOOR MAP MATRIX VIEW ───────────────── */}
           {activeTab === 'floor_map' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
                 {tables.map(table => {
                   const assignedToMe = table.assignedWaiterId === user?.uid;
-                  const isOccupied = table.status === 'occupied' || table.status === 'service_requested' || table.status === 'bill_requested';
-                  const isCleaning = table.status === 'cleaning';
-                  const activeOrderForTable = orders.find(o => String(o.tableNumber) === String(table.number) && o.status !== 'ARCHIVED' && o.status !== 'CANCELLED' && o.status !== 'COMPLETED');
+                  const rawStatus = table.status || (table as any).tableStatus;
+                  const isOccupied = isTableOccupied(rawStatus);
+                  const isCleaning = isTableCleaning(rawStatus);
+                  const isAvailable = isTableAvailable(rawStatus, table.isActive);
+                  
+                  // Match active order for this table
+                  const activeOrderForTable = orders.find(o => 
+                    (String(o.tableNumber) === String(table.number) || o.orderId === table.activeOrderId || o.id === table.activeOrderId) &&
+                    isOrderActive(o)
+                  );
+
+                  const orderStatus = activeOrderForTable ? (activeOrderForTable.status || '').toUpperCase() : '';
+                  const isOrderPaid = activeOrderForTable ? (activeOrderForTable.paymentStatus || '').toLowerCase() === 'paid' : false;
+                  const customerName = activeOrderForTable?.customerName || (activeOrderForTable as any)?.userName || (activeOrderForTable as any)?.name || (isOccupied ? 'Guest Diner' : null);
+                  const itemsCount = activeOrderForTable?.items?.length || 0;
+                  const orderTotal = activeOrderForTable ? (activeOrderForTable.total || (activeOrderForTable as any)?.totalAmount || 0) : 0;
                   const activeAssistanceForTable = waiterRequests.find(r => String(r.tableNumber) === String(table.number) && r.status !== 'Completed' && r.status !== 'Cancelled');
                   
                   return (
                     <Card
                       key={table.id}
-                      className={`p-3.5 border bg-slate-900/40 rounded-2xl text-left flex flex-col justify-between min-h-[170px] h-auto hover:border-slate-755 transition-all ${
+                      className={`p-3.5 border bg-slate-900/40 rounded-2xl text-left flex flex-col justify-between min-h-[195px] h-auto hover:border-slate-755 transition-all ${
                         assignedToMe 
                           ? 'border-primary/45 bg-primary/5 ring-1 ring-primary/10' 
                           : 'border-slate-850'
@@ -2284,41 +2380,58 @@ export const WaiterMatrix: React.FC = () => {
                         <span className="font-extrabold text-sm text-textPearl">Table {table.number}</span>
                         <Badge
                           variant={
-                            table.status === 'empty'
+                            isAvailable
                               ? 'success'
-                              : table.status === 'bill_requested'
+                              : isCleaning
+                              ? 'neutral'
+                              : rawStatus === 'bill_requested'
                               ? 'danger'
                               : 'warning'
                           }
                           className="text-[9px]"
                         >
-                          {table.status === 'bill_requested'
-                            ? 'Invoice'
-                            : table.status === 'service_requested'
-                            ? 'Alert'
-                            : table.status}
+                          {isCleaning ? 'Cleaning' : rawStatus === 'bill_requested' ? 'Invoice' : isOccupied ? 'Occupied' : 'Available'}
                         </Badge>
                       </div>
 
                       <div className="text-left space-y-1 my-1">
                         <span className="text-[10px] text-slate-500 font-extrabold uppercase">{table.section || 'Main Room'}</span>
-                        <div className="text-[10px] text-slate-400 truncate">
-                          {isOccupied ? `Guests: ${table.guestsCount || 2}` : 'Available'}
-                        </div>
-                        {table.tableNotes && (
-                          <div className="text-[9px] text-amber-400 mt-0.5 truncate">
-                            ⚠️ {table.tableNotes}
+
+                        {isOccupied || activeOrderForTable ? (
+                          <div className="space-y-0.5 pt-0.5">
+                            <div className="text-xs font-bold text-textPearl truncate flex items-center gap-1">
+                              <span>👤</span>
+                              <span className="truncate">{customerName || 'Diner Guest'}</span>
+                            </div>
+                            {activeOrderForTable && (
+                              <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between">
+                                <span className="truncate font-semibold">#{activeOrderForTable.orderId}</span>
+                                <span className="font-extrabold text-emerald-400">{formatPrice(orderTotal)}</span>
+                              </div>
+                            )}
+                            <div className="text-[10px] text-slate-400 truncate">
+                              {itemsCount > 0 ? `${itemsCount} item${itemsCount === 1 ? '' : 's'}` : `${table.guestsCount || 2} guests`} · <span className="font-bold text-amber-400">{orderStatus || 'ACTIVE'}</span>
+                            </div>
+                          </div>
+                        ) : isCleaning ? (
+                          <div className="text-[11px] text-indigo-400 font-bold flex items-center gap-1 py-1">
+                            <span>🧹 Needs Sanitizing</span>
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-slate-400 py-1">
+                            Available · Cap: {table.seatingCapacity || 4}
                           </div>
                         )}
-                        <div className="text-[9px] text-slate-500 font-medium truncate">
+
+                        <div className="text-[9px] text-slate-500 font-medium truncate pt-0.5">
                           Server: {table.assignedWaiterName || 'Unassigned'}
                         </div>
 
-                        {/* Separate Table Attention Indicators: Order Status & Assistance Request */}
+                        {/* Attention Indicators: Order Status & Assistance Request */}
                         <div className="flex flex-col gap-1 pt-1">
-                          {activeOrderForTable?.status === 'READY' && (
-                            <span className="inline-flex items-center gap-1 text-[8.5px] font-extrabold text-emerald-400 bg-emerald-500/15 border border-emerald-500/25 px-1.5 py-0.5 rounded truncate">
-                              🍽️ Order Ready
+                          {orderStatus === 'READY' && (
+                            <span className="inline-flex items-center gap-1 text-[8.5px] font-extrabold text-emerald-400 bg-emerald-500/15 border border-emerald-500/25 px-1.5 py-0.5 rounded truncate animate-pulse">
+                              🍽️ Ready to Serve
                             </span>
                           )}
                           {activeAssistanceForTable && (
@@ -2329,8 +2442,81 @@ export const WaiterMatrix: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between border-t border-slate-800/40 pt-2 gap-1.5">
-                        {table.status === 'empty' ? (
+                      {/* State-aware Action Buttons */}
+                      <div className="flex flex-wrap items-center justify-between border-t border-slate-800/40 pt-2 gap-1.5">
+                        {isCleaning ? (
+                          <Button
+                            onClick={() => handleCompleteCleaningCC(table)}
+                            className="w-full py-1 text-[9px] bg-indigo-500 hover:bg-indigo-600 text-slate-950 font-extrabold cursor-pointer"
+                          >
+                            <Check className="w-3 h-3 mr-0.5 inline" /> Mark Available
+                          </Button>
+                        ) : (isOccupied || activeOrderForTable) ? (
+                          <>
+                            {orderStatus === 'READY' && activeOrderForTable ? (
+                              <Button
+                                onClick={() => handleServeFood(activeOrderForTable)}
+                                className="w-full py-1 text-[9px] bg-emerald-500 hover:bg-emerald-600 text-slate-955 font-black cursor-pointer shadow-xs animate-pulse"
+                              >
+                                <ChefHat className="w-3 h-3 mr-0.5 inline" /> Serve Food
+                              </Button>
+                            ) : isOrderPaid ? (
+                              <Button
+                                onClick={() => handleStartCleaning(table)}
+                                className="w-full py-1 text-[9px] bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold cursor-pointer"
+                              >
+                                <Sparkles className="w-3 h-3 mr-0.5 inline" /> Start Cleaning
+                              </Button>
+                            ) : (orderStatus === 'SERVED' || orderStatus === 'DELIVERED' || orderStatus === 'DINING_COMPLETED' || table.status === 'bill_requested') && activeOrderForTable ? (
+                              <Button
+                                onClick={() => handleGenerateBill(activeOrderForTable)}
+                                className="w-full py-1 text-[9px] bg-emerald-500 hover:bg-emerald-600 text-slate-955 font-extrabold cursor-pointer"
+                              >
+                                <DollarSign className="w-3 h-3 mr-0.5 inline" /> Payment / Bill
+                              </Button>
+                            ) : (
+                              <>
+                                <Button
+                                  onClick={() => {
+                                    if (activeOrderForTable) {
+                                      setSelectedOrder(activeOrderForTable);
+                                    } else {
+                                      setOrderTable(table);
+                                      setCart({});
+                                      setCustomerName('');
+                                      setCustomerPhone('');
+                                    }
+                                  }}
+                                  className="flex-1 py-1 text-[9px] bg-primary text-slate-950 font-bold cursor-pointer"
+                                >
+                                  {activeOrderForTable ? 'View Order' : 'Order'}
+                                </Button>
+                                <Button
+                                  onClick={() => {
+                                    if (activeOrderForTable) {
+                                      handleGenerateBill(activeOrderForTable);
+                                    } else {
+                                      handleRequestBill(table);
+                                    }
+                                  }}
+                                  className="flex-1 py-1 text-[9px] bg-slate-800 hover:bg-slate-750 text-slate-300 font-bold cursor-pointer"
+                                >
+                                  Invoice
+                                </Button>
+                              </>
+                            )}
+
+                            {!assignedToMe && (
+                              <button
+                                type="button"
+                                onClick={() => user?.uid && handleUpdateTableWaiter(table.id, user.uid)}
+                                className="w-full text-[8.5px] text-slate-400 hover:text-white transition-colors text-center font-semibold pt-0.5 cursor-pointer"
+                              >
+                                + Claim Server
+                              </button>
+                            )}
+                          </>
+                        ) : (
                           <Button
                             onClick={() => {
                               setSelectedTable(table);
@@ -2338,62 +2524,10 @@ export const WaiterMatrix: React.FC = () => {
                               setTableSectionInput(table.section || 'Main Room');
                               setTableNotesInput('');
                             }}
-                            className="w-full py-1 text-[9px] bg-slate-800 text-slate-300 font-bold hover:bg-slate-750"
+                            className="w-full py-1 text-[9px] bg-slate-800 text-slate-300 font-bold hover:bg-slate-750 cursor-pointer"
                           >
                             <UserPlus className="w-3 h-3 mr-1 inline" /> Check In
                           </Button>
-                        ) : (
-                          <>
-                            {assignedToMe ? (
-                              <>
-                                {table.status === 'bill_requested' ? (
-                                  <Button
-                                    onClick={() => {
-                                      const activeOrder = orders.find(o => o.orderId === table.activeOrderId);
-                                      if (activeOrder) handleGenerateBill(activeOrder);
-                                    }}
-                                    className="flex-1 py-1 text-[9px] bg-emerald-500 text-slate-955 font-extrabold"
-                                  >
-                                    <DollarSign className="w-3 h-3 mr-0.5 inline" /> Checkout
-                                  </Button>
-                                ) : isCleaning ? (
-                                  <Button
-                                    onClick={() => handleCompleteCleaningCC(table)}
-                                    className="w-full py-1 text-[9px] bg-indigo-500 text-slate-950 font-extrabold"
-                                  >
-                                    <Check className="w-3 h-3 mr-0.5 inline" /> Sanitize
-                                  </Button>
-                                ) : (
-                                  <>
-                                    <Button
-                                      onClick={() => {
-                                        setOrderTable(table);
-                                        setCart({});
-                                        setCustomerName('');
-                                        setCustomerPhone('');
-                                      }}
-                                      className="flex-1 py-1 text-[9px] bg-primary text-slate-950 font-bold"
-                                    >
-                                      Order
-                                    </Button>
-                                    <Button
-                                      onClick={() => handleRequestBill(table)}
-                                      className="flex-1 py-1 text-[9px] bg-slate-800 text-slate-300 font-bold"
-                                    >
-                                      Invoice
-                                    </Button>
-                                  </>
-                                )}
-                              </>
-                            ) : (
-                              <Button
-                                onClick={() => user?.uid && handleUpdateTableWaiter(table.id, user.uid)}
-                                className="w-full py-1 text-[9px] bg-white border border-[#E3DED5] text-[#18201D] font-bold hover:bg-[#F7F4EE]"
-                              >
-                                Claim Server Role
-                              </Button>
-                            )}
-                          </>
                         )}
                       </div>
                     </Card>

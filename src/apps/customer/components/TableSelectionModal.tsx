@@ -15,6 +15,8 @@ import {
   Sparkles
 } from 'lucide-react';
 
+import { isTableAvailable } from '../../../shared/domain/tables/types';
+
 export interface ITableData {
   id: string;
   tableId?: string;
@@ -52,6 +54,7 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
   onSelectTable,
 }) => {
   const [tables, setTables] = useState<ITableData[]>([]);
+  const [totalConfiguredTables, setTotalConfiguredTables] = useState<number>(0);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTable, setSelectedTable] = useState<ITableData | null>(null);
@@ -86,12 +89,9 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
         });
       });
 
-      // Filter: only legitimately selectable tables
-      // Exclude disabled tables (status === 'Disabled' or isActive === false)
+      // Filter: strictly only available tables that diners can legitimately sit at
       const selectable = list.filter(t => {
-        if (t.isActive === false) return false;
-        if (String(t.status).toLowerCase() === 'disabled') return false;
-        if (String(t.tableStatus).toLowerCase() === 'disabled') return false;
+        if (!isTableAvailable(t.status || t.tableStatus, t.isActive)) return false;
         // If branchId is specified and table has branchId, match branch
         if (branchId && t.branchId && t.branchId !== branchId && branchId !== 'all') {
           return false;
@@ -109,6 +109,7 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
         return (a.tableName || '').localeCompare(b.tableName || '');
       });
 
+      setTotalConfiguredTables(list.length);
       setTables(selectable);
 
       // Pre-select currentTableId if provided
@@ -207,10 +208,14 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
               </div>
               <div className="space-y-1 max-w-sm mx-auto">
                 <h3 className="text-sm font-extrabold text-[#202124]">
-                  No tables are currently configured for this restaurant.
+                  {totalConfiguredTables > 0 
+                    ? 'All tables are currently occupied or being cleaned.' 
+                    : 'No tables are currently configured for this restaurant.'}
                 </h3>
                 <p className="text-xs text-[#756B64] leading-relaxed">
-                  Please ask restaurant staff for assistance.
+                  {totalConfiguredTables > 0
+                    ? 'Please ask our floor staff for seating or check back in a few minutes.'
+                    : 'Please ask restaurant staff for assistance.'}
                 </p>
               </div>
             </div>
