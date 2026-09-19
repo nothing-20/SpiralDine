@@ -145,9 +145,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const now = new Date().toISOString();
 
   try {
-    await ensureServerAuth();
+    // 1. Ensure authenticated context as server admin for lock and initial checks
+    await ensureServerAuth(true);
 
-    // 3. Check existing real human Super Admins before proceeding
+    // 2. Check existing real human Super Admins before proceeding
     const q1 = serverQuery(serverCollection(serverDb, 'users'), serverWhere('role', '==', 'super_admin'));
     const q2 = serverQuery(serverCollection(serverDb, 'users'), serverWhere('role', '==', 'super-admin'));
     const [existing1, existing2] = await Promise.all([serverGetDocs(q1), serverGetDocs(q2)]);
@@ -167,7 +168,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // Set atomic lock
+    // Set atomic lock with server admin privileges
     await serverSetDoc(lockRef, {
       isSetupComplete: true,
       setupInitiatedAt: now,
@@ -176,7 +177,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       syncedFromUserCheck: false,
     }, { merge: true });
 
-    // 4. Create user in Firebase Authentication
+    // 3. Create or authenticate user in Firebase Authentication
     let createdUid = '';
     const creds = getServiceAccountCredentials();
 
@@ -189,12 +190,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
 
-      const userRecord = await createFirebaseAuthUser(creds, {
-        email: cleanEmail,
-        password: password,
-        displayName: fullName.trim(),
-      });
-      createdUid = userRecord.uid;
+      if (existingUser?.localId) {
+        createdUid = existingUser.localId;
+      } else {
+        const userRecord = await createFirebaseAuthUser(creds, {
+          email: cleanEmail,
+          password: password,
+          displayName: fullName.trim(),
+        });
+        createdUid = userRecord.uid;
+      }
 
       // Assign Canonical Super Admin Custom Claims
       const existingClaims = existingUser?.customAttributes || {};
@@ -204,7 +209,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         super_admin: true,
       });
     } else {
-      // Fallback: Create via Firebase Client Auth SDK in serverless function
+      // Fallback: Create or authenticate via Firebase Client Auth SDK in serverless function
       try {
         const userCred = await createUserWithEmailAndPassword(serverAuth, cleanEmail, password);
         createdUid = userCred.user.uid;
@@ -215,18 +220,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           try {
             const existingCred = await signInWithEmailAndPassword(serverAuth, cleanEmail, password);
             createdUid = existingCred.user.uid;
+            if (fullName.trim()) {
+              await updateProfile(existingCred.user, { displayName: fullName.trim() });
+            }
           } catch {
+            // Re-authenticate service admin so lock can be safely rolled back
+            await ensureServerAuth(true);
+            await serverSetDoc(lockRef, {
+              isSetupComplete: false,
+              lastError: 'Email already in use with different credentials',
+            }, { merge: true });
             return res.status(400).json({
-              error: 'An account with this email address already exists in Firebase Auth with a different password.',
+              error: 'An account with this email address already exists. Please enter your existing password to promote it to Super Admin, or use a fresh email address.',
             });
           }
         } else {
+          // Rollback setup lock on unexpected auth error
+          await ensureServerAuth(true);
+          await serverSetDoc(lockRef, {
+            isSetupComplete: false,
+            lastError: authErr?.message,
+          }, { merge: true });
           throw authErr;
         }
       }
     }
 
-    // 5. Create/Update Firestore users/{uid} profile
+    // 4. Create/Update Firestore users/{uid} profile
+    // Auth context is currently the created/authenticated user (createdUid), satisfying request.auth.uid == userId
     const userDocRef = serverDoc(serverDb, 'users', createdUid);
     await serverSetDoc(userDocRef, {
       uid: createdUid,
@@ -242,7 +263,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       updatedAt: now,
     }, { merge: true });
 
-    // 6. Finalize setup lock with created UID
+    // 5. Finalize setup lock with created UID using elevated server admin context
+    await ensureServerAuth(true);
     await serverSetDoc(lockRef, {
       isSetupComplete: true,
       completedAt: now,

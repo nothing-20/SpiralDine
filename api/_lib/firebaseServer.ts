@@ -32,12 +32,13 @@ let isAuthInitialized = false;
 /**
  * Ensure serverless function has authenticated context for Firestore security rules.
  */
-export async function ensureServerAuth() {
-  if (auth.currentUser) return auth.currentUser;
-  if (isAuthInitialized) return auth.currentUser;
-
+export async function ensureServerAuth(force = false) {
   const serverEmail = process.env.FIREBASE_SERVER_EMAIL || 'dev-admin-reset@restaurantos.internal';
   const serverPassword = process.env.FIREBASE_SERVER_PASSWORD || 'DevResetSecret123!';
+
+  if (!force && auth.currentUser && auth.currentUser.email === serverEmail) {
+    return auth.currentUser;
+  }
 
   try {
     const cred = await signInWithEmailAndPassword(auth, serverEmail, serverPassword);
