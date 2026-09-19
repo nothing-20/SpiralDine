@@ -19,6 +19,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { IOrder } from '../../../types';
 import { formatPrice } from '../../../shared/utils/format';
 import { intelligenceService } from '../../../shared/intelligence/services/intelligenceService';
+import { calculateBusinessHealth, IBusinessHealthReport } from '../../../shared/services/businessHealthService';
 import { automationService } from '../../../shared/services/automationService';
 import { logEvent } from '../../../shared/services/eventEngine';
 import { featureFlags } from '../../../config/featureFlags';
@@ -94,6 +95,7 @@ export const OwnerOverview: React.FC = () => {
   const [resWaiterInput, setResWaiterInput] = useState('');
 
   const [isLoading, setIsLoading] = useState(true);
+  const [isHealthModalOpen, setIsHealthModalOpen] = useState(false);
   const [, setIntelData] = useState<any | null>(null);
   const [greeting, setGreeting] = useState<{ title: string; desc: string; icon: string }>({
     title: 'Loading Executive Summary...',
@@ -507,25 +509,43 @@ export const OwnerOverview: React.FC = () => {
       return sum + score;
     }, 0);
 
-    const avg = satisfactionRatings.length > 0 ? csatTotal / satisfactionRatings.length : 4.8;
+    const avg = satisfactionRatings.length > 0 ? csatTotal / satisfactionRatings.length : null;
 
     const pendingFeedback = managerReviews.filter(r => r.resolutionStatus === 'Pending').length;
 
-    const repeatCustomersCount = satisfactionRatings.filter(r => r.repeatCustomer).length;
-    const repeatRate = satisfactionRatings.length > 0
-      ? Math.round((repeatCustomersCount / satisfactionRatings.length) * 100)
-      : 74;
+    let repeatRate: number | null = null;
+    if (satisfactionRatings.length > 0) {
+      const repeatCustomersCount = satisfactionRatings.filter(r => r.repeatCustomer).length;
+      repeatRate = Math.round((repeatCustomersCount / satisfactionRatings.length) * 100);
+    } else {
+      // Calculate real customer repeat rate from unique customer orders
+      const customerOrderCounts: Record<string, number> = {};
+      orders.forEach(o => {
+        const id = o.customerPhone || o.customerName || (o as any).metadata?.customerPhone;
+        if (id) {
+          customerOrderCounts[id] = (customerOrderCounts[id] || 0) + 1;
+        }
+      });
+      const uniqueCustomers = Object.keys(customerOrderCounts);
+      if (uniqueCustomers.length > 0) {
+        const repeatCount = uniqueCustomers.filter(c => customerOrderCounts[c] > 1).length;
+        repeatRate = Math.round((repeatCount / uniqueCustomers.length) * 100);
+      }
+    }
 
-    return { avg, pendingFeedback, repeatRate };
-  }, [satisfactionRatings, managerReviews]);
+    return { avg, pendingFeedback, repeatRate, count: satisfactionRatings.length };
+  }, [satisfactionRatings, managerReviews, orders]);
 
   // Staff Performance computations
   const staffMetrics = useMemo(() => {
-    // 1. Kitchen prep duration avg
-    const completedOrdersTodayList = orders.filter(o => (o.status === 'DELIVERED' || o.status === 'COMPLETED') && o.createdAt && new Date(o.createdAt).toDateString() === todayStr);
+    // 1. Kitchen prep duration avg (today or recent historical completed orders)
+    let completedOrdersList = orders.filter(o => (o.status === 'DELIVERED' || o.status === 'COMPLETED') && o.createdAt && new Date(o.createdAt).toDateString() === todayStr);
+    if (completedOrdersList.length === 0) {
+      completedOrdersList = orders.filter(o => (o.status === 'DELIVERED' || o.status === 'COMPLETED'));
+    }
     let totalPrepTime = 0;
     let prepCount = 0;
-    completedOrdersTodayList.forEach(o => {
+    completedOrdersList.forEach(o => {
       if (o.createdAt && o.updatedAt) {
         const diff = (new Date(o.updatedAt).getTime() - new Date(o.createdAt).getTime()) / 60000;
         if (diff > 0 && diff < 180) {
@@ -534,14 +554,14 @@ export const OwnerOverview: React.FC = () => {
         }
       }
     });
-    const avgPrep = prepCount > 0 ? (totalPrepTime / prepCount).toFixed(1) : '12.5';
+    const avgPrep = prepCount > 0 ? (totalPrepTime / prepCount).toFixed(1) : '—';
 
     // 2. Waiter average response/delivery
     const ordersWithDelivery = orders.filter(o => o.deliveryDurationSeconds !== undefined && o.deliveryDurationSeconds > 0);
     const avgDeliveryTimeSeconds = ordersWithDelivery.length > 0
       ? ordersWithDelivery.reduce((sum, o) => sum + (o.deliveryDurationSeconds || 0), 0) / ordersWithDelivery.length
       : 0;
-    const avgDeliveryMins = avgDeliveryTimeSeconds > 0 ? (avgDeliveryTimeSeconds / 60).toFixed(1) : '4.2';
+    const avgDeliveryMins = avgDeliveryTimeSeconds > 0 ? (avgDeliveryTimeSeconds / 60).toFixed(1) : '—';
 
     // 3. Fastest response
     const waiterStats: Record<string, { totalTime: number; count: number }> = {};
@@ -604,7 +624,7 @@ export const OwnerOverview: React.FC = () => {
     }
 
     // 2. Kitchen prep delay
-    if (Number(staffMetrics.avgPrep) > 15) {
+    if (staffMetrics.avgPrep !== '—' && Number(staffMetrics.avgPrep) > 15) {
       return {
         title: 'Cooking Turnaround Latency',
         type: 'Kitchen Delay',
@@ -659,7 +679,9 @@ export const OwnerOverview: React.FC = () => {
         ? `Revenue is pacing ${Math.abs(revenueChangePercent)}% ${revenueChangePercent >= 0 ? 'higher' : 'lower'} than yesterday.`
         : 'First transaction lists are loading.';
 
-      const prepText = Number(staffMetrics.avgPrep) <= 12.5
+      const prepText = staffMetrics.avgPrep === '—'
+        ? 'Kitchen queue is clear.'
+        : Number(staffMetrics.avgPrep) <= 15
         ? 'Kitchen performance is stable.'
         : `Kitchen turnaround is slightly delayed (${staffMetrics.avgPrep}m).`;
 
@@ -674,9 +696,10 @@ export const OwnerOverview: React.FC = () => {
           icon: 'morning'
         });
       } else if (hour >= 12 && hour < 17) {
+        const csatGreeting = csatMetrics.avg !== null ? `CSAT is at ${csatMetrics.avg.toFixed(1)}★.` : 'No customer reviews recorded yet.';
         setGreeting({
           title: 'Midday Business Summary',
-          desc: `Lunch operations are pacing. ${revText} ${prepText} CSAT is at ${csatMetrics.avg.toFixed(1)}★.`,
+          desc: `Lunch operations are pacing. ${revText} ${prepText} ${csatGreeting}`,
           icon: 'midday'
         });
       } else {
@@ -873,21 +896,15 @@ export const OwnerOverview: React.FC = () => {
     return { total, onShift, pending, activeOrders, capacityPct };
   }, [employees, orders]);
 
-  // Compile health status attributes
-  const compiledHealth = useMemo(() => {
-    return intelligenceService.calculateHealthScore({
-      tenantId: tenantId || '',
-      timestamp: new Date().toISOString(),
-      revenueToday: todaySales,
-      ordersTodayCount: todayCompletedOrdersCount,
-      avgOrderValue: averageOrderValue,
-      avgPrepTimeMins: Math.round(Number(staffMetrics.avgPrep)),
-      avgCsatRating: csatMetrics.avg,
-      activeDinersCount: activeOccupiedTables,
-      lowStockItemsCount: inventoryMetrics.low,
-      totalWasteCost: 0
+  // Compile real Firestore-backed business health
+  const businessHealthReport = useMemo(() => {
+    return calculateBusinessHealth({
+      orders,
+      paidTransactions,
+      inventory,
+      satisfactionRatings
     });
-  }, [tenantId, todaySales, todayCompletedOrdersCount, averageOrderValue, staffMetrics, csatMetrics, activeOccupiedTables, inventoryMetrics]);
+  }, [orders, paidTransactions, inventory, satisfactionRatings]);
 
   // Sparkline Chart points generator (Derived from canonical confirmed transactions)
   const renderSparkline = () => {
@@ -1496,18 +1513,46 @@ export const OwnerOverview: React.FC = () => {
         {/* KPI 1: Business Health Score */}
         <Card className="p-5 border-[#E5E0D9] bg-white relative overflow-hidden flex flex-col justify-between h-44 hover:border-[#16845B]/40 transition-all duration-300 shadow-sm rounded-2xl">
           <div className="flex justify-between items-start">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-[#52606D]">Business Health</span>
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-[#E8F5EF] border border-[#C6E7D8]">
-              <Award className="w-4 h-4 text-[#16845B]" />
+            <div>
+              <span className="text-[10px] uppercase font-bold tracking-wider text-[#52606D]">Business Health</span>
+              <div className="text-[9px] text-[#7B8794]">
+                Coverage: {businessHealthReport.dataCoveragePercentage}%
+              </div>
+            </div>
+            <div className="flex items-center space-x-1.5">
+              <button
+                type="button"
+                onClick={() => setIsHealthModalOpen(true)}
+                className="px-2 py-0.5 text-[10px] font-semibold text-[#16845B] bg-[#E8F5EF] hover:bg-[#C6E7D8] rounded-md transition-colors border border-[#C6E7D8]/60 cursor-pointer"
+                title="View score explanation & telemetry"
+              >
+                Details
+              </button>
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-[#E8F5EF] border border-[#C6E7D8]">
+                <Award className="w-3.5 h-3.5 text-[#16845B]" />
+              </div>
             </div>
           </div>
-          <div className="my-2 flex items-baseline space-x-2">
-            <span className="text-4xl font-display font-black text-[#17202A]">{compiledHealth.score}</span>
+          <div className="my-1 flex items-baseline space-x-2">
+            <span className="text-4xl font-display font-black text-[#17202A]">
+              {businessHealthReport.overallScore !== null ? businessHealthReport.overallScore : '—'}
+            </span>
             <span className="text-[10px] text-[#7B8794]">/ 100</span>
           </div>
           <div className="flex justify-between items-center text-[10px] font-bold border-t border-[#E5E0D9] pt-2.5">
-            <span className="text-[#16845B] uppercase tracking-widest">{compiledHealth.label}</span>
-            <span className="text-[#52606D]">+3% vs last week</span>
+            <span
+              className="uppercase tracking-wider font-extrabold text-[10px]"
+              style={{
+                color: businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 80 ? '#16845B' :
+                       businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 65 ? '#2E7D32' :
+                       businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 50 ? '#D97706' : '#D64545'
+              }}
+            >
+              {businessHealthReport.label}
+            </span>
+            <span className="text-[#52606D] text-[9px] truncate max-w-[110px]" title={businessHealthReport.trendText}>
+              {businessHealthReport.trendText}
+            </span>
           </div>
         </Card>
 
@@ -1588,11 +1633,17 @@ export const OwnerOverview: React.FC = () => {
             </div>
           </div>
           <div className="my-2 flex items-baseline space-x-2">
-            <span className="text-4xl font-display font-black text-[#17202A]">{csatMetrics.avg.toFixed(1)}</span>
-            <span className="text-xs text-[#52606D] font-bold">/ 5.0 Rating</span>
+            <span className="text-4xl font-display font-black text-[#17202A]">
+              {csatMetrics.avg !== null ? csatMetrics.avg.toFixed(1) : '—'}
+            </span>
+            <span className="text-xs text-[#52606D] font-bold">
+              {csatMetrics.avg !== null ? '/ 5.0 Rating' : 'No reviews yet'}
+            </span>
           </div>
           <div className="flex justify-between items-center text-[10px] font-bold border-t border-[#E5E0D9] pt-2.5">
-            <span className="text-[#1D5D9B] font-semibold">{csatMetrics.repeatRate}% Repeat Rate</span>
+            <span className="text-[#1D5D9B] font-semibold">
+              {csatMetrics.repeatRate !== null ? `${csatMetrics.repeatRate}% Repeat Rate` : '— Repeat Rate'}
+            </span>
             <span className="text-[#D64545] font-extrabold">{csatMetrics.pendingFeedback} Pending Reviews</span>
           </div>
         </Card>
@@ -3333,6 +3384,132 @@ export const OwnerOverview: React.FC = () => {
           <div className="flex justify-end pt-2">
             <Button onClick={() => setIsShiftsOpen(false)} className="bg-slate-800 text-textPearl hover:bg-slate-700 font-semibold">
               Close Overview
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Business Health Breakdown & Explainability Modal */}
+      <Modal
+        isOpen={isHealthModalOpen}
+        onClose={() => setIsHealthModalOpen(false)}
+        title="Business Health Architecture & Scoring Breakdown"
+        size="2xl"
+      >
+        <div className="space-y-4 text-left text-xs max-h-[75vh] overflow-y-auto pr-1">
+          {/* Top Banner */}
+          <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center space-x-2">
+                <span className="text-2xl font-black text-white">
+                  {businessHealthReport.overallScore !== null ? `${businessHealthReport.overallScore} / 100` : 'Limited Data'}
+                </span>
+                <span
+                  className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+                  style={{
+                    backgroundColor: businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 80 ? 'rgba(22,132,91,0.15)' :
+                                     businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 65 ? 'rgba(46,125,50,0.15)' :
+                                     businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 50 ? 'rgba(217,119,6,0.15)' : 'rgba(214,69,69,0.15)',
+                    color: businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 80 ? '#10B981' :
+                           businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 65 ? '#4ADE80' :
+                           businessHealthReport.overallScore !== null && businessHealthReport.overallScore >= 50 ? '#FBBF24' : '#F87171',
+                  }}
+                >
+                  {businessHealthReport.label}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Calculated strictly from live Firestore operations ({businessHealthReport.dataCoveragePercentage}% data coverage).
+              </p>
+            </div>
+            <div className="text-right text-[11px] text-slate-400">
+              <div className="font-semibold text-slate-300">Trend Status</div>
+              <div>{businessHealthReport.trendText}</div>
+            </div>
+          </div>
+
+          {/* Explainability Note */}
+          <div className="p-3 bg-blue-950/30 border border-blue-900/40 rounded-xl flex items-start space-x-2.5">
+            <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+            <p className="text-[11px] text-blue-200/90 leading-relaxed">
+              Business Health scores restaurant operating vigor across 5 distinct operational pillars. 
+              Dimensions with insufficient historical activity are marked <strong>Insufficient Data</strong> and excluded from penalizing your score, with remaining weights dynamically renormalized.
+            </p>
+          </div>
+
+          {/* 5 Dimensions List */}
+          <div className="space-y-3">
+            <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+              Operational Dimensions ({businessHealthReport.dimensions.length})
+            </h4>
+
+            {businessHealthReport.dimensions.map((dim) => {
+              const isAvailable = dim.status === 'available';
+              return (
+                <div key={dim.id} className="p-3.5 bg-slate-900/60 border border-slate-850 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <span className="font-bold text-slate-200 text-sm">{dim.title}</span>
+                      <span className="text-[10px] text-slate-400">
+                        (Baseline Weight: {dim.weight}%)
+                      </span>
+                    </div>
+                    {isAvailable && dim.score !== null ? (
+                      <div className="flex items-center space-x-2">
+                        <span className="text-sm font-extrabold text-white">{dim.score} / 100</span>
+                        <span
+                          className="text-[10px] font-semibold px-2 py-0.5 rounded"
+                          style={{
+                            backgroundColor: dim.score >= 80 ? 'rgba(16,185,129,0.15)' : dim.score >= 60 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)',
+                            color: dim.score >= 80 ? '#34D399' : dim.score >= 60 ? '#FBBF24' : '#F87171'
+                          }}
+                        >
+                          {dim.score >= 80 ? 'Optimal' : dim.score >= 60 ? 'Fair' : 'Needs Attention'}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] font-bold text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded">
+                        Insufficient Data
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Progress bar */}
+                  {isAvailable && dim.score !== null && (
+                    <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{
+                          width: `${Math.min(100, Math.max(0, dim.score))}%`,
+                          backgroundColor: dim.score >= 80 ? '#10B981' : dim.score >= 60 ? '#F59E0B' : '#EF4444'
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Explanation text */}
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    {dim.explanation}
+                  </p>
+
+                  {/* Metrics chips */}
+                  {dim.metrics && Object.keys(dim.metrics).length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {Object.entries(dim.metrics).map(([k, v]) => (
+                        <span key={k} className="text-[10px] bg-slate-800/70 border border-slate-700/60 rounded px-2 py-0.5 text-slate-300">
+                          <span className="text-slate-400">{k}:</span> {typeof v === 'number' ? v : String(v)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <Button onClick={() => setIsHealthModalOpen(false)} className="bg-slate-800 text-white hover:bg-slate-700 font-semibold text-xs px-4 py-2">
+              Close Details
             </Button>
           </div>
         </div>

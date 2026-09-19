@@ -216,26 +216,38 @@ export const intelligenceService = {
    * Scoring calculation
    */
   calculateHealthScore(context: IRestaurantContext): { score: number; label: string; color: string } {
-    let score = 90; // baseline
+    // If no orders and no revenue recorded yet, return early state
+    if (context.ordersTodayCount === 0 && context.revenueToday === 0) {
+      return {
+        score: 50,
+        label: 'Awaiting Activity',
+        color: 'text-slate-500 border-slate-500/20 bg-slate-500/5'
+      };
+    }
+
+    let score = 75; // Neutral starting operational baseline
 
     // CSAT impact
-    if (context.avgCsatRating < 4.2) score -= 15;
-    else if (context.avgCsatRating < 4.6) score -= 5;
+    if (context.avgCsatRating >= 4.5) score += 10;
+    else if (context.avgCsatRating < 3.5) score -= 20;
+    else if (context.avgCsatRating < 4.0) score -= 10;
 
     // Prep speed impact
-    if (context.avgPrepTimeMins > 18) score -= 15;
-    else if (context.avgPrepTimeMins > 15) score -= 5;
+    if (context.avgPrepTimeMins > 0 && context.avgPrepTimeMins <= 15) score += 10;
+    else if (context.avgPrepTimeMins > 25) score -= 20;
+    else if (context.avgPrepTimeMins > 18) score -= 10;
 
     // Stock items warning
-    if (context.lowStockItemsCount > 5) score -= 10;
+    if (context.lowStockItemsCount > 5) score -= 15;
     else if (context.lowStockItemsCount > 2) score -= 5;
+    else score += 5;
 
     // Waste cost caps
-    if (context.totalWasteCost > 5000) score -= 10; // Rs 5000 / $50
+    if (context.totalWasteCost > 5000) score -= 15;
 
-    score = Math.max(score, 10);
+    score = Math.min(100, Math.max(score, 10));
 
-    let label = 'Excellent';
+    let label = 'Healthy';
     let color = 'text-emerald-500 border-emerald-500/20 bg-emerald-500/5';
     if (score < 50) {
       label = 'Critical';
@@ -243,9 +255,9 @@ export const intelligenceService = {
     } else if (score < 70) {
       label = 'Needs Attention';
       color = 'text-amber-500 border-amber-500/20 bg-amber-500/5';
-    } else if (score < 85) {
-      label = 'Good';
-      color = 'text-sky-500 border-sky-500/20 bg-sky-500/5';
+    } else if (score >= 85) {
+      label = 'Optimal';
+      color = 'text-emerald-500 border-emerald-500/20 bg-emerald-500/5';
     }
 
     return { score, label, color };
