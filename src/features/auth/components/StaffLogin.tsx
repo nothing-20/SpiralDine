@@ -145,6 +145,10 @@ export const StaffLogin: React.FC = () => {
         msg = 'Your account is authenticated, but your staff profile cannot be accessed because of an authorization configuration problem. Contact your administrator.';
       } else if (err.code === 'auth/too-many-requests') {
         msg = 'Too many attempts. Please wait a moment and try again.';
+      } else if (err.code === 'auth/api-key-not-valid' || err.message?.includes('api-key-not-valid')) {
+        msg = 'Firebase configuration error: API key missing or invalid. Please check your environment variables.';
+      } else if (err.code === 'auth/unauthorized-domain' || err.message?.includes('unauthorized-domain')) {
+        msg = 'This domain is not authorized in Firebase Auth. Please add your domain to Firebase Console -> Authorized Domains.';
       } else if (err.message) {
         msg = err.message;
       }
