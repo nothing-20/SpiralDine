@@ -254,9 +254,21 @@ export const OwnerInventoryManager: React.FC = () => {
   // Derived stock overview metrics
   const stockMetrics = useMemo(() => {
     const total = ingredients.length;
-    const low = ingredients.filter(i => i.status === 'low').length;
-    const critical = ingredients.filter(i => i.status === 'critical').length;
-    const out = ingredients.filter(i => i.status === 'out_of_stock').length;
+    const low = ingredients.filter(i => {
+      const s = Number(i.currentStock ?? 0);
+      const m = Number(i.minimumStock ?? 5);
+      return inventoryService.calculateStockStatus(s, m, i.reorderLevel) === 'low';
+    }).length;
+    const critical = ingredients.filter(i => {
+      const s = Number(i.currentStock ?? 0);
+      const m = Number(i.minimumStock ?? 5);
+      return inventoryService.calculateStockStatus(s, m, i.reorderLevel) === 'critical';
+    }).length;
+    const out = ingredients.filter(i => {
+      const s = Number(i.currentStock ?? 0);
+      const m = Number(i.minimumStock ?? 5);
+      return inventoryService.calculateStockStatus(s, m, i.reorderLevel) === 'out_of_stock' || s <= 0;
+    }).length;
     
     // Low portions batch prepared items
     const lowBatch = menuItems.filter(item => 

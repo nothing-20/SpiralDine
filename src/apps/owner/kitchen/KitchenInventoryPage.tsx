@@ -178,15 +178,16 @@ export const KitchenInventoryPage: React.FC = () => {
       }
 
       // Status Filter
-      const stock = item.currentStock ?? 0;
-      const min = item.minimumStock ?? 5;
+      const stock = Number(item.currentStock ?? 0);
+      const min = Number(item.minimumStock ?? 5);
+      const computedStatus = inventoryService.calculateStockStatus(stock, min, item.reorderLevel);
 
       if (statusFilter === 'low') {
-        if (stock <= 0 || stock > min) return false;
+        if (computedStatus !== 'low' && computedStatus !== 'critical') return false;
       } else if (statusFilter === 'out_of_stock') {
-        if (stock > 0) return false;
+        if (computedStatus !== 'out_of_stock' && stock > 0) return false;
       } else if (statusFilter === 'healthy') {
-        if (stock <= min) return false;
+        if (computedStatus !== 'healthy') return false;
       }
 
       // Category
@@ -205,11 +206,13 @@ export const KitchenInventoryPage: React.FC = () => {
     let outCount = 0;
 
     ingredients.forEach((i) => {
-      const stock = i.currentStock ?? 0;
-      const min = i.minimumStock ?? 5;
-      if (stock <= 0 || i.status === 'out_of_stock') {
+      const stock = Number(i.currentStock ?? 0);
+      const min = Number(i.minimumStock ?? 5);
+      const computedStatus = inventoryService.calculateStockStatus(stock, min, i.reorderLevel);
+
+      if (computedStatus === 'out_of_stock' || stock <= 0) {
         outCount++;
-      } else if (stock <= min || i.status === 'low' || i.status === 'critical') {
+      } else if (computedStatus === 'low' || computedStatus === 'critical') {
         lowCount++;
       } else {
         healthyCount++;
@@ -749,12 +752,14 @@ export const KitchenInventoryPage: React.FC = () => {
         /* ─── Grid of Ingredient Cards ─── */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredIngredients.map((item) => {
-            const stock = item.currentStock ?? 0;
-            const minStock = item.minimumStock ?? 5;
-            const reorder = item.reorderLevel ?? minStock * 1.5;
-            const isOut = stock <= 0;
-            const isLow = !isOut && stock <= minStock;
-            const isHealthy = stock > minStock;
+            const stock = Number(item.currentStock ?? 0);
+            const minStock = Number(item.minimumStock ?? 5);
+            const reorder = Number(item.reorderLevel ?? minStock * 1.5);
+            const computedStatus = inventoryService.calculateStockStatus(stock, minStock, reorder);
+            const isOut = computedStatus === 'out_of_stock' || stock <= 0;
+            const isCritical = computedStatus === 'critical';
+            const isLow = computedStatus === 'low' || isCritical;
+            const isHealthy = computedStatus === 'healthy' && stock > minStock;
 
             // Health bar fill calculation
             const maxCap = Math.max(reorder * 1.5, stock * 1.2, 10);
@@ -796,12 +801,14 @@ export const KitchenInventoryPage: React.FC = () => {
                       className={`text-[9.5px] font-extrabold uppercase px-2 py-0.5 rounded-md border tracking-wider shrink-0 ${
                         isOut
                           ? 'bg-[#FDEEEC] text-[#C7463A] border-[#C7463A]/30'
+                          : isCritical
+                          ? 'bg-[#FDEEEC] text-[#C7463A] border-[#C7463A]/30'
                           : isLow
                           ? 'bg-[#FEF5E7] text-[#D79A24] border-[#D79A24]/30'
                           : 'bg-[#EBF7EE] text-[#287A55] border-[#287A55]/30'
                       }`}
                     >
-                      {isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock'}
+                      {isOut ? 'Out of Stock' : isCritical ? 'Critical Low' : isLow ? 'Low Stock' : 'In Stock'}
                     </span>
                   </div>
                 </div>

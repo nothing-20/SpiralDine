@@ -342,8 +342,8 @@ service cloud.firestore {
       // Canonical Inventory & Ingredients - accessible by authorized tenant staff (Owner, Admin, Manager, Kitchen)
       match /inventory/{ingredientId} {
         allow read: if isTenantStaff(tenantId);
-        allow create, delete: if isTenantManager(tenantId);
-        allow update: if isTenantStaff(tenantId);
+        allow create, update: if isTenantStaff(tenantId);
+        allow delete: if isTenantManager(tenantId);
       }
 
       // Stock Movements Audit Trail - append-only by authorized tenant staff, immutable once logged

@@ -23,6 +23,7 @@ import { isTableOccupied } from '../../../shared/domain/tables/types';
 import { intelligenceService } from '../../../shared/intelligence/services/intelligenceService';
 import { calculateBusinessHealth, IBusinessHealthReport } from '../../../shared/services/businessHealthService';
 import { automationService } from '../../../shared/services/automationService';
+import { inventoryService } from '../../../shared/services/inventoryService';
 import { logEvent } from '../../../shared/services/eventEngine';
 import { featureFlags } from '../../../config/featureFlags';
 
@@ -300,8 +301,8 @@ export const OwnerOverview: React.FC = () => {
       toast.error('Failed to stream sales records.');
     });
 
-    // 2. Inventory (bounded to 30 items)
-    const qInventory = query(collection(db, 'restaurants', tenantId, 'inventory'), limit(30));
+    // 2. Inventory (Canonical real-time collection shared with Kitchen)
+    const qInventory = collection(db, 'restaurants', tenantId, 'inventory');
     const unsubInventory = onSnapshot(qInventory, (snap) => {
       const list: any[] = [];
       snap.forEach(d => list.push({ id: d.id, ...d.data() }));
@@ -513,19 +514,25 @@ export const OwnerOverview: React.FC = () => {
   }, [tables]);
 
 
-  // Inventory computations
+  // Inventory computations (synchronized canonically with Kitchen inventory service)
   const inventoryMetrics = useMemo(() => {
     let healthy = 0;
     let low = 0;
     let critical = 0;
+    let out = 0;
 
     inventory.forEach((item) => {
       const stock = Number(item.currentStock ?? item.stockLevel ?? item.currentQuantity ?? 0);
       const minStock = Number(item.minimumStock ?? item.reorderThreshold ?? item.reorderLevel ?? item.minimumQuantity ?? 5);
+      const reorderLevel = Number(item.reorderLevel ?? item.reorderThreshold ?? minStock * 1.5);
       
-      if (stock === 0 || item.status === 'out_of_stock') {
+      const computedStatus = inventoryService.calculateStockStatus(stock, minStock, reorderLevel);
+
+      if (computedStatus === 'out_of_stock' || stock <= 0) {
+        out++;
+      } else if (computedStatus === 'critical') {
         critical++;
-      } else if (stock <= minStock || item.status === 'low' || item.status === 'critical') {
+      } else if (computedStatus === 'low') {
         low++;
       } else {
         healthy++;
@@ -539,7 +546,7 @@ export const OwnerOverview: React.FC = () => {
       return diffDays >= 0 && diffDays <= 3;
     }).length;
 
-    return { healthy, low, critical, expiringSoon };
+    return { healthy, low, critical, out, expiringSoon };
   }, [inventory]);
 
   // Customer Experience CSAT
@@ -659,11 +666,18 @@ export const OwnerOverview: React.FC = () => {
     }
 
     // 1. Low stock threat
-    if (inventoryMetrics.low > 0 || inventoryMetrics.critical > 0) {
+    if (inventoryMetrics.out > 0 || inventoryMetrics.critical > 0 || inventoryMetrics.low > 0) {
+      const totalAlerts = inventoryMetrics.low + inventoryMetrics.critical;
+      const desc = inventoryMetrics.out > 0 && totalAlerts > 0
+        ? `${totalAlerts} items are running below reorder bounds and ${inventoryMetrics.out} are fully depleted.`
+        : inventoryMetrics.out > 0
+        ? `${inventoryMetrics.out} items are fully depleted (out of stock).`
+        : `${totalAlerts} items are running below reorder bounds.`;
+
       return {
-        title: 'Safety Stock Low threshold Alert',
+        title: inventoryMetrics.out > 0 ? 'Out of Stock Alert' : 'Safety Stock Low threshold Alert',
         type: 'Low Stock',
-        description: `${inventoryMetrics.low} items are running below reorder bounds and ${inventoryMetrics.critical} are fully depleted.`,
+        description: desc,
         actionLabel: 'Create Purchase Order',
         actionLink: '/dashboard/owner/inventory/purchase-orders',
         color: 'red'
@@ -1979,14 +1993,14 @@ export const OwnerOverview: React.FC = () => {
             <div className="grid grid-cols-2 gap-3 text-xs font-semibold pt-1">
               <div className="p-3 bg-slate-955/20 border border-slate-850 rounded-xl">
                 <span className="text-[10px] text-slate-500 block uppercase font-bold tracking-wider">Low Stock</span>
-                <span className={`text-base font-extrabold block mt-0.5 ${inventoryMetrics.low > 0 ? 'text-amber-500' : 'text-slate-350'}`}>
-                  {inventoryMetrics.low} items
+                <span className={`text-base font-extrabold block mt-0.5 ${(inventoryMetrics.low + inventoryMetrics.critical) > 0 ? 'text-amber-500' : 'text-slate-350'}`}>
+                  {inventoryMetrics.low + inventoryMetrics.critical} items
                 </span>
               </div>
               <div className="p-3 bg-slate-955/20 border border-slate-850 rounded-xl">
-                <span className="text-[10px] text-slate-505 block uppercase font-bold tracking-wider">Critical Out</span>
-                <span className={`text-base font-extrabold block mt-0.5 ${inventoryMetrics.critical > 0 ? 'text-rose-500 font-bold' : 'text-slate-350'}`}>
-                  {inventoryMetrics.critical} items
+                <span className="text-[10px] text-slate-505 block uppercase font-bold tracking-wider">Out of Stock</span>
+                <span className={`text-base font-extrabold block mt-0.5 ${(inventoryMetrics.out || 0) > 0 ? 'text-rose-500 font-bold' : 'text-slate-350'}`}>
+                  {inventoryMetrics.out || 0} items
                 </span>
               </div>
               <div className="p-3 bg-slate-955/20 border border-slate-850 rounded-xl">
