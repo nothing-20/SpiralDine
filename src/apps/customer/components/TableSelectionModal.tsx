@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../../../shared/firebase/config';
 import { getTablePath } from '../../../shared/firebase/collections';
 import { 
@@ -15,7 +15,7 @@ import {
   Sparkles
 } from 'lucide-react';
 
-import { isTableAvailable } from '../../../shared/domain/tables/types';
+import { isTableAvailable, isTableOccupied, isTableCleaning } from '../../../shared/domain/tables/types';
 
 export interface ITableData {
   id: string;
@@ -58,82 +58,93 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTable, setSelectedTable] = useState<ITableData | null>(null);
+  const [reloadKey, setReloadKey] = useState<number>(0);
 
-  // Fetch real Firestore tables
-  const fetchTables = async () => {
-    if (!tenantId) return;
+  // Real-time listener for tables
+  useEffect(() => {
+    if (!isOpen || !tenantId) {
+      setSelectedTable(null);
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
-    try {
-      const tablesRef = collection(db, getTablePath(tenantId));
-      const snap = await getDocs(tablesRef);
-      const list: ITableData[] = [];
 
-      snap.forEach(docSnap => {
-        const data = docSnap.data();
-        list.push({
-          id: docSnap.id,
-          tableId: data.tableId || docSnap.id,
-          tableNumber: data.tableNumber || data.number || docSnap.id.replace(/^TBL-/i, ''),
-          number: data.number || data.tableNumber,
-          tableName: data.tableName || data.name || `Table ${data.tableNumber || data.number || docSnap.id.replace(/^TBL-/i, '')}`,
-          name: data.name,
-          capacity: data.capacity || data.seatingCapacity,
-          seatingCapacity: data.seatingCapacity || data.capacity,
-          floor: data.floor,
-          section: data.section,
-          status: data.status || data.tableStatus || 'Available',
-          tableStatus: data.tableStatus || data.status,
-          isActive: data.isActive !== false,
-          branchId: data.branchId || 'main',
+    const tablesRef = collection(db, getTablePath(tenantId));
+    const unsubscribe = onSnapshot(
+      tablesRef,
+      (snap) => {
+        const list: ITableData[] = [];
+        snap.forEach(docSnap => {
+          const data = docSnap.data();
+          list.push({
+            id: docSnap.id,
+            tableId: data.tableId || docSnap.id,
+            tableNumber: data.tableNumber || data.number || docSnap.id.replace(/^TBL-/i, ''),
+            number: data.number || data.tableNumber,
+            tableName: data.tableName || data.name || `Table ${data.tableNumber || data.number || docSnap.id.replace(/^TBL-/i, '')}`,
+            name: data.name,
+            capacity: data.capacity || data.seatingCapacity,
+            seatingCapacity: data.seatingCapacity || data.capacity,
+            floor: data.floor,
+            section: data.section,
+            status: data.status || data.tableStatus || 'Available',
+            tableStatus: data.tableStatus || data.status,
+            isActive: data.isActive !== false,
+            branchId: data.branchId || 'main',
+          });
         });
-      });
 
-      // Filter: strictly only available tables that diners can legitimately sit at
-      const selectable = list.filter(t => {
-        if (!isTableAvailable(t.status || t.tableStatus, t.isActive)) return false;
-        // If branchId is specified and table has branchId, match branch
-        if (branchId && t.branchId && t.branchId !== branchId && branchId !== 'all') {
-          return false;
+        // Filter: Keep all active tables for this branch (do NOT filter out occupied tables)
+        const branchTables = list.filter(t => {
+          if (t.isActive === false) return false;
+          if (branchId && t.branchId && t.branchId !== branchId && branchId !== 'all') {
+            return false;
+          }
+          return true;
+        });
+
+        // Natural numeric sort: 1, 2, 3...
+        branchTables.sort((a, b) => {
+          const numA = parseInt(a.tableNumber || '0', 10);
+          const numB = parseInt(b.tableNumber || '0', 10);
+          if (!isNaN(numA) && !isNaN(numB) && numA !== numB) {
+            return numA - numB;
+          }
+          return (a.tableName || '').localeCompare(b.tableName || '');
+        });
+
+        setTotalConfiguredTables(list.length);
+        setTables(branchTables);
+        setIsLoading(false);
+
+        // Pre-select currentTableId if provided and not yet selected
+        if (currentTableId) {
+          const match = branchTables.find(t => t.id === currentTableId || t.tableId === currentTableId || `TBL-${t.tableNumber}` === currentTableId);
+          if (match) {
+            setSelectedTable(prev => prev || match);
+          }
         }
-        return true;
-      });
-
-      // Natural numeric sort: 1, 2, 3...
-      selectable.sort((a, b) => {
-        const numA = parseInt(a.tableNumber || '0', 10);
-        const numB = parseInt(b.tableNumber || '0', 10);
-        if (!isNaN(numA) && !isNaN(numB) && numA !== numB) {
-          return numA - numB;
-        }
-        return (a.tableName || '').localeCompare(b.tableName || '');
-      });
-
-      setTotalConfiguredTables(list.length);
-      setTables(selectable);
-
-      // Pre-select currentTableId if provided
-      if (currentTableId) {
-        const match = selectable.find(t => t.id === currentTableId || t.tableId === currentTableId || `TBL-${t.tableNumber}` === currentTableId);
-        if (match) {
-          setSelectedTable(match);
-        }
+      },
+      (err) => {
+        console.error('[TableSelectionModal] Real-time table listener error:', err);
+        setError('Unable to load tables.');
+        setIsLoading(false);
       }
-    } catch (err: any) {
-      console.error('[TableSelectionModal] Failed to load tables:', err);
-      setError('Unable to load tables.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    );
 
-  useEffect(() => {
-    if (isOpen) {
-      fetchTables();
-    } else {
-      setSelectedTable(null);
-    }
-  }, [isOpen, tenantId, branchId]);
+    return () => {
+      unsubscribe();
+    };
+  }, [isOpen, tenantId, branchId, currentTableId, reloadKey]);
+
+  const availableCount = useMemo(() => {
+    return tables.filter(t => !isTableOccupied(t.status || t.tableStatus) && !isTableCleaning(t.status || t.tableStatus)).length;
+  }, [tables]);
+
+  const occupiedCount = useMemo(() => {
+    return tables.filter(t => isTableOccupied(t.status || t.tableStatus)).length;
+  }, [tables]);
 
   if (!isOpen) return null;
 
@@ -194,7 +205,7 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
                 <p className="text-xs text-[#756B64]">Please check your connection and try again.</p>
               </div>
               <button
-                onClick={fetchTables}
+                onClick={() => setReloadKey(k => k + 1)}
                 className="px-4 py-2 bg-[#C85A3F] hover:bg-[#A94332] text-white text-xs font-bold rounded-xl transition-all shadow-xs cursor-pointer inline-flex items-center gap-1.5"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
@@ -222,15 +233,27 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
           ) : (
             <div className="space-y-3">
               <div className="flex items-center justify-between text-xs text-[#756B64] px-1 font-semibold">
-                <span>Available Tables ({tables.length})</span>
-                <span className="text-[11px] text-[#756B64]/80">Tap to select</span>
+                <span className="font-bold text-[#202124]">All Tables ({tables.length})</span>
+                <div className="flex items-center gap-1.5 text-[11px]">
+                  <span className="inline-flex items-center gap-1 text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200 font-bold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
+                    {availableCount} Available
+                  </span>
+                  {occupiedCount > 0 && (
+                    <span className="inline-flex items-center gap-1 text-amber-900 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 font-bold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
+                      {occupiedCount} Occupied
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {tables.map(table => {
                   const isSelected = selectedTable?.id === table.id;
-                  const isCleaning = String(table.status).toLowerCase() === 'cleaning';
-                  const isOccupied = String(table.status).toLowerCase() === 'occupied';
+                  const rawStatus = table.status || table.tableStatus || '';
+                  const isOccupied = isTableOccupied(rawStatus);
+                  const isCleaning = isTableCleaning(rawStatus);
 
                   return (
                     <button
@@ -239,7 +262,11 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
                       onClick={() => setSelectedTable(table)}
                       className={`relative p-4 rounded-2xl border text-left transition-all flex flex-col justify-between gap-2.5 cursor-pointer group ${
                         isSelected
-                          ? 'bg-[#FFF8F2] border-[#C85A3F] ring-2 ring-[#C85A3F]/30 shadow-sm'
+                          ? 'bg-[#FFF8F2] border-[#C85A3F] ring-2 ring-[#C85A3F]/30 shadow-md'
+                          : isOccupied
+                          ? 'bg-amber-50/20 border-amber-200/90 hover:border-amber-400 hover:bg-amber-50/40'
+                          : isCleaning
+                          ? 'bg-slate-50 border-slate-200 hover:border-slate-300'
                           : 'bg-white border-[#E5DCD5] hover:border-[#C85A3F]/50 hover:bg-[#FCFAF7]'
                       }`}
                     >
@@ -264,7 +291,7 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
                       </div>
 
                       {/* Bottom Row: Capacity + Status Badge */}
-                      <div className="flex items-center justify-between gap-1 text-[11px] pt-1 border-t border-[#E5DCD5]/60">
+                      <div className="flex items-center justify-between gap-1 text-[11px] pt-1.5 border-t border-[#E5DCD5]/60">
                         {table.capacity ? (
                           <span className="inline-flex items-center gap-1 text-[#756B64] font-medium">
                             <Users className="w-3 h-3 text-[#756B64]/70" />
@@ -274,14 +301,17 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
                           <span className="text-[10px] text-[#756B64]/70">Dine-in</span>
                         )}
 
-                        <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-extrabold uppercase tracking-wider ${
+                        <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider flex items-center gap-1 shrink-0 ${
                           isOccupied
-                            ? 'bg-amber-100/70 text-amber-800'
+                            ? 'bg-amber-100 text-amber-900 border border-amber-300'
                             : isCleaning
-                            ? 'bg-slate-100 text-slate-600'
-                            : 'bg-emerald-100/70 text-emerald-800'
+                            ? 'bg-slate-100 text-slate-700 border border-slate-200'
+                            : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
                         }`}>
-                          {table.status || 'Available'}
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            isOccupied ? 'bg-amber-600' : isCleaning ? 'bg-slate-500' : 'bg-emerald-600'
+                          }`} />
+                          {isOccupied ? 'Occupied' : isCleaning ? 'Cleaning' : 'Available'}
                         </span>
                       </div>
                     </button>
@@ -297,7 +327,12 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
           <div className="text-xs text-[#756B64]">
             {selectedTable ? (
               <span className="font-semibold text-[#202124]">
-                Selected: <strong className="text-[#C85A3F] font-bold">{selectedTable.tableName || `Table ${selectedTable.tableNumber}`} ✓</strong>
+                Selected: <strong className="text-[#C85A3F] font-bold">{selectedTable.tableName || `Table ${selectedTable.tableNumber}`}</strong>
+                {isTableOccupied(selectedTable.status || selectedTable.tableStatus) && (
+                  <span className="ml-1.5 px-2 py-0.5 text-[10px] font-extrabold bg-amber-100 text-amber-900 rounded-md border border-amber-300">
+                    Occupied (Your Table)
+                  </span>
+                )}
               </span>
             ) : (
               <span>Please choose your table to proceed.</span>
