@@ -28,6 +28,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
+import { Link } from 'react-router-dom';
 import { logEvent } from '../../../services/eventEngine';
 import { ITimelineEvent } from '../../../types';
 
@@ -1516,6 +1517,14 @@ export const KitchenQueue: React.FC = () => {
             </div>
 
             <div className="flex items-center space-x-2">
+              <Link
+                to="/dashboard/kitchen/inventory"
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#287A55]/10 border border-[#287A55]/30 text-[#287A55] hover:bg-[#287A55] hover:text-white transition-all shadow-sm"
+                title="Manage Ingredients & Stock Movements"
+              >
+                <Package className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Stock Inventory</span>
+              </Link>
               <button
                 onClick={() => setShowInsights(s => !s)}
                 className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-bold border transition-all ${

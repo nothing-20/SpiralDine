@@ -26,6 +26,7 @@ import {
   Flame,
   Clock,
   SlidersHorizontal,
+  Package,
   PackageX,
   Utensils,
   Building2,
@@ -145,6 +146,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
           icon: ChefHat, 
           badge: activeCookingCount > 0 ? activeCookingCount : undefined 
         },
+        { to: '/dashboard/kitchen/inventory', label: 'Inventory', icon: Package },
         { to: '/dashboard/kitchen/menu-control', label: 'Out of Stock', icon: PackageX },
         { to: 'divider-1', label: '', icon: () => null },
         { to: '/dashboard/kitchen/order-history', label: 'Order History', icon: History },

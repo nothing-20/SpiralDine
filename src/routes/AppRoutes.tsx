@@ -57,6 +57,7 @@ const OwnerAuditLogs = React.lazy(() => import('../apps/owner/pages/OwnerAuditLo
 
 // Kitchen
 const KitchenQueue = React.lazy(() => import('../apps/owner/kitchen/KitchenQueue'));
+const KitchenInventoryPage = React.lazy(() => import('../apps/owner/kitchen/KitchenInventoryPage'));
 const KitchenMenuControl = React.lazy(() => import('../apps/owner/kitchen/KitchenMenuControl'));
 const KitchenOrderHistoryPage = React.lazy(() => import('../apps/owner/kitchen/KitchenOrderHistoryPage'));
 const KitchenItemHistoryPage = React.lazy(() => import('../apps/owner/kitchen/KitchenItemHistoryPage'));
@@ -373,6 +374,7 @@ export const AppRoutes: React.FC = () => {
               {/* Kitchen Dashboards */}
               <Route element={<RoleGuard allowedRoles={['owner', 'admin', 'manager', 'kitchen']} />}>
                 <Route path="/dashboard/kitchen" element={<KitchenQueue />} />
+                <Route path="/dashboard/kitchen/inventory" element={<KitchenInventoryPage />} />
                 <Route path="/dashboard/kitchen/menu-control" element={<KitchenMenuControl />} />
                 <Route path="/dashboard/kitchen/order-history" element={<KitchenOrderHistoryPage />} />
                 <Route path="/dashboard/kitchen/item-history" element={<KitchenItemHistoryPage />} />

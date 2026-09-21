@@ -520,8 +520,8 @@ export const OwnerOverview: React.FC = () => {
     let critical = 0;
 
     inventory.forEach((item) => {
-      const stock = Number(item.stockLevel ?? item.currentQuantity ?? 0);
-      const minStock = Number(item.reorderThreshold ?? item.minimumQuantity ?? 0);
+      const stock = Number(item.currentStock ?? item.stockLevel ?? item.currentQuantity ?? 0);
+      const minStock = Number(item.minimumStock ?? item.reorderThreshold ?? item.reorderLevel ?? item.minimumQuantity ?? 5);
       
       if (stock === 0 || item.status === 'out_of_stock') {
         critical++;
@@ -1965,12 +1965,12 @@ export const OwnerOverview: React.FC = () => {
             <div>
               <div className="flex justify-between text-[10px] font-bold text-slate-400 mb-1.5">
                 <span>Ingredient Stock Healthy</span>
-                <span className="text-emerald-455">{inventoryMetrics.healthy} / {inventory.length || 10} items</span>
+                <span className="text-emerald-455">{inventoryMetrics.healthy} / {inventory.length} items</span>
               </div>
               <div className="w-full bg-slate-955 h-2 rounded-full overflow-hidden border border-slate-850/50">
                 <div 
                   className="bg-emerald-500 h-full rounded-full transition-all duration-500"
-                  style={{ width: `${inventory.length > 0 ? (inventoryMetrics.healthy / inventory.length) * 100 : 80}%` }}
+                  style={{ width: `${inventory.length > 0 ? Math.round((inventoryMetrics.healthy / inventory.length) * 100) : 0}%` }}
                 />
               </div>
             </div>
