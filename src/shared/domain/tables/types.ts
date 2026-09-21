@@ -6,6 +6,8 @@ export type TTableStatus =
   | 'Disabled'
   | 'empty' 
   | 'occupied' 
+  | 'seated'
+  | 'browsing'
   | 'service_requested' 
   | 'bill_requested' 
   | 'cleaning';
@@ -18,12 +20,15 @@ export interface ITable {
   seatingCapacity: number;
   status: TTableStatus | string;
   tableStatus?: string;
+  subStatus?: 'browsing' | 'seated' | 'ordering' | 'dining' | 'bill_requested' | 'cleaning' | string;
+  diningStatus?: string;
+  customerPresent?: boolean;
   activeOrderId?: string;
   qrCodeUrl: string;
   capacity?: number;
   floor?: string;
   
-  // Waiter assignments
+  // Waiter assignments & lifecycle
   assignedWaiterId?: string;
   assignedWaiterName?: string;
   guestsCount?: number;
@@ -31,9 +36,17 @@ export interface ITable {
   section?: string;
   tableNotes?: string;
   seatingTime?: string;
+  seatedAt?: string;
+  lastActiveAt?: string;
   billRequestedAt?: string;
   occupiedAt?: string;
   cleaningStartedAt?: string;
+  cleaningDurationMinutes?: number;
+  cleaningCompletedAt?: string;
+  billPaidAt?: string;
+  customerName?: string;
+  customerPhone?: string;
+  orderSource?: string;
   tableName?: string;
   name?: string;
   isActive?: boolean;
@@ -51,7 +64,11 @@ export const isTableAvailable = (status?: string, isActive?: boolean): boolean =
   if (s === 'available' || s === 'empty') return true;
   if (
     s === 'occupied' || 
+    s === 'seated' ||
+    s === 'browsing' ||
+    s === 'dining' ||
     s === 'cleaning' || 
+    s === 'needs_cleaning' ||
     s === 'reserved' || 
     s === 'disabled' || 
     s === 'maintenance' || 
@@ -64,12 +81,34 @@ export const isTableAvailable = (status?: string, isActive?: boolean): boolean =
 };
 
 /**
- * Checks whether a table is currently occupied by active diners.
+ * Checks whether a table is currently occupied by active diners (seated, browsing, ordering or dining).
  */
-export const isTableOccupied = (status?: string): boolean => {
+export const isTableOccupied = (status?: string, subStatus?: string, diningStatus?: string): boolean => {
   if (!status) return false;
   const s = status.toLowerCase().trim();
-  return s === 'occupied' || s === 'service_requested' || s === 'bill_requested';
+  const sub = (subStatus || diningStatus || '').toLowerCase().trim();
+  return (
+    s === 'occupied' || 
+    s === 'seated' || 
+    s === 'browsing' || 
+    s === 'dining' || 
+    s === 'service_requested' || 
+    s === 'bill_requested' ||
+    sub === 'browsing' ||
+    sub === 'seated' ||
+    sub === 'dining' ||
+    sub === 'ordering'
+  );
+};
+
+/**
+ * Checks whether a table has a diner actively browsing the menu without a committed order yet.
+ */
+export const isTableBrowsing = (table: ITable): boolean => {
+  const status = (table.status || table.tableStatus || '').toLowerCase().trim();
+  const sub = (table.subStatus || table.diningStatus || '').toLowerCase().trim();
+  const hasOrder = Boolean(table.activeOrderId || table.currentOrderId);
+  return !hasOrder && (status === 'browsing' || sub === 'browsing' || (status === 'occupied' && sub === 'seated'));
 };
 
 /**
@@ -78,7 +117,8 @@ export const isTableOccupied = (status?: string): boolean => {
 export const isTableCleaning = (status?: string): boolean => {
   if (!status) return false;
   const s = status.toLowerCase().trim();
-  return s === 'cleaning';
+  return s === 'cleaning' || s === 'needs_cleaning' || s === 'sanitizing';
 };
+
 
 

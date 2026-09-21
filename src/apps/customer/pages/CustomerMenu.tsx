@@ -30,6 +30,7 @@ import {
   generateSessionId, 
   syncDiningSessionToFirestore 
 } from '../../../shared/utils/diningSession';
+import { tableService } from '../../../shared/services/tableService';
 
 // Navigation & Header
 import CustomerHeader from '../../../shared/ui/navigation/CustomerHeader';
@@ -170,12 +171,26 @@ export const CustomerMenu: React.FC = () => {
       setSession(activeSession);
       if (!tableParam && activeSession.tableNumber) {
         setTableNumber(activeSession.tableNumber);
+        tableService.setTableBrowsing(
+          tenantId,
+          activeSession.tableNumber,
+          activeSession.orderSource || 'app',
+          { name: user?.displayName || '', phone: user?.phoneNumber || '' }
+        ).catch(() => {});
       }
     }
 
     if (tableParam) {
       const cleanParam = tableParam.replace(/^TBL-/i, '');
       setTableNumber(cleanParam);
+
+      // Immediately notify waiter that customer is seated and viewing menu
+      tableService.setTableBrowsing(
+        tenantId,
+        cleanParam,
+        searchParams.get('source') === 'qr' ? 'qr' : 'app',
+        { name: user?.displayName || '', phone: user?.phoneNumber || '' }
+      ).catch(() => {});
 
       if (!activeSession || activeSession.tableNumber !== cleanParam) {
         // Establish new active dining session for this table
@@ -820,16 +835,19 @@ export const CustomerMenu: React.FC = () => {
         console.warn('[CustomerMenu] Failed to update local recent orders index:', storageErr);
       }
 
-      // Canonical table status update: transitions table to Occupied
+      // Canonical table status update: transitions table to Occupied with active order details
       try {
-        const tableRef = doc(db, 'restaurants', tenantId, 'tables', resolvedTableId);
-        await setDoc(tableRef, {
-          status: 'Occupied',
-          tableStatus: 'Occupied',
-          activeOrderId: orderId,
-          currentOrderId: orderId,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
+        await tableService.setTableOccupiedWithOrder(
+          tenantId, 
+          cleanTableNum || resolvedTableId, 
+          orderId, 
+          {
+            total: totalCartCost,
+            itemsCount: cartItems.length,
+            customerName: customerName.trim() || user?.displayName || 'Guest Diner',
+            guestsCount: 2
+          }
+        );
       } catch (err) {
         console.warn('[CustomerMenu] Table status update warning:', err);
       }

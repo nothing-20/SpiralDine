@@ -47,12 +47,42 @@
     color: #18201D;
   }
 
+  /* Modal dialog styling inside Restaurant Operations (.kds-theme) */
+  .kds-theme [role="dialog"],
+  .kds-theme .modal-container {
+    background-color: #FFFFFF !important;
+    border-color: #E3DED5 !important;
+    color: #18201D !important;
+    box-shadow: 0 20px 45px -10px rgba(24, 32, 29, 0.2) !important;
+  }
+  .kds-theme [role="dialog"] h3,
+  .kds-theme [role="dialog"] .font-display {
+    color: #18201D !important;
+  }
+  .kds-theme [role="dialog"] [class*="border-b"],
+  .kds-theme [role="dialog"] [class*="border-t"] {
+    border-color: #E3DED5 !important;
+  }
+  .kds-theme [role="dialog"] button[aria-label*="lose"] {
+    color: #5F6875 !important;
+  }
+  .kds-theme [role="dialog"] button[aria-label*="lose"]:hover {
+    background-color: #F7F4EE !important;
+    color: #18201D !important;
+  }
+  .kds-theme [role="dialog"] [class*="bg-slate-950"],
+  .kds-theme [role="dialog"] [class*="bg-slate-900"] {
+    background-color: #F7F4EE !important;
+    border-color: #E3DED5 !important;
+    color: #18201D !important;
+  }
+
   /* Stat callout boxes and subtle secondary boxes (like bg-slate-955/40) */
   .kds-theme [class*="bg-slate-955"],
   .kds-theme [class*="bg-slate-950/"] {
     background-color: #F7F4EE !important;
     border-color: #E3DED5 !important;
-    color: #18201D;
+    color: #18201D !important;
   }
 
   /* Text color remapping inside Restaurant Operations light theme */

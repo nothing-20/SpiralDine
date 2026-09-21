@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import { db } from '../../../config/firebase';
 import { featureFlags } from '../../../config/featureFlags';
@@ -22,6 +22,7 @@ import {
   AlertTriangle,
   X,
   ChevronRight,
+  ChevronDown,
   Database,
   Menu
 } from 'lucide-react';
@@ -33,6 +34,7 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
   const { user, role, logout } = useAuth();
+  const navigate = useNavigate();
   const tenantId = user?.tenantId;
 
   // Search & Command Palette Modal state
@@ -141,21 +143,25 @@ export const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
 
   // Define static commands
   const commands = useMemo(() => [
-    { id: 'cmd-order', type: 'Quick Action', label: 'Create Order', action: () => window.location.href = '/dashboard/waiter' },
-    { id: 'cmd-kitchen', type: 'Navigation', label: 'Open Kitchen Display System (KDS)', action: () => window.location.href = '/dashboard/kitchen' },
-    { id: 'cmd-billing', type: 'Navigation', label: 'Open Billing POS Register', action: () => window.location.href = '/dashboard/owner/billing' },
-    { id: 'cmd-inventory', type: 'Navigation', label: 'Open Inventory Manager', action: () => window.location.href = '/dashboard/owner/inventory' },
-    { id: 'cmd-staff', type: 'Navigation', label: 'Add Employee Profile', action: () => window.location.href = '/dashboard/owner/staff' },
-    { id: 'cmd-analytics', type: 'Navigation', label: 'Open BI Analytics', action: () => window.location.href = '/dashboard/owner/analytics' },
-    { id: 'cmd-settings', type: 'Navigation', label: 'Open Settings Panel', action: () => window.location.href = '/dashboard/owner/settings' },
-    { id: 'cmd-demo', type: 'Demo Reset', label: 'Load Demo mode preset', action: () => window.location.href = '/dashboard/owner/settings' }
-  ], []);
+    { id: 'cmd-order', type: 'Quick Action', label: 'Tables Matrix / New Order', action: () => navigate('/dashboard/waiter') },
+    { id: 'cmd-assigned', type: 'Navigation', label: 'My Assigned Tables', action: () => navigate('/dashboard/waiter/assigned-tables') },
+    { id: 'cmd-live-orders', type: 'Navigation', label: 'Live Orders', action: () => navigate('/dashboard/waiter/live-orders') },
+    { id: 'cmd-waiter-alerts', type: 'Navigation', label: 'Customer Alerts & Requests', action: () => navigate('/dashboard/waiter/alerts') },
+    { id: 'cmd-waiter-billing', type: 'Navigation', label: 'Waiter Billing POS', action: () => navigate('/dashboard/waiter/billing') },
+    { id: 'cmd-kitchen', type: 'Navigation', label: 'Open Kitchen Display System (KDS)', action: () => navigate('/dashboard/kitchen') },
+    { id: 'cmd-billing', type: 'Navigation', label: 'Open Owner Billing POS Register', action: () => navigate('/owner/billing') },
+    { id: 'cmd-inventory', type: 'Navigation', label: 'Open Inventory Manager', action: () => navigate('/owner/inventory') },
+    { id: 'cmd-staff', type: 'Navigation', label: 'Manage Staff Profiles', action: () => navigate('/owner/staff') },
+    { id: 'cmd-menu', type: 'Navigation', label: 'Menu Editor', action: () => navigate('/owner/menu') },
+    { id: 'cmd-analytics', type: 'Navigation', label: 'Open BI Analytics & Reports', action: () => navigate('/owner/analytics') },
+    { id: 'cmd-settings', type: 'Navigation', label: 'Open Settings Panel', action: () => navigate('/owner/settings') },
+  ], [navigate]);
 
   // Combine and filter search results
   const filteredResults = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
     const searchPool = [...commands, ...menuItems, ...tables, ...employees, ...inventory];
-    if (!q) return commands.slice(0, 5); // default commands list
+    if (!q) return commands.slice(0, 6); // default commands list
 
     return searchPool.filter(item => 
       item.label.toLowerCase().includes(q) || 
@@ -185,7 +191,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
     if (item.action) {
       item.action();
     } else if (item.path) {
-      window.location.href = item.path;
+      navigate(item.path);
     }
   };
 
@@ -307,11 +313,15 @@ export const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
             }`}
           >
             <Bell className="w-4 h-4" />
-            {alerts.length > 0 && (
-              <span className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full ${
-                isOwner ? 'bg-[#C9533B]' : isLightService ? 'bg-[#C84A38]' : 'bg-primary animate-pulse'
-              }`} />
-            )}
+            {alerts.length > 0 ? (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-[#D64545] text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                {alerts.length}
+              </span>
+            ) : isLightService ? (
+              <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#D64545] text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                2
+              </span>
+            ) : null}
           </button>
 
           {showNotifications && (
@@ -332,7 +342,7 @@ export const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
                 <span className={`text-[9px] px-2 py-0.5 rounded-full font-mono font-bold ${
                   isLightHeader ? 'bg-[#FBEAE5] text-[#C9533B]' : 'bg-slate-900 border border-slate-800 text-slate-400'
                 }`}>
-                  {alerts.length} New
+                  {alerts.length || 2} New
                 </span>
               </div>
 
@@ -393,20 +403,23 @@ export const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
           }`}>
             {user?.displayName 
               ? user.displayName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() 
-              : (user?.email ? user.email.slice(0, 2).toUpperCase() : (isOwner ? 'OW' : isKitchen ? 'KS' : (isWaiter ? 'WT' : <User className="w-4 h-4" />)))}
+              : (user?.email ? user.email.slice(0, 2).toUpperCase() : (isOwner ? 'OW' : isKitchen ? 'KS' : (isWaiter ? 'SC' : <User className="w-4 h-4" />)))}
           </div>
           <div className="hidden md:flex flex-col text-left">
             <span className={`text-xs font-bold truncate max-w-[120px] ${
               isLightHeader ? 'text-[#17202A]' : 'text-textPearl'
             }`}>
-              {user?.displayName || user?.email?.split('@')[0] || (isOwner ? 'Owner' : isKitchen ? 'Kitchen Staff' : (isWaiter ? 'Waiter' : 'User'))}
+              {user?.displayName || user?.email?.split('@')[0] || (isOwner ? 'Owner' : isKitchen ? 'Kitchen Staff' : (isWaiter ? 'Sri Charan' : 'User'))}
             </span>
             <span className={`text-[9px] uppercase font-extrabold tracking-widest ${
               isOwner ? 'text-[#C9533B]' : isLightService ? 'text-[#5F6762]' : 'text-primary'
             }`}>
-              {role === 'owner' ? 'Owner' : role === 'kitchen' ? 'Head Chef' : (role === 'waiter' ? 'Waiter' : (role ? (role.charAt(0).toUpperCase() + role.slice(1)) : 'Staff'))}
+              {role === 'owner' ? 'Owner' : role === 'kitchen' ? 'Head Chef' : (role === 'waiter' ? 'WAITER' : (role ? (role.charAt(0).toUpperCase() + role.slice(1)) : 'Staff'))}
             </span>
           </div>
+          {isLightService && (
+            <ChevronDown className="w-3.5 h-3.5 text-[#5F6762] hidden md:block cursor-pointer" />
+          )}
         </div>
 
         {/* Logout */}

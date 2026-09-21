@@ -190,8 +190,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
 
-      if (existingUser?.localId) {
-        createdUid = existingUser.localId;
+      if (existingUser?.uid) {
+        createdUid = existingUser.uid;
       } else {
         const userRecord = await createFirebaseAuthUser(creds, {
           email: cleanEmail,

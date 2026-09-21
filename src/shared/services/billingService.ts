@@ -16,6 +16,7 @@ import {
 import { db } from '../firebase/config';
 import { IOrder, IBill, IShiftReport, IPaymentBreakdown, TPaymentStatus } from '../domain/index';
 import { logEvent } from './eventEngine';
+import { tableService } from './tableService';
 
 export interface ISettlePaymentParams {
   method: 'cash' | 'upi' | 'card' | 'wallet' | 'mixed';
@@ -463,21 +464,14 @@ export const billingService = {
       console.warn('[billingService] Could not update order on payment:', orderErr);
     }
 
-    // 8. Update Table status to 'cleaning'
+    // 8. Update Table status to 'cleaning' with authoritative 10-minute timer and waiter alert
     if (bill.tableId || bill.tableNumber) {
       try {
-        let tableDocId = bill.tableId;
-        if (!tableDocId && bill.tableNumber && bill.tableNumber !== 'Walk-in') {
-          tableDocId = `TBL-${bill.tableNumber}`;
-        }
-        if (tableDocId) {
-          const tableRef = doc(db, 'restaurants', tenantId, 'tables', tableDocId);
-          await updateDoc(tableRef, {
-            status: 'cleaning',
-            cleaningStartedAt: nowIso,
-            updatedAt: nowIso
-          });
-        }
+        await tableService.setTableCleaning(
+          tenantId,
+          bill.tableId || bill.tableNumber,
+          10
+        );
       } catch (tableErr) {
         console.warn('[billingService] Could not transition table to cleaning:', tableErr);
       }

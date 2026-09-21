@@ -14,6 +14,7 @@ import {
   generateSessionId, 
   syncDiningSessionToFirestore 
 } from '../../../shared/utils/diningSession';
+import { tableService } from '../../../shared/services/tableService';
 import { 
   ShoppingBag, Trash2, ArrowLeft, ArrowRight, Minus, Plus, 
   Tag, Check, Sparkles, ShieldCheck, Utensils, Heart, 
@@ -452,30 +453,16 @@ export const CartPage: React.FC = () => {
       // Robust canonical update to table status: transitions table to Occupied
       if (tenantId && (session?.tableId || tableNumber)) {
         try {
-          const resolvedTableId = session?.tableId || `TBL-${tableNumber}`;
-          const tableRef = doc(db, 'restaurants', tenantId, 'tables', resolvedTableId);
-          const tableSnap = await getDoc(tableRef);
-          let targetRef = tableRef;
-          if (!tableSnap.exists()) {
-            const tablesColRef = collection(db, 'restaurants', tenantId, 'tables');
-            const cleanTableNum = String(tableNumber || '').replace(/^TBL-/i, '');
-            const q1 = query(tablesColRef, where('tableNumber', '==', cleanTableNum));
-            let qSnap = await getDocs(q1);
-            if (qSnap.empty) {
-              const q2 = query(tablesColRef, where('number', '==', cleanTableNum));
-              qSnap = await getDocs(q2);
+          await tableService.setTableOccupiedWithOrder(
+            tenantId,
+            session?.tableId || tableNumber,
+            orderId,
+            {
+              total: grandTotal,
+              itemsCount: cartItems.length,
+              customerName: session?.customerName || user?.displayName || 'Guest Diner'
             }
-            if (!qSnap.empty) {
-              targetRef = doc(db, 'restaurants', tenantId, 'tables', qSnap.docs[0].id);
-            }
-          }
-          await setDoc(targetRef, {
-            status: 'Occupied',
-            tableStatus: 'Occupied',
-            activeOrderId: orderId,
-            currentOrderId: orderId,
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
+          );
         } catch (tableErr) {
           console.warn('[CartPage] Table status occupation warning:', tableErr);
         }

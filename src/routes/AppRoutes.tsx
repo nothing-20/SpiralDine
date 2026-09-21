@@ -392,6 +392,10 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/dashboard/waiter/item-history" element={<WaiterItemHistoryPage />} />
                 <Route path="/dashboard/waiter/performance" element={<WaiterPerformancePage />} />
                 <Route path="/dashboard/waiter/timeline" element={<WaiterTimelinePage />} />
+                <Route path="/dashboard/waiter/kitchen-timeline" element={<Navigate to="/dashboard/waiter/timeline" replace />} />
+                <Route path="/dashboard/waiter/tables" element={<Navigate to="/dashboard/waiter" replace />} />
+                <Route path="/dashboard/waiter/matrix" element={<Navigate to="/dashboard/waiter" replace />} />
+                <Route path="/dashboard/waiter/pos" element={<Navigate to="/dashboard/waiter/billing" replace />} />
                 <Route path="/dashboard/waiter/shift-report" element={<WaiterShiftReportPage />} />
                 <Route path="/dashboard/waiter/billing" element={<WaiterBillingPage />} />
               </Route>
