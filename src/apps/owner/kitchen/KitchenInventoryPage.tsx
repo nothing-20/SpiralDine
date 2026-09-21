@@ -2,9 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   collection, 
   onSnapshot, 
-  query, 
-  orderBy, 
-  limit 
+  doc, 
+  setDoc,
+  writeBatch
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
@@ -13,10 +13,6 @@ import { IStockIngredient, IStockMovement } from '../../../shared/domain/invento
 
 // UI Kit
 import Card from '../../../components/ui/Card/Card';
-import Button from '../../../components/ui/Button/Button';
-import Input from '../../../components/ui/Input/Input';
-import Modal from '../../../components/ui/Modal/Modal';
-import Badge from '../../../components/ui/Badge/Badge';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner/LoadingSpinner';
 
 // Icons
@@ -40,9 +36,34 @@ import {
   RefreshCw,
   Layers,
   Filter,
-  Check
+  Check,
+  Sparkles,
+  ChefHat,
+  Truck,
+  Scale,
+  X,
+  Flame,
+  ShieldCheck,
+  ChevronDown,
+  Info
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+
+// 12 Standard Kitchen Pantry Staples for Quick Setup
+const DEFAULT_PANTRY_ESSENTIALS = [
+  { name: 'Red Onions', category: 'Vegetables', unit: 'kg', currentStock: 25, minimumStock: 10, reorderLevel: 15, storageLocation: 'Pantry Shelf', purchaseCost: 1.2 },
+  { name: 'Fresh Tomatoes', category: 'Vegetables', unit: 'kg', currentStock: 20, minimumStock: 8, reorderLevel: 12, storageLocation: 'Walk-in Chiller', purchaseCost: 1.5 },
+  { name: 'Cooking Oil (Sunflower)', category: 'Dry Goods', unit: 'liters', currentStock: 30, minimumStock: 10, reorderLevel: 15, storageLocation: 'Dry Storage', purchaseCost: 2.8 },
+  { name: 'Basmati Rice', category: 'Dry Goods', unit: 'kg', currentStock: 50, minimumStock: 15, reorderLevel: 25, storageLocation: 'Dry Storage', purchaseCost: 2.1 },
+  { name: 'Fresh Paneer / Cottage Cheese', category: 'Dairy', unit: 'kg', currentStock: 12, minimumStock: 5, reorderLevel: 8, storageLocation: 'Walk-in Chiller', purchaseCost: 4.5 },
+  { name: 'Chicken Breast (Boneless)', category: 'Meat', unit: 'kg', currentStock: 18, minimumStock: 8, reorderLevel: 12, storageLocation: 'Deep Freezer', purchaseCost: 6.0 },
+  { name: 'Fresh Garlic', category: 'Vegetables', unit: 'kg', currentStock: 6, minimumStock: 3, reorderLevel: 5, storageLocation: 'Pantry Shelf', purchaseCost: 3.0 },
+  { name: 'Ginger Root', category: 'Vegetables', unit: 'kg', currentStock: 5, minimumStock: 2, reorderLevel: 4, storageLocation: 'Pantry Shelf', purchaseCost: 3.2 },
+  { name: 'Full Cream Milk', category: 'Dairy', unit: 'liters', currentStock: 15, minimumStock: 6, reorderLevel: 10, storageLocation: 'Walk-in Chiller', purchaseCost: 1.1 },
+  { name: 'Unsalted Butter', category: 'Dairy', unit: 'kg', currentStock: 8, minimumStock: 3, reorderLevel: 5, storageLocation: 'Walk-in Chiller', purchaseCost: 5.5 },
+  { name: 'Iodized Salt', category: 'Spices', unit: 'kg', currentStock: 15, minimumStock: 5, reorderLevel: 8, storageLocation: 'Dry Storage', purchaseCost: 0.6 },
+  { name: 'Garam Masala Blend', category: 'Spices', unit: 'kg', currentStock: 4, minimumStock: 1.5, reorderLevel: 2.5, storageLocation: 'Spice Rack', purchaseCost: 8.0 }
+] as const;
 
 export const KitchenInventoryPage: React.FC = () => {
   const { user } = useAuth();
@@ -59,6 +80,8 @@ export const KitchenInventoryPage: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<'all' | 'low' | 'out_of_stock' | 'healthy'>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [isSeeding, setIsSeeding] = useState(false);
 
   // Operational Action Modal States
   const [activeAction, setActiveAction] = useState<'receive' | 'usage' | 'waste' | 'adjust' | null>(null);
@@ -67,6 +90,16 @@ export const KitchenInventoryPage: React.FC = () => {
   const [actionReason, setActionReason] = useState<string>('');
   const [wasteReason, setWasteReason] = useState<'spoilage' | 'expired' | 'damaged' | 'staff_mistake' | 'customer_return'>('spoilage');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // New Ingredient Form States
+  const [newName, setNewName] = useState('');
+  const [newCategory, setNewCategory] = useState<'Vegetables' | 'Meat' | 'Dairy' | 'Dry Goods' | 'Beverages' | 'Spices' | 'Bakery' | 'Other'>('Vegetables');
+  const [newUnit, setNewUnit] = useState<'kg' | 'g' | 'liters' | 'ml' | 'pieces' | 'packs'>('kg');
+  const [newStock, setNewStock] = useState('10');
+  const [newMinStock, setNewMinStock] = useState('5');
+  const [newReorderLevel, setNewReorderLevel] = useState('8');
+  const [newStorage, setNewStorage] = useState('Pantry Shelf');
+  const [newCost, setNewCost] = useState('0');
 
   // 1. Subscribe to canonical Firestore collections in real time
   useEffect(() => {
@@ -101,18 +134,19 @@ export const KitchenInventoryPage: React.FC = () => {
 
     // Canonical Stock Movements listener: restaurants/{tenantId}/stockMovements
     const movementsCol = collection(db, 'restaurants', tenantId, 'stockMovements');
-    const qMovements = query(movementsCol, orderBy('timestamp', 'desc'), limit(50));
     const unsubMovements = onSnapshot(
-      qMovements,
+      movementsCol,
       (snap) => {
         const list: IStockMovement[] = [];
         snap.forEach((docSnap) => {
           list.push({ id: docSnap.id, ...(docSnap.data() as any) } as IStockMovement);
         });
+        // Newest movements first
+        list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
         setMovements(list);
       },
       (err) => {
-        console.warn('[KitchenInventory] Movements listener warning:', err);
+        console.warn('[KitchenInventory] Movements listener error:', err);
       }
     );
 
@@ -122,13 +156,13 @@ export const KitchenInventoryPage: React.FC = () => {
     };
   }, [tenantId]);
 
-  // Derived unique categories
+  // Categories list
   const availableCategories = useMemo(() => {
-    const cats = new Set<string>();
+    const set = new Set<string>();
     ingredients.forEach((i) => {
-      if (i.category) cats.add(i.category);
+      if (i.category) set.add(i.category);
     });
-    return ['all', ...Array.from(cats)];
+    return ['all', ...Array.from(set)];
   }, [ingredients]);
 
   // Filtered ingredients
@@ -138,19 +172,21 @@ export const KitchenInventoryPage: React.FC = () => {
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchesName = (item.name || '').toLowerCase().includes(q);
-        const matchesCategory = (item.category || '').toLowerCase().includes(q);
-        const matchesLocation = (item.storageLocation || '').toLowerCase().includes(q);
-        if (!matchesName && !matchesCategory && !matchesLocation) return false;
+        const matchesCat = (item.category || '').toLowerCase().includes(q);
+        const matchesLoc = (item.storageLocation || '').toLowerCase().includes(q);
+        if (!matchesName && !matchesCat && !matchesLoc) return false;
       }
 
-      // Status
+      // Status Filter
+      const stock = item.currentStock ?? 0;
+      const min = item.minimumStock ?? 5;
+
       if (statusFilter === 'low') {
-        const isLow = item.status === 'low' || item.status === 'critical';
-        if (!isLow) return false;
+        if (stock <= 0 || stock > min) return false;
       } else if (statusFilter === 'out_of_stock') {
-        if (item.status !== 'out_of_stock' && (item.currentStock ?? 0) > 0) return false;
+        if (stock > 0) return false;
       } else if (statusFilter === 'healthy') {
-        if (item.status !== 'healthy' && (item.status as string) !== 'In Stock') return false;
+        if (stock <= min) return false;
       }
 
       // Category
@@ -197,7 +233,7 @@ export const KitchenInventoryPage: React.FC = () => {
       action === 'receive' 
         ? 'Shipment received & verified' 
         : action === 'usage' 
-        ? 'Service prep & cooking consumption' 
+        ? 'Prep & service consumption' 
         : action === 'adjust' 
         ? 'Kitchen physical stock count correction' 
         : ''
@@ -251,30 +287,28 @@ export const KitchenInventoryPage: React.FC = () => {
           setIsSubmitting(false);
           return;
         }
-        const costPerUnit = selectedIngredient.purchaseCost || 0;
-        const valueLost = qty * costPerUnit;
-
+        const costLoss = qty * (selectedIngredient.purchaseCost || 0);
         await inventoryService.recordWaste(tenantId, {
           ingredientId: selectedIngredient.id,
           ingredientName: selectedIngredient.name,
           quantity: qty,
           unit: selectedIngredient.unit,
           reason: wasteReason,
-          notes: actionReason.trim(),
-          valueLost,
-          submittedBy: user?.uid || 'kitchen-staff',
-          submittedByName: user?.displayName || user?.email || 'Kitchen Chef',
-          performedByRole: user?.role || 'kitchen'
+          valueLost: costLoss,
+          submittedBy: user?.uid || 'kitchen',
+          submittedByName: user?.displayName || 'Kitchen Chef',
+          performedByRole: 'kitchen',
+          notes: actionReason.trim() || `Kitchen ${wasteReason}`
         });
-        toast.success(`Logged ${qty} ${selectedIngredient.unit} waste for ${selectedIngredient.name}.`);
+        toast.success(`Waste logged: -${qty} ${selectedIngredient.unit} ${selectedIngredient.name}.`);
       } else if (activeAction === 'adjust') {
-        const newStock = Math.max(0, qty);
+        const newStockVal = Math.max(0, qty);
         await inventoryService.adjustStock(tenantId, selectedIngredient.id, {
-          newStock,
+          newStock: newStockVal,
           reason: actionReason.trim() || 'Physical inventory audit',
           user
         });
-        toast.success(`Adjusted ${selectedIngredient.name} stock to ${newStock} ${selectedIngredient.unit}!`);
+        toast.success(`Adjusted ${selectedIngredient.name} stock to ${newStockVal} ${selectedIngredient.unit}!`);
       }
 
       closeActionModal();
@@ -285,547 +319,953 @@ export const KitchenInventoryPage: React.FC = () => {
     }
   };
 
-  return (
-    <div className="space-y-6 text-left pb-12 animate-in fade-in duration-200">
-      {/* ─── Top Header ─── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5">
-        <div>
-          <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-[11px] font-bold text-amber-400 mb-1.5">
-            <Package className="w-3.5 h-3.5" />
-            <span>Kitchen Operational Inventory</span>
-          </div>
-          <h1 className="text-2xl font-display font-extrabold text-textPearl tracking-tight">
-            Inventory & Ingredients
-          </h1>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Live day-to-day stock monitoring, usage deductions, and waste logging synchronized in real-time with Owner.
-          </p>
-        </div>
+  // Quick Seed Essentials Handler
+  const handleSeedEssentials = async () => {
+    if (!tenantId) return;
+    setIsSeeding(true);
+    try {
+      const batch = writeBatch(db);
+      const timestamp = new Date().toISOString();
 
-        <div className="flex items-center gap-2.5">
-          <Button
-            variant="secondary"
-            onClick={() => setShowHistoryModal(true)}
-            className="flex items-center gap-1.5 text-xs bg-slate-900 border-slate-800 hover:bg-slate-850 text-textPearl"
-          >
-            <History className="w-4 h-4 text-amber-400" />
-            <span>Stock Movements ({movements.length})</span>
-          </Button>
+      DEFAULT_PANTRY_ESSENTIALS.forEach((item) => {
+        const docId = item.name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+        const ref = doc(db, 'restaurants', tenantId, 'inventory', docId);
+        
+        const status = inventoryService.calculateStockStatus(item.currentStock, item.minimumStock);
+        
+        batch.set(ref, {
+          id: docId,
+          name: item.name,
+          category: item.category,
+          unit: item.unit,
+          currentStock: item.currentStock,
+          minimumStock: item.minimumStock,
+          reorderLevel: item.reorderLevel,
+          storageLocation: item.storageLocation,
+          purchaseCost: item.purchaseCost,
+          status,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          lastReceivedDate: timestamp.split('T')[0]
+        });
+
+        // Audit movement
+        const mvtId = `MVT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+        const mvtRef = doc(db, 'restaurants', tenantId, 'stockMovements', mvtId);
+        batch.set(mvtRef, {
+          id: mvtId,
+          tenantId,
+          ingredientId: docId,
+          ingredientName: item.name,
+          quantity: item.currentStock,
+          previousStock: 0,
+          newStock: item.currentStock,
+          unit: item.unit,
+          type: 'purchase',
+          reason: 'Initial Kitchen Pantry Setup',
+          submittedBy: user?.uid || 'kitchen',
+          submittedByName: user?.displayName || 'Kitchen Chef',
+          performedByRole: user?.role || 'kitchen',
+          timestamp
+        });
+      });
+
+      await batch.commit();
+      toast.success('✨ Successfully initialized 12 kitchen pantry staples!');
+    } catch (err: any) {
+      console.error('Seed error:', err);
+      toast.error('Failed to seed essentials: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
+  // Create Custom Ingredient Handler
+  const handleCreateIngredient = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenantId) return;
+    if (!newName.trim()) {
+      toast.error('Please enter ingredient name.');
+      return;
+    }
+
+    const currentStockVal = parseFloat(newStock) || 0;
+    const minStockVal = parseFloat(newMinStock) || 5;
+    const reorderVal = parseFloat(newReorderLevel) || minStockVal * 1.5;
+    const costVal = parseFloat(newCost) || 0;
+
+    setIsSubmitting(true);
+    try {
+      const docId = newName.trim().toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
+      const docRef = doc(db, 'restaurants', tenantId, 'inventory', docId);
+      const timestamp = new Date().toISOString();
+      const status = inventoryService.calculateStockStatus(currentStockVal, minStockVal);
+
+      await setDoc(docRef, {
+        id: docId,
+        name: newName.trim(),
+        category: newCategory,
+        unit: newUnit,
+        currentStock: currentStockVal,
+        minimumStock: minStockVal,
+        reorderLevel: reorderVal,
+        storageLocation: newStorage.trim() || 'Pantry Shelf',
+        purchaseCost: costVal,
+        status,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        lastReceivedDate: timestamp.split('T')[0]
+      });
+
+      // Audit movement
+      const mvtId = `MVT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+      await setDoc(doc(db, 'restaurants', tenantId, 'stockMovements', mvtId), {
+        id: mvtId,
+        tenantId,
+        ingredientId: docId,
+        ingredientName: newName.trim(),
+        quantity: currentStockVal,
+        previousStock: 0,
+        newStock: currentStockVal,
+        unit: newUnit,
+        type: 'purchase',
+        reason: 'Initial Stock Master Entry',
+        submittedBy: user?.uid || 'kitchen',
+        submittedByName: user?.displayName || 'Kitchen Chef',
+        performedByRole: user?.role || 'kitchen',
+        timestamp
+      });
+
+      toast.success(`"${newName.trim()}" added to inventory!`);
+      setShowAddModal(false);
+      setNewName('');
+      setNewStock('10');
+      setNewMinStock('5');
+    } catch (err: any) {
+      console.error('Create error:', err);
+      toast.error('Failed to create ingredient: ' + (err.message || 'Error'));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 text-left select-none pb-24 font-sans max-w-7xl mx-auto">
+      {/* ─── Editorial Header Banner ─── */}
+      <div className="bg-white border border-[#E3DED5] rounded-2xl p-6 sm:p-7 shadow-[0_1px_4px_rgba(30,30,20,0.05)]">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <div className="space-y-1.5">
+            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-[#F7F4EE] border border-[#E3DED5] text-[11px] font-bold uppercase tracking-wider text-[#6F746F]">
+              <Package className="w-3.5 h-3.5 text-[#C84A38]" />
+              <span>Kitchen Operational Stock Master</span>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-serif font-bold text-[#18201D] tracking-tight">
+              Inventory & Ingredients
+            </h1>
+            <p className="text-xs sm:text-sm text-[#6F746F] max-w-2xl font-normal">
+              Real-time ingredient tracking, rapid kitchen usage deductions, delivery check-ins, and spoilage logging synchronized instantly with Owner.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <button
+              onClick={() => setShowHistoryModal(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-white hover:bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] rounded-xl text-xs font-bold shadow-[0_1px_3px_rgba(30,30,20,0.04)] transition-all cursor-pointer"
+              title="View immutable stock movement ledger"
+            >
+              <History className="w-4 h-4 text-[#C84A38]" />
+              <span>Movement Ledger ({movements.length})</span>
+            </button>
+
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#13241F] hover:bg-[#1A312B] text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
+            >
+              <Plus className="w-4 h-4 text-emerald-400" />
+              <span>+ Add Ingredient</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* ─── KPI Metrics Strip ─── */}
+      {/* ─── High-Contrast KPI Cards ─── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <Card className="p-4 bg-slate-900/60 border-slate-800 flex items-center justify-between">
+        {/* Total Items */}
+        <div 
+          onClick={() => { setStatusFilter('all'); setCategoryFilter('all'); }}
+          className={`p-5 bg-white border rounded-2xl shadow-[0_1px_4px_rgba(30,30,20,0.04)] flex items-center justify-between cursor-pointer transition-all hover:border-[#18201D]/30 ${
+            statusFilter === 'all' && categoryFilter === 'all' ? 'border-[#18201D] ring-2 ring-[#18201D]/5' : 'border-[#E3DED5]'
+          }`}
+        >
           <div>
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Total Items</span>
-            <span className="text-2xl font-black font-mono text-textPearl mt-0.5 block">{metrics.total}</span>
+            <span className="text-[11px] font-bold text-[#6F746F] uppercase tracking-wider block">
+              Total Ingredients
+            </span>
+            <span className="text-3xl font-serif font-bold text-[#18201D] mt-1 block">
+              {metrics.total}
+            </span>
+            <span className="text-[10px] text-[#6F746F] block mt-0.5">Across all categories</span>
           </div>
-          <div className="w-10 h-10 rounded-xl bg-slate-800/80 text-slate-300 flex items-center justify-center">
-            <Layers className="w-5 h-5" />
+          <div className="w-12 h-12 rounded-xl bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] flex items-center justify-center">
+            <Layers className="w-6 h-6 text-[#18201D]" />
           </div>
-        </Card>
+        </div>
 
-        <Card className="p-4 bg-slate-900/60 border-slate-800 flex items-center justify-between">
+        {/* Healthy In Stock */}
+        <div 
+          onClick={() => setStatusFilter('healthy')}
+          className={`p-5 bg-white border rounded-2xl shadow-[0_1px_4px_rgba(30,30,20,0.04)] flex items-center justify-between cursor-pointer transition-all hover:border-[#287A55]/40 ${
+            statusFilter === 'healthy' ? 'border-[#287A55] ring-2 ring-[#287A55]/10 bg-[#EBF7EE]/20' : 'border-[#E3DED5]'
+          }`}
+        >
           <div>
-            <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider block">In Stock (Healthy)</span>
-            <span className="text-2xl font-black font-mono text-emerald-400 mt-0.5 block">{metrics.healthy}</span>
+            <span className="text-[11px] font-bold text-[#287A55] uppercase tracking-wider block">
+              In Stock (Healthy)
+            </span>
+            <span className="text-3xl font-serif font-bold text-[#287A55] mt-1 block">
+              {metrics.healthy}
+            </span>
+            <span className="text-[10px] text-[#5F6762] block mt-0.5">Above reorder threshold</span>
           </div>
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
-            <CheckCircle className="w-5 h-5" />
+          <div className="w-12 h-12 rounded-xl bg-[#EBF7EE] border border-[#287A55]/30 text-[#287A55] flex items-center justify-center">
+            <CheckCircle className="w-6 h-6" />
           </div>
-        </Card>
+        </div>
 
-        <Card className="p-4 bg-slate-900/60 border-slate-800 flex items-center justify-between">
+        {/* Low Stock Alerts */}
+        <div 
+          onClick={() => setStatusFilter('low')}
+          className={`p-5 bg-white border rounded-2xl shadow-[0_1px_4px_rgba(30,30,20,0.04)] flex items-center justify-between cursor-pointer transition-all hover:border-[#D79A24]/40 ${
+            statusFilter === 'low' ? 'border-[#D79A24] ring-2 ring-[#D79A24]/10 bg-[#FEF5E7]/20' : 'border-[#E3DED5]'
+          }`}
+        >
           <div>
-            <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider block">Low Stock Alerts</span>
-            <span className={`text-2xl font-black font-mono mt-0.5 block ${metrics.low > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+            <span className="text-[11px] font-bold text-[#D79A24] uppercase tracking-wider block">
+              Low Stock Alerts
+            </span>
+            <span className="text-3xl font-serif font-bold text-[#D79A24] mt-1 block">
               {metrics.low}
             </span>
+            <span className="text-[10px] text-[#5F6762] block mt-0.5">Below minimum buffer</span>
           </div>
-          <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center">
-            <AlertTriangle className="w-5 h-5" />
+          <div className="w-12 h-12 rounded-xl bg-[#FEF5E7] border border-[#D79A24]/30 text-[#D79A24] flex items-center justify-center">
+            <AlertTriangle className="w-6 h-6" />
           </div>
-        </Card>
+        </div>
 
-        <Card className="p-4 bg-slate-900/60 border-slate-800 flex items-center justify-between">
+        {/* Out of Stock */}
+        <div 
+          onClick={() => setStatusFilter('out_of_stock')}
+          className={`p-5 bg-white border rounded-2xl shadow-[0_1px_4px_rgba(30,30,20,0.04)] flex items-center justify-between cursor-pointer transition-all hover:border-[#C7463A]/40 ${
+            statusFilter === 'out_of_stock' ? 'border-[#C7463A] ring-2 ring-[#C7463A]/10 bg-[#FDEEEC]/20' : 'border-[#E3DED5]'
+          }`}
+        >
           <div>
-            <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider block">Out of Stock</span>
-            <span className={`text-2xl font-black font-mono mt-0.5 block ${metrics.out > 0 ? 'text-rose-400 font-bold' : 'text-slate-400'}`}>
+            <span className="text-[11px] font-bold text-[#C7463A] uppercase tracking-wider block">
+              Out of Stock
+            </span>
+            <span className="text-3xl font-serif font-bold text-[#C7463A] mt-1 block">
               {metrics.out}
             </span>
+            <span className="text-[10px] text-[#5F6762] block mt-0.5">Immediate reorder required</span>
           </div>
-          <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-400 flex items-center justify-center">
-            <XCircle className="w-5 h-5" />
+          <div className="w-12 h-12 rounded-xl bg-[#FDEEEC] border border-[#C7463A]/30 text-[#C7463A] flex items-center justify-center">
+            <XCircle className="w-6 h-6" />
           </div>
-        </Card>
+        </div>
       </div>
 
-      {/* ─── Search & Status Filters ─── */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/40 p-3 rounded-2xl border border-slate-800">
-        <div className="relative flex-1 min-w-[220px]">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search ingredient, category, location..."
-            className="w-full pl-10 pr-4 py-2 bg-slate-950/70 border border-slate-800 text-textPearl rounded-xl text-xs placeholder-slate-500 focus:outline-none focus:border-amber-500/60 transition-all"
-          />
-        </div>
+      {/* ─── Search, Status & Category Filter Bar ─── */}
+      <div className="bg-white p-4 rounded-2xl border border-[#E3DED5] shadow-[0_1px_4px_rgba(30,30,20,0.05)] space-y-3">
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+          {/* Search Field */}
+          <div className="relative flex-1 min-w-[240px]">
+            <Search className="w-4 h-4 text-[#6F746F] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by ingredient name, category, or storage location..."
+              className="w-full pl-10 pr-9 py-2.5 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] placeholder-[#6F746F]/70 rounded-xl text-xs font-medium focus:outline-none focus:border-[#18201D] focus:bg-white transition-all"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6F746F] hover:text-[#18201D]"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
 
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
-          {/* Status Pills */}
-          <button
-            type="button"
-            onClick={() => setStatusFilter('all')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
-              statusFilter === 'all'
-                ? 'bg-amber-500 text-slate-950 shadow-xs'
-                : 'bg-slate-900 text-slate-400 hover:text-textPearl border border-slate-800'
-            }`}
-          >
-            All ({ingredients.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setStatusFilter('low')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
-              statusFilter === 'low'
-                ? 'bg-amber-500 text-slate-950 shadow-xs'
-                : 'bg-slate-900 text-amber-400 hover:text-amber-300 border border-slate-800'
-            }`}
-          >
-            <AlertTriangle className="w-3.5 h-3.5" />
-            <span>Low Stock ({metrics.low})</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setStatusFilter('out_of_stock')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
-              statusFilter === 'out_of_stock'
-                ? 'bg-rose-500 text-slate-950 shadow-xs'
-                : 'bg-slate-900 text-rose-400 hover:text-rose-300 border border-slate-800'
-            }`}
-          >
-            <XCircle className="w-3.5 h-3.5" />
-            <span>Out of Stock ({metrics.out})</span>
-          </button>
-
-          {/* Category Filter Select */}
-          {availableCategories.length > 2 && (
-            <select
-              value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
-              className="px-3 py-1.5 bg-slate-950 border border-slate-800 text-slate-300 rounded-xl text-xs font-semibold focus:outline-none focus:border-amber-500 shrink-0"
+          {/* Quick Status Buttons */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-thin">
+            <button
+              type="button"
+              onClick={() => setStatusFilter('all')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                statusFilter === 'all'
+                  ? 'bg-[#13241F] text-white shadow-xs'
+                  : 'bg-[#F7F4EE] text-[#6F746F] hover:text-[#18201D] border border-[#E3DED5]'
+              }`}
             >
-              {availableCategories.map((c) => (
-                <option key={c} value={c}>
-                  {c === 'all' ? 'All Categories' : c}
-                </option>
-              ))}
-            </select>
-          )}
+              All ({ingredients.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('healthy')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
+                statusFilter === 'healthy'
+                  ? 'bg-[#287A55] text-white shadow-xs'
+                  : 'bg-[#F7F4EE] text-[#287A55] hover:bg-[#EBF7EE] border border-[#E3DED5]'
+              }`}
+            >
+              <CheckCircle className="w-3.5 h-3.5" />
+              <span>In Stock ({metrics.healthy})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('low')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
+                statusFilter === 'low'
+                  ? 'bg-[#D79A24] text-white shadow-xs'
+                  : 'bg-[#F7F4EE] text-[#D79A24] hover:bg-[#FEF5E7] border border-[#E3DED5]'
+              }`}
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>Low Stock ({metrics.low})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('out_of_stock')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
+                statusFilter === 'out_of_stock'
+                  ? 'bg-[#C7463A] text-white shadow-xs'
+                  : 'bg-[#F7F4EE] text-[#C7463A] hover:bg-[#FDEEEC] border border-[#E3DED5]'
+              }`}
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              <span>Out of Stock ({metrics.out})</span>
+            </button>
+          </div>
         </div>
+
+        {/* Category Pills Strip */}
+        {availableCategories.length > 2 && (
+          <div className="flex items-center gap-1.5 pt-2 border-t border-[#E3DED5] overflow-x-auto pb-1 scrollbar-thin">
+            <span className="text-[10px] uppercase font-bold text-[#6F746F] tracking-wider shrink-0 mr-1 flex items-center gap-1">
+              <Filter className="w-3 h-3" />
+              <span>Category:</span>
+            </span>
+            {availableCategories.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setCategoryFilter(c)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all shrink-0 cursor-pointer ${
+                  categoryFilter === c
+                    ? 'bg-[#C84A38] text-white'
+                    : 'bg-[#F7F4EE] text-[#6F746F] hover:text-[#18201D] hover:bg-[#EBE7DF]'
+                }`}
+              >
+                {c === 'all' ? 'All' : c}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* ─── Main Ingredients Grid ─── */}
+      {/* ─── Main Content Display ─── */}
       {isLoading ? (
-        <div className="py-20 flex flex-col items-center justify-center space-y-3">
-          <LoadingSpinner label="Loading live inventory..." />
+        <div className="py-24 flex flex-col items-center justify-center space-y-3 bg-white border border-[#E3DED5] rounded-2xl">
+          <LoadingSpinner label="Connecting to real-time inventory..." />
         </div>
       ) : error ? (
-        <Card className="p-8 text-center bg-rose-500/5 border-rose-500/20 max-w-md mx-auto space-y-3">
-          <AlertTriangle className="w-8 h-8 text-rose-500 mx-auto" />
-          <h3 className="text-sm font-bold text-textPearl">{error}</h3>
-          <p className="text-xs text-slate-400">Please verify your restaurant permissions and connection.</p>
-        </Card>
+        <div className="p-8 text-center bg-white border border-[#C7463A]/30 rounded-2xl max-w-md mx-auto space-y-3 shadow-sm">
+          <AlertTriangle className="w-10 h-10 text-[#C7463A] mx-auto" />
+          <h3 className="text-base font-serif font-bold text-[#18201D]">{error}</h3>
+          <p className="text-xs text-[#6F746F]">Please verify your kitchen connection or reload the page.</p>
+        </div>
       ) : filteredIngredients.length === 0 ? (
-        <Card className="p-12 text-center bg-slate-900/40 border-slate-800 space-y-3 max-w-lg mx-auto">
-          <div className="w-12 h-12 rounded-2xl bg-slate-800/80 flex items-center justify-center mx-auto text-amber-400">
-            <Package className="w-6 h-6" />
+        /* Rich Empty State with One-Click Starter Pack Seeder */
+        <div className="p-10 sm:p-14 text-center bg-white border border-[#E3DED5] rounded-2xl shadow-[0_1px_4px_rgba(30,30,20,0.05)] max-w-2xl mx-auto space-y-5">
+          <div className="w-16 h-16 rounded-2xl bg-[#F7F4EE] border border-[#E3DED5] flex items-center justify-center mx-auto text-[#C84A38]">
+            <ChefHat className="w-8 h-8" />
           </div>
-          <h3 className="text-sm font-extrabold text-textPearl">
-            {searchQuery || statusFilter !== 'all' || categoryFilter !== 'all'
-              ? 'No matching ingredients found'
-              : 'No inventory configured yet'}
-          </h3>
-          <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
-            {searchQuery || statusFilter !== 'all' || categoryFilter !== 'all'
-              ? 'Try adjusting your search query or filter settings.'
-              : 'Ingredients created by the restaurant owner will appear here live with full stock controls.'}
-          </p>
-        </Card>
+
+          <div className="space-y-1.5 max-w-md mx-auto">
+            <h3 className="text-xl font-serif font-bold text-[#18201D]">
+              {ingredients.length === 0 ? 'No Ingredients in Kitchen Pantry Yet' : 'No Matching Ingredients Found'}
+            </h3>
+            <p className="text-xs sm:text-sm text-[#6F746F] leading-relaxed">
+              {ingredients.length === 0 
+                ? 'Get your kitchen operational in seconds! You can initialize standard restaurant kitchen pantry staples or add custom ingredients right away.'
+                : 'Try clearing your search query or selecting "All" to view the full inventory.'}
+            </p>
+          </div>
+
+          {ingredients.length === 0 ? (
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+              <button
+                onClick={handleSeedEssentials}
+                disabled={isSeeding}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 bg-[#C84A38] hover:bg-[#B33F2E] text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer disabled:opacity-50"
+              >
+                <Sparkles className="w-4 h-4 text-amber-200" />
+                <span>{isSeeding ? 'Initializing 12 Staples...' : '✨ Initialize Kitchen Pantry Essentials'}</span>
+              </button>
+
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-3 bg-[#13241F] hover:bg-[#1A312B] text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4 text-emerald-400" />
+                <span>Add Custom Ingredient</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => { setSearchQuery(''); setStatusFilter('all'); setCategoryFilter('all'); }}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-[#F7F4EE] hover:bg-[#EBE7DF] text-[#18201D] border border-[#E3DED5] rounded-xl text-xs font-bold transition-all cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset All Filters</span>
+            </button>
+          )}
+
+          {ingredients.length === 0 && (
+            <div className="pt-4 border-t border-[#E3DED5] text-left bg-[#F7F4EE]/60 p-4 rounded-xl text-[11px] text-[#6F746F] space-y-1">
+              <div className="font-bold text-[#18201D] flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5 text-[#C84A38]" />
+                <span>Shared Real-Time Architecture</span>
+              </div>
+              <p>
+                Any ingredient added here is automatically available to the Restaurant Owner in <span className="font-semibold text-[#18201D]">/owner/inventory</span>, and any recipe batch cooked in the kitchen immediately logs real-time deductions.
+              </p>
+            </div>
+          )}
+        </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        /* ─── Grid of Ingredient Cards ─── */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredIngredients.map((item) => {
             const stock = item.currentStock ?? 0;
             const minStock = item.minimumStock ?? 5;
-            const isOutOfStock = stock <= 0 || item.status === 'out_of_stock';
-            const isLowStock = !isOutOfStock && (stock <= minStock || item.status === 'low' || item.status === 'critical');
-            const stockPercentage = Math.min(100, Math.round((stock / (item.maximumStock || minStock * 3 || 10)) * 100));
+            const reorder = item.reorderLevel ?? minStock * 1.5;
+            const isOut = stock <= 0;
+            const isLow = !isOut && stock <= minStock;
+            const isHealthy = stock > minStock;
+
+            // Health bar fill calculation
+            const maxCap = Math.max(reorder * 1.5, stock * 1.2, 10);
+            const fillPct = Math.min(100, Math.round((stock / maxCap) * 100));
 
             return (
-              <Card
+              <div
                 key={item.id}
-                className={`p-5 flex flex-col justify-between space-y-4 transition-all ${
-                  isOutOfStock
-                    ? 'bg-rose-950/15 border-rose-500/30'
-                    : isLowStock
-                    ? 'bg-amber-950/15 border-amber-500/30'
-                    : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                className={`bg-white border rounded-2xl p-5 shadow-[0_1px_4px_rgba(30,30,20,0.05)] transition-all flex flex-col justify-between space-y-4 hover:shadow-md ${
+                  isOut 
+                    ? 'border-[#C7463A]/40 bg-[#FDEEEC]/15' 
+                    : isLow 
+                    ? 'border-[#D79A24]/40 bg-[#FEF5E7]/15' 
+                    : 'border-[#E3DED5]'
                 }`}
               >
-                {/* Header: Title + Status Badge */}
+                {/* Header row */}
                 <div className="space-y-1.5">
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <h3 className="text-base font-extrabold text-textPearl leading-tight">{item.name}</h3>
-                      <div className="flex items-center gap-2 mt-1 text-[11px] text-slate-400 font-semibold">
-                        {item.category && (
-                          <span className="bg-slate-800/80 px-2 py-0.5 rounded-md text-slate-300">
-                            {item.category}
-                          </span>
-                        )}
+                      <h3 className="font-serif font-bold text-lg text-[#18201D] tracking-tight leading-snug">
+                        {item.name}
+                      </h3>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-[#F7F4EE] border border-[#E3DED5] text-[#6F746F]">
+                          {item.category || 'Pantry'}
+                        </span>
                         {item.storageLocation && (
-                          <span className="inline-flex items-center gap-1 text-slate-400">
-                            <MapPin className="w-3 h-3 text-slate-500" />
+                          <span className="text-[10px] font-semibold text-[#6F746F] flex items-center gap-1">
+                            <MapPin className="w-3 h-3 text-[#C84A38]" />
                             <span>{item.storageLocation}</span>
                           </span>
                         )}
                       </div>
                     </div>
 
+                    {/* Status Badge */}
                     <span
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider shrink-0 flex items-center gap-1 border ${
-                        isOutOfStock
-                          ? 'bg-rose-500/10 border-rose-500/30 text-rose-400 animate-pulse'
-                          : isLowStock
-                          ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                          : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      className={`text-[9.5px] font-extrabold uppercase px-2 py-0.5 rounded-md border tracking-wider shrink-0 ${
+                        isOut
+                          ? 'bg-[#FDEEEC] text-[#C7463A] border-[#C7463A]/30'
+                          : isLow
+                          ? 'bg-[#FEF5E7] text-[#D79A24] border-[#D79A24]/30'
+                          : 'bg-[#EBF7EE] text-[#287A55] border-[#287A55]/30'
                       }`}
                     >
-                      <span className={`w-1.5 h-1.5 rounded-full ${
-                        isOutOfStock ? 'bg-rose-500' : isLowStock ? 'bg-amber-500' : 'bg-emerald-500'
-                      }`} />
-                      {isOutOfStock ? 'Out of Stock' : isLowStock ? 'Low Stock' : 'In Stock'}
+                      {isOut ? 'Out of Stock' : isLow ? 'Low Stock' : 'In Stock'}
                     </span>
                   </div>
                 </div>
 
-                {/* Stock Level Display & Progress */}
-                <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-850 space-y-2">
+                {/* Stock Level Display */}
+                <div className="bg-[#F7F4EE] p-3.5 rounded-xl border border-[#E3DED5] space-y-2">
                   <div className="flex items-baseline justify-between">
                     <div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                        Current Stock
+                      <span className="text-[10px] uppercase font-bold text-[#6F746F] tracking-wider block">
+                        Current Available
                       </span>
-                      <div className="flex items-baseline gap-1.5 mt-0.5">
-                        <span className={`text-2xl font-black font-mono ${
-                          isOutOfStock ? 'text-rose-400' : isLowStock ? 'text-amber-400' : 'text-textPearl'
+                      <div className="flex items-baseline gap-1 mt-0.5">
+                        <span className={`text-2xl font-serif font-bold ${
+                          isOut ? 'text-[#C7463A]' : isLow ? 'text-[#D79A24]' : 'text-[#18201D]'
                         }`}>
                           {stock}
                         </span>
-                        <span className="text-xs font-bold text-slate-400">{item.unit}</span>
+                        <span className="text-xs font-bold text-[#6F746F] uppercase font-mono">
+                          {item.unit}
+                        </span>
                       </div>
                     </div>
 
                     <div className="text-right">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                        Min Safety Limit
+                      <span className="text-[10px] font-semibold text-[#6F746F] block">
+                        Min: <span className="font-mono font-bold text-[#18201D]">{minStock} {item.unit}</span>
                       </span>
-                      <span className="text-xs font-bold font-mono text-slate-300 mt-0.5 block">
-                        {minStock} {item.unit}
+                      <span className="text-[10px] font-semibold text-[#6F746F] block">
+                        Reorder: <span className="font-mono font-bold text-[#18201D]">{reorder} {item.unit}</span>
                       </span>
                     </div>
                   </div>
 
-                  {/* Stock Level Bar */}
-                  <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden border border-slate-800">
+                  {/* Stock Gauge Bar */}
+                  <div className="w-full h-1.5 rounded-full bg-[#E3DED5] overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all duration-300 ${
-                        isOutOfStock ? 'bg-rose-500 w-0' : isLowStock ? 'bg-amber-500' : 'bg-emerald-500'
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        isOut 
+                          ? 'bg-[#C7463A]' 
+                          : isLow 
+                          ? 'bg-[#D79A24]' 
+                          : 'bg-[#287A55]'
                       }`}
-                      style={{ width: `${Math.max(5, stockPercentage)}%` }}
+                      style={{ width: `${Math.max(4, fillPct)}%` }}
                     />
                   </div>
-
-                  {item.expiryDate && (
-                    <div className="flex items-center gap-1.5 text-[10px] text-slate-400 pt-0.5">
-                      <Calendar className="w-3 h-3 text-slate-500" />
-                      <span>Expires: {item.expiryDate}</span>
-                    </div>
-                  )}
                 </div>
 
-                {/* Operational Actions Strip */}
-                <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-800/80">
+                {/* Action Buttons Grid */}
+                <div className="grid grid-cols-4 gap-1.5 pt-1">
                   <button
-                    type="button"
                     onClick={() => openActionModal('receive', item)}
-                    className="flex flex-col items-center justify-center p-2 rounded-xl bg-slate-850 hover:bg-emerald-500/20 hover:text-emerald-400 border border-slate-800 hover:border-emerald-500/40 text-slate-300 text-[11px] font-bold transition-all cursor-pointer group active:scale-95"
+                    className="flex flex-col items-center justify-center p-2 rounded-xl bg-white hover:bg-[#EBF7EE] border border-[#E3DED5] hover:border-[#287A55]/40 text-[#287A55] text-[10px] font-bold transition-all cursor-pointer shadow-2xs"
+                    title="Check in received shipment"
                   >
-                    <Plus className="w-4 h-4 mb-0.5 text-emerald-400 group-hover:scale-110 transition-transform" />
+                    <ArrowDownRight className="w-3.5 h-3.5 mb-0.5" />
                     <span>Receive</span>
                   </button>
 
                   <button
-                    type="button"
                     onClick={() => openActionModal('usage', item)}
-                    disabled={isOutOfStock}
-                    className="flex flex-col items-center justify-center p-2 rounded-xl bg-slate-850 hover:bg-amber-500/20 hover:text-amber-400 border border-slate-800 hover:border-amber-500/40 text-slate-300 text-[11px] font-bold transition-all cursor-pointer group disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                    disabled={isOut}
+                    className="flex flex-col items-center justify-center p-2 rounded-xl bg-white hover:bg-[#F7F4EE] border border-[#E3DED5] hover:border-[#18201D]/40 text-[#18201D] text-[10px] font-bold transition-all cursor-pointer shadow-2xs disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Record kitchen prep or cooking usage"
                   >
-                    <Minus className="w-4 h-4 mb-0.5 text-amber-400 group-hover:scale-110 transition-transform" />
-                    <span>Use</span>
+                    <ArrowUpRight className="w-3.5 h-3.5 mb-0.5 text-[#C84A38]" />
+                    <span>Deduct</span>
                   </button>
 
                   <button
-                    type="button"
                     onClick={() => openActionModal('waste', item)}
-                    disabled={isOutOfStock}
-                    className="flex flex-col items-center justify-center p-2 rounded-xl bg-slate-850 hover:bg-rose-500/20 hover:text-rose-400 border border-slate-800 hover:border-rose-500/40 text-slate-300 text-[11px] font-bold transition-all cursor-pointer group disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
+                    disabled={isOut}
+                    className="flex flex-col items-center justify-center p-2 rounded-xl bg-white hover:bg-[#FDEEEC] border border-[#E3DED5] hover:border-[#C7463A]/40 text-[#C7463A] text-[10px] font-bold transition-all cursor-pointer shadow-2xs disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Log spoiled, expired, or damaged item"
                   >
-                    <Trash2 className="w-4 h-4 mb-0.5 text-rose-400 group-hover:scale-110 transition-transform" />
+                    <Trash2 className="w-3.5 h-3.5 mb-0.5" />
                     <span>Waste</span>
                   </button>
+
+                  <button
+                    onClick={() => openActionModal('adjust', item)}
+                    className="flex flex-col items-center justify-center p-2 rounded-xl bg-white hover:bg-[#F7F4EE] border border-[#E3DED5] text-[#6F746F] hover:text-[#18201D] text-[10px] font-bold transition-all cursor-pointer shadow-2xs"
+                    title="Correct count after physical stock take"
+                  >
+                    <Sliders className="w-3.5 h-3.5 mb-0.5" />
+                    <span>Adjust</span>
+                  </button>
                 </div>
-              </Card>
+              </div>
             );
           })}
         </div>
       )}
 
-      {/* ─── Operational Action Modal ─── */}
-      <Modal
-        isOpen={activeAction !== null}
-        onClose={closeActionModal}
-        title={
-          activeAction === 'receive'
-            ? `Receive Stock — ${selectedIngredient?.name}`
-            : activeAction === 'usage'
-            ? `Record Kitchen Usage — ${selectedIngredient?.name}`
-            : activeAction === 'waste'
-            ? `Log Waste / Spoilage — ${selectedIngredient?.name}`
-            : `Adjust Stock Count — ${selectedIngredient?.name}`
-        }
-      >
-        {selectedIngredient && (
-          <form onSubmit={handleExecuteAction} className="space-y-4 text-left">
-            {/* Context Badge Banner */}
-            <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
-              <div>
-                <span className="text-slate-400 block text-[10px] uppercase font-bold">Current Stock Level</span>
-                <span className="text-base font-black font-mono text-textPearl mt-0.5 block">
-                  {selectedIngredient.currentStock ?? 0} {selectedIngredient.unit}
-                </span>
+      {/* ─── MODAL 1: Operational Action Modal (Receive, Deduct, Waste, Adjust) ─── */}
+      {activeAction && selectedIngredient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#18201D]/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl border border-[#E3DED5] shadow-2xl max-w-md w-full p-6 space-y-5">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-[#E3DED5] pb-4">
+              <div className="space-y-0.5">
+                <div className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6F746F]">
+                  <Package className="w-3.5 h-3.5 text-[#C84A38]" />
+                  <span>{selectedIngredient.category}</span>
+                </div>
+                <h2 className="text-xl font-serif font-bold text-[#18201D]">
+                  {activeAction === 'receive' && 'Receive Stock Shipment'}
+                  {activeAction === 'usage' && 'Record Prep / Usage Deduction'}
+                  {activeAction === 'waste' && 'Log Kitchen Wastage / Loss'}
+                  {activeAction === 'adjust' && 'Adjust Physical Count'}
+                </h2>
+                <p className="text-xs text-[#6F746F]">
+                  Target: <span className="font-bold text-[#18201D]">{selectedIngredient.name}</span> (Current: {selectedIngredient.currentStock} {selectedIngredient.unit})
+                </p>
               </div>
-              <div className="text-right">
-                <span className="text-slate-500 block text-[10px] uppercase font-bold">Safety Limit</span>
-                <span className="text-xs font-bold font-mono text-slate-300 block">
-                  {selectedIngredient.minimumStock ?? 5} {selectedIngredient.unit}
-                </span>
-              </div>
-            </div>
-
-            {/* Quantity Input */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-300 block">
-                {activeAction === 'receive'
-                  ? `Quantity Received (${selectedIngredient.unit})`
-                  : activeAction === 'usage'
-                  ? `Quantity Used (${selectedIngredient.unit})`
-                  : activeAction === 'waste'
-                  ? `Quantity Wasted (${selectedIngredient.unit})`
-                  : `New Total Stock (${selectedIngredient.unit})`}
-              </label>
-              <input
-                type="number"
-                step="any"
-                min="0"
-                required
-                autoFocus
-                value={actionQuantity}
-                onChange={(e) => setActionQuantity(e.target.value)}
-                placeholder={`e.g., ${activeAction === 'adjust' ? selectedIngredient.currentStock : '5'}`}
-                className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 text-textPearl rounded-xl text-base font-mono font-bold focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
-            {/* Waste Reason Selector (only for waste) */}
-            {activeAction === 'waste' && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-300 block">Reason for Waste</label>
-                <select
-                  value={wasteReason}
-                  onChange={(e) => setWasteReason(e.target.value as any)}
-                  className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 text-textPearl rounded-xl text-xs font-semibold focus:outline-none focus:border-amber-500"
-                >
-                  <option value="spoilage">Spoilage / Rotten</option>
-                  <option value="expired">Expired Date</option>
-                  <option value="damaged">Damaged in Handling</option>
-                  <option value="staff_mistake">Kitchen / Cooking Mistake</option>
-                  <option value="customer_return">Customer Return</option>
-                </select>
-              </div>
-            )}
-
-            {/* Operational Reason / Notes */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-300 block">
-                Operational Notes / Reason
-              </label>
-              <input
-                type="text"
-                value={actionReason}
-                onChange={(e) => setActionReason(e.target.value)}
-                placeholder="e.g., Morning prep, Delivery invoice #482, Drop on floor..."
-                className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 text-textPearl rounded-xl text-xs placeholder-slate-500 focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
-              <Button
-                type="button"
-                variant="secondary"
+              <button
                 onClick={closeActionModal}
-                disabled={isSubmitting}
-                className="bg-slate-900 border-slate-800 text-slate-300"
+                className="p-1 rounded-lg text-[#6F746F] hover:text-[#18201D] hover:bg-[#F7F4EE] transition-colors cursor-pointer"
               >
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={isSubmitting}
-                className={
-                  activeAction === 'waste'
-                    ? 'bg-rose-500 hover:bg-rose-600 text-slate-950 font-bold'
-                    : activeAction === 'receive'
-                    ? 'bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold'
-                    : 'bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold'
-                }
-              >
-                {isSubmitting ? (
-                  <span className="flex items-center gap-1.5">
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Saving...</span>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleExecuteAction} className="space-y-4">
+              {/* Quantity Input */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-[#18201D]">
+                  {activeAction === 'adjust' ? `New Total Stock Level (${selectedIngredient.unit})` : `Quantity (${selectedIngredient.unit})`} *
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    autoFocus
+                    required
+                    value={actionQuantity}
+                    onChange={(e) => setActionQuantity(e.target.value)}
+                    placeholder={activeAction === 'adjust' ? `e.g. ${selectedIngredient.currentStock}` : 'e.g. 5'}
+                    className="w-full px-3.5 py-2.5 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] rounded-xl text-sm font-bold focus:outline-none focus:border-[#18201D] focus:bg-white transition-all font-mono"
+                  />
+                  <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[#6F746F] uppercase">
+                    {selectedIngredient.unit}
                   </span>
-                ) : activeAction === 'receive' ? (
-                  'Confirm Receipt'
-                ) : activeAction === 'usage' ? (
-                  'Confirm Usage'
-                ) : activeAction === 'waste' ? (
-                  'Log Wastage'
-                ) : (
-                  'Update Stock'
-                )}
-              </Button>
-            </div>
-          </form>
-        )}
-      </Modal>
+                </div>
 
-      {/* ─── Real-Time Stock Movement History Modal ─── */}
-      <Modal
-        isOpen={showHistoryModal}
-        onClose={() => setShowHistoryModal(false)}
-        title="Live Inventory Movement History"
-        size="2xl"
-      >
-        <div className="space-y-3 text-left">
-          <p className="text-xs text-slate-400">
-            Real-time audit log of stock received, service consumption, adjustments, and kitchen wastage.
-          </p>
+                {/* Quick Presets */}
+                <div className="flex items-center gap-1.5 pt-1">
+                  <span className="text-[10px] text-[#6F746F] font-semibold">Quick add:</span>
+                  {[1, 5, 10, 25].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        const cur = parseFloat(actionQuantity) || 0;
+                        setActionQuantity(String(cur + preset));
+                      }}
+                      className="px-2 py-0.5 rounded-md bg-[#F7F4EE] hover:bg-[#EBE7DF] border border-[#E3DED5] text-[10px] font-bold text-[#18201D] transition-all cursor-pointer"
+                    >
+                      +{preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          {movements.length === 0 ? (
-            <div className="p-8 text-center bg-slate-950/60 rounded-2xl border border-slate-800 text-slate-400 text-xs">
-              No stock movements recorded yet. Movements will automatically log here whenever stock is received or used.
-            </div>
-          ) : (
-            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-              {movements.map((m) => {
-                const isPositive = (m.quantity || 0) > 0;
-                const isWaste = m.type === 'waste';
-
-                return (
-                  <div
-                    key={m.id}
-                    className="p-3 bg-slate-950/80 rounded-xl border border-slate-850 flex items-center justify-between text-xs gap-3"
+              {/* Waste Reason Selector (only for waste) */}
+              {activeAction === 'waste' && (
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-[#18201D]">
+                    Wastage Reason *
+                  </label>
+                  <select
+                    value={wasteReason}
+                    onChange={(e: any) => setWasteReason(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] rounded-xl text-xs font-semibold focus:outline-none focus:border-[#18201D]"
                   >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                          isPositive
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : isWaste
-                            ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                        }`}
-                      >
-                        {isPositive ? (
-                          <ArrowUpRight className="w-4 h-4" />
-                        ) : isWaste ? (
-                          <Trash2 className="w-4 h-4" />
-                        ) : (
-                          <ArrowDownRight className="w-4 h-4" />
-                        )}
-                      </div>
+                    <option value="spoilage">🥦 Spoilage / Rotten during storage</option>
+                    <option value="expired">📅 Passed expiration date</option>
+                    <option value="damaged">📦 Damaged / Dropped / Broken container</option>
+                    <option value="staff_mistake">👨‍🍳 Cooking burn / Recipe mistake</option>
+                    <option value="customer_return">🍽️ Returned from customer dining table</option>
+                  </select>
+                </div>
+              )}
 
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <strong className="text-textPearl font-extrabold">{m.ingredientName}</strong>
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
-                              isPositive
-                                ? 'bg-emerald-500/20 text-emerald-400'
-                                : isWaste
-                                ? 'bg-rose-500/20 text-rose-400'
-                                : 'bg-slate-800 text-slate-300'
-                            }`}
-                          >
-                            {m.type?.replace('_', ' ') || 'Movement'}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5">{m.reason || 'Operational update'}</p>
-                        <div className="text-[10px] text-slate-500 flex items-center gap-2 mt-0.5 font-medium">
-                          <span>By: {m.submittedByName || 'Staff'} ({m.performedByRole || 'Kitchen'})</span>
-                          <span>•</span>
-                          <span>{m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
-                        </div>
-                      </div>
-                    </div>
+              {/* Reason / Notes */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-[#18201D]">
+                  Operational Notes / Reason
+                </label>
+                <input
+                  type="text"
+                  value={actionReason}
+                  onChange={(e) => setActionReason(e.target.value)}
+                  placeholder="e.g. Morning vendor delivery PO#104"
+                  className="w-full px-3.5 py-2.5 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] placeholder-[#6F746F]/70 rounded-xl text-xs font-medium focus:outline-none focus:border-[#18201D] focus:bg-white transition-all"
+                />
+              </div>
 
-                    <div className="text-right shrink-0">
-                      <span
-                        className={`text-sm font-black font-mono block ${
-                          isPositive ? 'text-emerald-400' : isWaste ? 'text-rose-400' : 'text-amber-400'
-                        }`}
-                      >
-                        {isPositive ? `+${m.quantity}` : m.quantity} {m.unit || ''}
-                      </span>
-                      {m.previousStock !== undefined && m.newStock !== undefined && (
-                        <span className="text-[10px] text-slate-500 font-mono block">
-                          {m.previousStock} → {m.newStock}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="pt-2 text-right">
-            <Button
-              variant="secondary"
-              onClick={() => setShowHistoryModal(false)}
-              className="bg-slate-900 border-slate-800 text-slate-300 text-xs"
-            >
-              Close
-            </Button>
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#E3DED5]">
+                <button
+                  type="button"
+                  onClick={closeActionModal}
+                  className="px-4 py-2 bg-[#F7F4EE] hover:bg-[#EBE7DF] text-[#18201D] rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-5 py-2 bg-[#13241F] hover:bg-[#1A312B] text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmitting ? 'Updating...' : 'Confirm Update'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
-      </Modal>
+      )}
+
+      {/* ─── MODAL 2: Create Custom Ingredient ─── */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#18201D]/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl border border-[#E3DED5] shadow-2xl max-w-lg w-full p-6 sm:p-7 space-y-5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between border-b border-[#E3DED5] pb-4">
+              <div>
+                <h2 className="text-xl font-serif font-bold text-[#18201D]">Add New Ingredient</h2>
+                <p className="text-xs text-[#6F746F] mt-0.5">
+                  Synchronizes instantly to both Kitchen KDS and Owner Inventory Master.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="p-1 rounded-lg text-[#6F746F] hover:text-[#18201D] hover:bg-[#F7F4EE] transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateIngredient} className="space-y-4">
+              {/* Ingredient Name */}
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-[#18201D]">Ingredient Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="e.g. Heavy Cream 36%"
+                  className="w-full px-3.5 py-2.5 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] placeholder-[#6F746F]/70 rounded-xl text-xs font-medium focus:outline-none focus:border-[#18201D] focus:bg-white"
+                />
+              </div>
+
+              {/* Category & Unit */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-[#18201D]">Category</label>
+                  <select
+                    value={newCategory}
+                    onChange={(e: any) => setNewCategory(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] rounded-xl text-xs font-semibold focus:outline-none focus:border-[#18201D]"
+                  >
+                    <option value="Vegetables">Vegetables</option>
+                    <option value="Meat">Meat & Poultry</option>
+                    <option value="Dairy">Dairy</option>
+                    <option value="Dry Goods">Dry Goods</option>
+                    <option value="Beverages">Beverages</option>
+                    <option value="Spices">Spices & Seasoning</option>
+                    <option value="Bakery">Bakery</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-[#18201D]">Measurement Unit</label>
+                  <select
+                    value={newUnit}
+                    onChange={(e: any) => setNewUnit(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] rounded-xl text-xs font-semibold focus:outline-none focus:border-[#18201D]"
+                  >
+                    <option value="kg">Kilograms (kg)</option>
+                    <option value="g">Grams (g)</option>
+                    <option value="liters">Liters (l)</option>
+                    <option value="ml">Milliliters (ml)</option>
+                    <option value="pieces">Pieces / Count (pcs)</option>
+                    <option value="packs">Packs / Boxes</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Stock Levels */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-[#18201D]">Initial Stock</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={newStock}
+                    onChange={(e) => setNewStock(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] rounded-xl text-xs font-mono font-bold focus:outline-none focus:border-[#18201D]"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-[#18201D]">Min Buffer</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={newMinStock}
+                    onChange={(e) => setNewMinStock(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] rounded-xl text-xs font-mono font-bold focus:outline-none focus:border-[#18201D]"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-[#18201D]">Reorder At</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={newReorderLevel}
+                    onChange={(e) => setNewReorderLevel(e.target.value)}
+                    className="w-full px-3 py-2 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] rounded-xl text-xs font-mono font-bold focus:outline-none focus:border-[#18201D]"
+                  />
+                </div>
+              </div>
+
+              {/* Storage & Cost */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-[#18201D]">Storage Location</label>
+                  <input
+                    type="text"
+                    value={newStorage}
+                    onChange={(e) => setNewStorage(e.target.value)}
+                    placeholder="e.g. Walk-in Chiller"
+                    className="w-full px-3 py-2 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] rounded-xl text-xs font-medium focus:outline-none focus:border-[#18201D]"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold text-[#18201D]">Unit Cost Est.</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={newCost}
+                    onChange={(e) => setNewCost(e.target.value)}
+                    placeholder="e.g. 2.50"
+                    className="w-full px-3 py-2 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] rounded-xl text-xs font-mono focus:outline-none focus:border-[#18201D]"
+                  />
+                </div>
+              </div>
+
+              {/* Buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#E3DED5]">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-4 py-2 bg-[#F7F4EE] hover:bg-[#EBE7DF] text-[#18201D] rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-5 py-2 bg-[#13241F] hover:bg-[#1A312B] text-white rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmitting ? 'Saving...' : 'Add to Stock Master'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─── MODAL 3: Stock Movement History Drawer / Modal ─── */}
+      {showHistoryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#18201D]/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl border border-[#E3DED5] shadow-2xl max-w-2xl w-full p-6 sm:p-7 space-y-5 max-h-[85vh] flex flex-col">
+            <div className="flex items-start justify-between border-b border-[#E3DED5] pb-4 shrink-0">
+              <div className="space-y-0.5">
+                <div className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6F746F]">
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#287A55]" />
+                  <span>Immutable Audit Trail</span>
+                </div>
+                <h2 className="text-xl font-serif font-bold text-[#18201D]">
+                  Stock Movements Ledger
+                </h2>
+                <p className="text-xs text-[#6F746F]">
+                  Real-time log of every purchase, consumption deduction, wastage, and manual count adjustment.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowHistoryModal(false)}
+                className="p-1 rounded-lg text-[#6F746F] hover:text-[#18201D] hover:bg-[#F7F4EE] transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* List */}
+            <div className="flex-1 overflow-y-auto pr-1 divide-y divide-[#E3DED5]">
+              {movements.length === 0 ? (
+                <div className="py-16 text-center text-[#6F746F] space-y-2">
+                  <Clock className="w-8 h-8 mx-auto text-[#6F746F]/40" />
+                  <p className="text-xs font-bold">No stock movements logged yet.</p>
+                  <p className="text-[11px]">Movements are recorded whenever ingredients are received, cooked, or wasted.</p>
+                </div>
+              ) : (
+                movements.map((mvt) => {
+                  const isPositive = mvt.quantity > 0 && mvt.type !== 'consumption' && mvt.type !== 'waste';
+                  return (
+                    <div key={mvt.id} className="py-3 flex items-start justify-between gap-3 text-xs">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-[#18201D]">{mvt.ingredientName}</span>
+                          <span className="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-[#F7F4EE] border border-[#E3DED5] text-[#6F746F]">
+                            {mvt.type}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[#6F746F] italic">
+                          {mvt.reason || 'No description provided'}
+                        </p>
+                        <div className="flex items-center gap-2 text-[10px] text-[#6F746F] pt-0.5">
+                          <span>By: <span className="font-semibold text-[#18201D]">{mvt.submittedByName || 'Chef'}</span> ({mvt.performedByRole || 'kitchen'})</span>
+                          <span>•</span>
+                          <span>{new Date(mvt.timestamp).toLocaleDateString()} {new Date(mvt.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <span className={`font-mono font-bold text-sm block ${
+                          isPositive ? 'text-[#287A55]' : 'text-[#C7463A]'
+                        }`}>
+                          {isPositive ? `+${mvt.quantity}` : `${mvt.quantity}`} {mvt.unit || ''}
+                        </span>
+                        {mvt.previousStock !== undefined && mvt.newStock !== undefined && (
+                          <span className="text-[10px] font-mono text-[#6F746F] block">
+                            {mvt.previousStock} → {mvt.newStock}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-[#E3DED5] flex justify-end shrink-0">
+              <button
+                onClick={() => setShowHistoryModal(false)}
+                className="px-4 py-2 bg-[#F7F4EE] hover:bg-[#EBE7DF] text-[#18201D] rounded-xl text-xs font-bold transition-all cursor-pointer"
+              >
+                Close Ledger
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
