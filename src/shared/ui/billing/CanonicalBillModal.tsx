@@ -4,6 +4,7 @@ import { db } from '../../../config/firebase';
 import { IBill } from '../../domain/billing/types';
 import { IOrder } from '../../../types';
 import { billingService } from '../../services/billingService';
+import { tableService } from '../../services/tableService';
 import { generateQrSvg } from '../../utils/qrCode';
 import { formatPrice } from '../../utils/format';
 import { useCurrency } from '../../../context/CurrencyContext';
@@ -423,6 +424,13 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
           transactionRef: verifyRes.paymentReference
         } as IBill;
         setBill(settledBill);
+        if (bill?.tableId || bill?.tableNumber) {
+          tableService.setTableCleaning(
+            tenantId,
+            bill.tableId || bill.tableNumber,
+            10
+          ).catch((err) => console.warn('[CanonicalBillModal] Table cleaning transition warning:', err));
+        }
         if (onPaymentSettled) {
           onPaymentSettled(settledBill);
         }

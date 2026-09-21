@@ -14,6 +14,7 @@ import {
   generateSessionId, 
   syncDiningSessionToFirestore 
 } from '../../../shared/utils/diningSession';
+import { tableService } from '../../../shared/services/tableService';
 import { 
   ShoppingBag, Trash2, ArrowLeft, ArrowRight, Minus, Plus, 
   Tag, Check, Sparkles, ShieldCheck, Utensils, Heart, 
@@ -449,16 +450,22 @@ export const CartPage: React.FC = () => {
         console.warn('[CartPage] Failed to update local recent orders index:', storageErr);
       }
 
-      // Non-blocking update to table status if known
-      if (session?.tableId && tenantId) {
+      // Robust canonical update to table status: transitions table to Occupied
+      if (tenantId && (session?.tableId || tableNumber)) {
         try {
-          const tableRef = doc(db, 'restaurants', tenantId, 'tables', session.tableId);
-          await setDoc(tableRef, {
-            status: 'occupied',
-            activeOrderId: orderId,
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
-        } catch (_) {}
+          await tableService.setTableOccupiedWithOrder(
+            tenantId,
+            session?.tableId || tableNumber,
+            orderId,
+            {
+              total: grandTotal,
+              itemsCount: cartItems.length,
+              customerName: session?.customerName || user?.displayName || 'Guest Diner'
+            }
+          );
+        } catch (tableErr) {
+          console.warn('[CartPage] Table status occupation warning:', tableErr);
+        }
       }
 
       toast.success('Order successfully routed to kitchen!');

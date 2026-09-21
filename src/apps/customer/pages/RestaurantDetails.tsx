@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import Card from '../../../components/ui/Card/Card';
@@ -72,6 +72,7 @@ interface IMenuItemData {
 
 export const RestaurantDetails: React.FC = () => {
   const { tenantId } = useParams<{ tenantId: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
   // State reset per tenantId to prevent any cross-tenant data leakage
@@ -96,11 +97,19 @@ export const RestaurantDetails: React.FC = () => {
 
   const handleOrderNow = () => {
     if (!restaurant) return;
-    const existingSession = getActiveDiningSession(restaurant.id);
-    if (existingSession && (existingSession.tableId || existingSession.tableNumber)) {
-      navigate(`/customer/restaurant/${restaurant.id}/menu${existingSession.tableNumber ? `?table=${existingSession.tableNumber}` : ''}`);
+    // 1. Direct URL table parameter (e.g. from QR scan) bypasses table modal
+    const urlTable = searchParams.get('table') || searchParams.get('t');
+    if (urlTable) {
+      navigate(`/customer/restaurant/${restaurant.id}/menu?table=${urlTable}`);
       return;
     }
+    // 2. Active session explicitly initiated from a QR scan
+    const existingSession = getActiveDiningSession(restaurant.id);
+    if (existingSession && existingSession.orderSource === 'qr' && (existingSession.tableNumber || existingSession.tableId)) {
+      navigate(`/customer/restaurant/${restaurant.id}/menu?table=${existingSession.tableNumber || existingSession.tableId}`);
+      return;
+    }
+    // 3. Otherwise, always prompt for table selection to prevent stale table assignments
     setIsTableModalOpen(true);
   };
 
@@ -109,27 +118,23 @@ export const RestaurantDetails: React.FC = () => {
     const cleanNum = String(table.tableNumber || table.number || '').replace(/^TBL-/i, '');
     const tableId = table.tableId || table.id;
     
-    // Check if there's already an active session for this restaurant & table
-    const existingSession = getActiveDiningSession(restaurant.id);
-    let session = existingSession;
-    if (!session || (session.tableNumber !== cleanNum && session.tableId !== tableId)) {
-      const sessionId = generateSessionId();
-      session = {
-        sessionId,
-        restaurantId: restaurant.id,
-        tenantId: restaurant.id,
-        branchId: table.branchId || 'main',
-        tableId: tableId,
-        tableNumber: cleanNum,
-        tableName: table.tableName || `Table ${cleanNum}`,
-        orderSource: 'app',
-        isLocked: false,
-        status: 'active',
-        startedAt: new Date().toISOString()
-      };
-      saveActiveDiningSession(session);
-      syncDiningSessionToFirestore(session).catch(() => {});
-    }
+    // Create new explicit dining session for this table
+    const sessionId = generateSessionId();
+    const session = {
+      sessionId,
+      restaurantId: restaurant.id,
+      tenantId: restaurant.id,
+      branchId: table.branchId || 'main',
+      tableId: tableId,
+      tableNumber: cleanNum,
+      tableName: table.tableName || `Table ${cleanNum}`,
+      orderSource: 'app' as const,
+      isLocked: false,
+      status: 'active' as const,
+      startedAt: new Date().toISOString()
+    };
+    saveActiveDiningSession(session);
+    syncDiningSessionToFirestore(session).catch(() => {});
 
     setIsTableModalOpen(false);
     navigate(`/customer/restaurant/${restaurant.id}/menu?table=${session.tableNumber}`);

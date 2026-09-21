@@ -8,7 +8,7 @@ import {
   Utensils, Clock, ChevronRight, ShoppingBag, 
   CheckCircle2, ArrowRight, RefreshCw, Calendar,
   MapPin, Search, Sparkles, ExternalLink, RotateCcw,
-  Receipt, ShieldCheck, Heart
+  Receipt, ShieldCheck, Heart, Star
 } from 'lucide-react';
 import { isOrderActive, isOrderTerminal } from '../../../shared/utils/orderUtils';
 
@@ -773,6 +773,16 @@ export const CustomerOrdersPage: React.FC = () => {
                         </button>
                       ) : orderIsTerminal && !isCancelled ? (
                         <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigate(`/customer/restaurant/${targetTenant}/order/${targetOrderId}`);
+                            }}
+                            className="px-3 py-1.5 bg-[#FFF8F2] border border-[#C85A3F]/30 hover:border-[#C85A3F] text-[#C85A3F] text-[11px] font-extrabold rounded-xl transition-all cursor-pointer flex items-center gap-1"
+                          >
+                            <Star className="w-3 h-3 fill-[#C85A3F]" />
+                            <span>Rate</span>
+                          </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

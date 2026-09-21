@@ -310,6 +310,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
                   key={link.to}
                   to={link.to}
                   end={link.to === baseRoute}
+                  onClick={() => onClose?.()}
                   className={({ isActive }) => `
                     group flex items-center justify-between px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-150
                     ${isActive 
@@ -439,6 +440,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
                   key={link.to}
                   to={link.to}
                   end={link.to === '/owner/dashboard' || link.to === '/dashboard/owner'}
+                  onClick={() => onClose?.()}
                   className={({ isActive }) => `
                     group flex items-center justify-between px-3 py-2 rounded-lg text-[13px] font-medium transition-all duration-150
                     ${isActive 
@@ -480,6 +482,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
         <div className="p-3 border-t border-[#1A473C] bg-[#0E221C]/70 space-y-2 shrink-0">
           <NavLink 
             to="/owner/settings"
+            onClick={() => onClose?.()}
             className={({ isActive }) => 
               `flex items-center space-x-2.5 w-full px-3 py-2 rounded-lg text-[13px] font-medium transition-all ${
                 isActive 
@@ -549,6 +552,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
               key={link.to}
               to={link.to}
               end={link.to === '/owner/dashboard' || link.to === '/dashboard/owner' || link.to === '/dashboard/waiter' || link.to === '/dashboard/kitchen'}
+              onClick={() => onClose?.()}
               className={({ isActive }) => `
                 flex items-center space-x-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-300
                 ${isActive 
@@ -573,6 +577,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
         <div className="p-4 border-t border-slate-800/40 bg-slate-950/20">
           <NavLink 
             to="/owner/settings"
+            onClick={() => onClose?.()}
             className={({ isActive }) => 
               `flex items-center space-x-3 w-full px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
                 isActive 
