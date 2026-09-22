@@ -124,7 +124,29 @@ export const tableService = {
       const nowIso = new Date().toISOString();
       const currentTable = match?.table;
 
-      // Only transition to browsing if table is currently available or unseated
+      // 1. Release any previous tables this diner was browsing in this restaurant to prevent multi-table ghost occupancy
+      if (customerInfo?.name || customerInfo?.phone || customerInfo?.customerId) {
+        try {
+          const allTables = await this.getTables(tenantId);
+          for (const t of allTables) {
+            const tNum = cleanTableIdentifier(t.number || t.tableNumber || t.id);
+            if (tNum !== cleanNum) {
+              const isSameCustomer = (
+                (customerInfo.customerId && (t as any).customerId === customerInfo.customerId) ||
+                (customerInfo.name && t.customerName && t.customerName.toLowerCase().trim() === customerInfo.name.toLowerCase().trim()) ||
+                (customerInfo.phone && t.customerPhone && t.customerPhone === customerInfo.phone)
+              );
+              const hasOrder = Boolean(t.activeOrderId || (t as any).currentOrderId);
+              const isBrowsingOnly = (t.subStatus === 'browsing' || t.diningStatus === 'browsing' || t.status === 'browsing' || (t.status === 'occupied' && !hasOrder)) && !hasOrder;
+              if (isSameCustomer && isBrowsingOnly) {
+                await this.setTableAvailable(tenantId, t.id);
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      // 2. Only transition to browsing if table is currently available or unseated
       const currentStatus = (currentTable?.status || (currentTable as any)?.tableStatus || '').toLowerCase();
       const hasActiveOrder = Boolean(currentTable?.activeOrderId || (currentTable as any)?.currentOrderId);
 
@@ -140,6 +162,7 @@ export const tableService = {
           orderSource: source,
           customerName: customerInfo?.name || currentTable?.customerName || 'Guest Diner',
           customerPhone: customerInfo?.phone || currentTable?.customerPhone || '',
+          customerId: customerInfo?.customerId || (currentTable as any)?.customerId || '',
           updatedAt: nowIso,
           number: currentTable?.number || cleanNum,
           tableNumber: currentTable?.tableNumber || cleanNum,
@@ -160,14 +183,108 @@ export const tableService = {
           });
         } catch (_) {}
       } else {
-        // Just touch lastActiveAt
+        // Just touch lastActiveAt and update customer name if available
         await updateDoc(tableRef, {
           lastActiveAt: nowIso,
-          updatedAt: nowIso
+          updatedAt: nowIso,
+          ...(customerInfo?.name ? { customerName: customerInfo.name } : {}),
+          ...(customerInfo?.phone ? { customerPhone: customerInfo.phone } : {})
         }).catch(() => {});
       }
     } catch (err) {
       console.warn('[tableService] setTableBrowsing warning:', err);
+    }
+  },
+
+  /**
+   * Releases a browsing table back to Available status when customer leaves or switches tables.
+   * Only clears if the table does NOT have an active placed order.
+   */
+  async releaseTableBrowsing(
+    tenantId: string,
+    tableIdentifier: string | number,
+    customerInfo?: { name?: string; customerName?: string; phone?: string; customerPhone?: string; customerId?: string }
+  ): Promise<void> {
+    if (!tenantId || !tableIdentifier) return;
+
+    try {
+      const match = await this.findTableByNumberOrId(tenantId, tableIdentifier);
+      if (!match) return;
+
+      const currentTable = match.table;
+      const hasActiveOrder = Boolean(currentTable?.activeOrderId || (currentTable as any)?.currentOrderId);
+
+      // Never release if table has an active order placed
+      if (hasActiveOrder) return;
+
+      // If customer info is provided, verify this customer was indeed the one browsing
+      const candidateName = customerInfo?.name || customerInfo?.customerName;
+      if (candidateName && currentTable?.customerName && currentTable.customerName !== 'Guest Diner') {
+        const matches = currentTable.customerName.toLowerCase().trim() === candidateName.toLowerCase().trim();
+        if (!matches) return;
+      }
+
+      await this.setTableAvailable(tenantId, match.id);
+    } catch (err) {
+      console.warn('[tableService] releaseTableBrowsing warning:', err);
+    }
+  },
+
+  /**
+   * Updates lastActiveAt timestamp for an active browsing session (heartbeat).
+   */
+  async touchTableBrowsing(
+    tenantId: string,
+    tableIdentifier: string | number
+  ): Promise<void> {
+    if (!tenantId || !tableIdentifier) return;
+    try {
+      const match = await this.findTableByNumberOrId(tenantId, tableIdentifier);
+      if (!match) return;
+      const tableRef = doc(db, 'restaurants', tenantId, 'tables', match.id);
+      await updateDoc(tableRef, {
+        lastActiveAt: new Date().toISOString()
+      }).catch(() => {});
+    } catch (_) {}
+  },
+
+  /**
+   * Cleans up stale browsing tables where diner abandoned browsing (> maxAgeMinutes ago without an order).
+   */
+  async cleanupStaleBrowsingTables(
+    tenantId: string,
+    maxAgeMinutes: number = 5
+  ): Promise<number> {
+    if (!tenantId) return 0;
+    try {
+      const allTables = await this.getTables(tenantId);
+      const now = Date.now();
+      let cleaned = 0;
+
+      for (const t of allTables) {
+        const hasOrder = Boolean(t.activeOrderId || (t as any)?.currentOrderId);
+        const isBrowsingOnly = (
+          t.subStatus === 'browsing' || 
+          t.diningStatus === 'browsing' || 
+          t.status === 'browsing' || 
+          (t.status === 'occupied' && !hasOrder)
+        ) && !hasOrder;
+
+        if (isBrowsingOnly) {
+          const timestamp = t.lastActiveAt || t.seatedAt || t.occupiedAt || (t as any).updatedAt;
+          if (timestamp) {
+            const ageMins = (now - new Date(timestamp).getTime()) / 60000;
+            if (ageMins > maxAgeMinutes) {
+              await this.setTableAvailable(tenantId, t.id);
+              cleaned++;
+            }
+          }
+        }
+      }
+      return cleaned;
+    } catch (err) {
+      console.warn('[tableService] cleanupStaleBrowsingTables warning:', err);
+      return 0;
     }
   },
 

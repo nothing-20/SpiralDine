@@ -21,6 +21,8 @@ import {
   saveActiveDiningSession, 
   syncDiningSessionToFirestore 
 } from '../../../shared/utils/diningSession';
+import { tableService } from '../../../shared/services/tableService';
+import { useAuth } from '../../../context/AuthContext';
 
 interface IRestaurantInfo {
   id: string;
@@ -92,6 +94,8 @@ export const RestaurantDetails: React.FC = () => {
   // Item details modal
   const [selectedItem, setSelectedItem] = useState<IMenuItemData | null>(null);
 
+  const { user } = useAuth();
+
   // Table selection modal for Dine-In ordering
   const [isTableModalOpen, setIsTableModalOpen] = useState(false);
 
@@ -117,6 +121,18 @@ export const RestaurantDetails: React.FC = () => {
     if (!restaurant) return;
     const cleanNum = String(table.tableNumber || table.number || '').replace(/^TBL-/i, '');
     const tableId = table.tableId || table.id;
+
+    // Release any previous browsing table if the user picked a different table
+    const existingSession = getActiveDiningSession(restaurant.id);
+    if (existingSession && (existingSession.tableNumber || existingSession.tableId)) {
+      const prevTable = existingSession.tableNumber || existingSession.tableId;
+      if (prevTable !== cleanNum && prevTable !== tableId) {
+        tableService.releaseTableBrowsing(restaurant.id, prevTable, {
+          customerId: user?.uid,
+          customerName: user?.displayName || undefined
+        }).catch(err => console.warn('Failed to release previous table browsing:', err));
+      }
+    }
     
     // Create new explicit dining session for this table
     const sessionId = generateSessionId();

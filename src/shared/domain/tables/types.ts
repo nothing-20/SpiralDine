@@ -90,11 +90,9 @@ export const isTableOccupied = (status?: string, subStatus?: string, diningStatu
   return (
     s === 'occupied' || 
     s === 'seated' || 
-    s === 'browsing' || 
     s === 'dining' || 
     s === 'service_requested' || 
     s === 'bill_requested' ||
-    sub === 'browsing' ||
     sub === 'seated' ||
     sub === 'dining' ||
     sub === 'ordering'
@@ -103,12 +101,26 @@ export const isTableOccupied = (status?: string, subStatus?: string, diningStatu
 
 /**
  * Checks whether a table has a diner actively browsing the menu without a committed order yet.
+ * Ephemeral: expires after maxAgeMinutes of inactivity so abandoned views do not ghost-occupy tables.
  */
-export const isTableBrowsing = (table: ITable): boolean => {
+export const isTableBrowsing = (table: ITable, maxAgeMinutes: number = 5): boolean => {
   const status = (table.status || table.tableStatus || '').toLowerCase().trim();
   const sub = (table.subStatus || table.diningStatus || '').toLowerCase().trim();
   const hasOrder = Boolean(table.activeOrderId || table.currentOrderId);
-  return !hasOrder && (status === 'browsing' || sub === 'browsing' || (status === 'occupied' && sub === 'seated'));
+  if (hasOrder) return false;
+
+  const isBrowsingStatus = status === 'browsing' || sub === 'browsing' || (status === 'occupied' && sub === 'seated');
+  if (!isBrowsingStatus) return false;
+
+  const timestamp = table.lastActiveAt || table.seatedAt || table.occupiedAt || (table as any).updatedAt;
+  if (timestamp) {
+    const ageMins = (Date.now() - new Date(timestamp).getTime()) / 60000;
+    if (ageMins > maxAgeMinutes) {
+      return false; // Stale / abandoned browsing session
+    }
+  }
+
+  return true;
 };
 
 /**
