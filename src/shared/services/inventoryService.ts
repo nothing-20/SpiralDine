@@ -256,12 +256,14 @@ export const inventoryService = {
 
     if (ingSnap.exists()) {
       const ingData = ingSnap.data() as IStockIngredient;
-      const newStock = Math.max(0, (ingData.currentStock || 0) - wasteData.quantity);
+      const prevStock = ingData.currentStock || 0;
+      const newStock = Math.max(0, prevStock - wasteData.quantity);
 
-      let status: IStockIngredient['status'] = 'healthy';
-      if (newStock === 0) status = 'out_of_stock';
-      else if (newStock <= ingData.minimumStock * 0.5) status = 'critical';
-      else if (newStock <= ingData.minimumStock) status = 'low';
+      let status: IStockIngredient['status'] = inventoryService.calculateStockStatus(
+        newStock, 
+        ingData.minimumStock || 5, 
+        ingData.reorderLevel
+      );
 
       await updateDoc(ingRef, {
         currentStock: newStock,
@@ -270,17 +272,22 @@ export const inventoryService = {
       });
 
       // Record Stock movement waste
-      const movementId = `MVT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
+      const movementId = `MVT-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
       await setDoc(doc(db, 'restaurants', tenantId, 'stockMovements', movementId), {
         id: movementId,
         ingredientId: wasteData.ingredientId,
-        ingredientName: wasteData.ingredientName,
+        ingredientName: wasteData.ingredientName || ingData.name,
         quantity: -wasteData.quantity,
+        unit: wasteData.unit || ingData.unit,
+        previousStock: prevStock,
+        newStock,
         type: 'waste',
         reason: `Recorded waste: ${wasteData.reason}`,
         valueLost: wasteData.valueLost,
         submittedBy: wasteData.submittedBy || 'system',
         submittedByName: wasteData.submittedByName || 'System',
+        performedByRole: wasteData.performedByRole || wasteData.submittedByRole || 'Staff',
+        tenantId,
         timestamp: new Date().toISOString()
       });
 
@@ -502,6 +509,271 @@ export const inventoryService = {
           timestamp: new Date().toISOString()
         });
       }
+    });
+  },
+
+  // Canonical stock health status calculator
+  calculateStockStatus: (currentStock: number, minimumStock: number, reorderLevel?: number): IStockIngredient['status'] => {
+    if (currentStock <= 0) return 'out_of_stock';
+    if (currentStock <= minimumStock * 0.5) return 'critical';
+    if (currentStock <= (reorderLevel ?? minimumStock)) return 'low';
+    return 'healthy';
+  },
+
+  // Operational Stock Adjustment (with full movement audit tracking)
+  adjustStock: async (
+    tenantId: string, 
+    ingredientId: string, 
+    options: { 
+      newStock: number; 
+      reason: string; 
+      user?: any; 
+      type?: IStockMovement['type'];
+    }
+  ) => {
+    const ingRef = doc(db, 'restaurants', tenantId, 'inventory', ingredientId);
+
+    return await runTransaction(db, async (transaction) => {
+      const ingSnap = await transaction.get(ingRef);
+      if (!ingSnap.exists()) {
+        throw new Error(`Ingredient with ID ${ingredientId} not found in inventory.`);
+      }
+
+      const ingData = ingSnap.data() as IStockIngredient;
+      const prevStock = ingData.currentStock || 0;
+      const targetStock = Math.max(0, options.newStock);
+      const diffQuantity = targetStock - prevStock;
+
+      const newStatus = inventoryService.calculateStockStatus(
+        targetStock, 
+        ingData.minimumStock || 5, 
+        ingData.reorderLevel
+      );
+
+      const timestamp = new Date().toISOString();
+      const userId = options.user?.uid || options.user?.id || 'system';
+      const userName = options.user?.displayName || options.user?.name || options.user?.email || 'Kitchen Staff';
+      const userRole = options.user?.role || 'kitchen';
+
+      transaction.update(ingRef, {
+        currentStock: targetStock,
+        status: newStatus,
+        updatedAt: timestamp
+      });
+
+      const movementId = `MVT-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const movementRef = doc(db, 'restaurants', tenantId, 'stockMovements', movementId);
+
+      const movementRecord: IStockMovement = {
+        id: movementId,
+        ingredientId,
+        ingredientName: ingData.name,
+        quantity: diffQuantity,
+        unit: ingData.unit,
+        previousStock: prevStock,
+        newStock: targetStock,
+        type: options.type || 'adjustment',
+        reason: options.reason || 'Manual stock level adjustment',
+        submittedBy: userId,
+        submittedByName: userName,
+        performedByRole: userRole,
+        tenantId,
+        timestamp
+      };
+
+      transaction.set(movementRef, movementRecord);
+
+      // Log event if critical or low
+      if (newStatus === 'low' || newStatus === 'critical' || newStatus === 'out_of_stock') {
+        const eventType = newStatus === 'out_of_stock' ? 'Out of Stock' : newStatus === 'critical' ? 'Critical Stock' : 'Low Stock';
+        logEvent(tenantId, {
+          eventType,
+          eventCategory: 'Management',
+          performedBy: userName,
+          performedByRole: userRole,
+          title: `${eventType}: ${ingData.name}`,
+          description: `Stock adjusted to ${targetStock} ${ingData.unit} by ${userName} (${userRole}).`,
+          metadata: { ingredientId, previousStock: prevStock, newStock: targetStock }
+        });
+      }
+
+      return { previousStock: prevStock, newStock: targetStock, status: newStatus };
+    });
+  },
+
+  // Operational Stock Receipt / Restock
+  receiveStock: async (
+    tenantId: string, 
+    ingredientId: string, 
+    options: { 
+      quantityAdded: number; 
+      cost?: number; 
+      supplierId?: string; 
+      supplierName?: string; 
+      reason?: string; 
+      user?: any; 
+    }
+  ) => {
+    if (options.quantityAdded <= 0) {
+      throw new Error('Quantity added must be greater than zero.');
+    }
+
+    const ingRef = doc(db, 'restaurants', tenantId, 'inventory', ingredientId);
+
+    return await runTransaction(db, async (transaction) => {
+      const ingSnap = await transaction.get(ingRef);
+      if (!ingSnap.exists()) {
+        throw new Error(`Ingredient with ID ${ingredientId} not found in inventory.`);
+      }
+
+      const ingData = ingSnap.data() as IStockIngredient;
+      const prevStock = ingData.currentStock || 0;
+      const newStock = prevStock + options.quantityAdded;
+
+      const newStatus = inventoryService.calculateStockStatus(
+        newStock, 
+        ingData.minimumStock || 5, 
+        ingData.reorderLevel
+      );
+
+      const timestamp = new Date().toISOString();
+      const userId = options.user?.uid || options.user?.id || 'system';
+      const userName = options.user?.displayName || options.user?.name || options.user?.email || 'Kitchen Staff';
+      const userRole = options.user?.role || 'kitchen';
+
+      const updateData: any = {
+        currentStock: newStock,
+        status: newStatus,
+        updatedAt: timestamp
+      };
+
+      if (options.cost !== undefined && options.cost > 0) {
+        updateData.purchaseCost = options.cost;
+      }
+      if (options.supplierId) {
+        updateData.supplierId = options.supplierId;
+      }
+      if (options.supplierName) {
+        updateData.supplierName = options.supplierName;
+      }
+
+      transaction.update(ingRef, updateData);
+
+      const movementId = `MVT-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const movementRef = doc(db, 'restaurants', tenantId, 'stockMovements', movementId);
+
+      const movementRecord: IStockMovement = {
+        id: movementId,
+        ingredientId,
+        ingredientName: ingData.name,
+        quantity: options.quantityAdded,
+        unit: ingData.unit,
+        previousStock: prevStock,
+        newStock: newStock,
+        type: 'purchase',
+        reason: options.reason || 'Stock shipment received & replenished',
+        submittedBy: userId,
+        submittedByName: userName,
+        performedByRole: userRole,
+        tenantId,
+        timestamp
+      };
+
+      transaction.set(movementRef, movementRecord);
+
+      logEvent(tenantId, {
+        eventType: 'Stock Received',
+        eventCategory: 'Management',
+        performedBy: userName,
+        performedByRole: userRole,
+        title: `Stock Received: ${ingData.name} (+${options.quantityAdded} ${ingData.unit})`,
+        description: `Shipment checked in by ${userName}. New stock: ${newStock} ${ingData.unit}.`,
+        metadata: { ingredientId, quantityAdded: options.quantityAdded, newStock }
+      });
+
+      return { previousStock: prevStock, newStock, status: newStatus };
+    });
+  },
+
+  // Operational Usage Deduction (for kitchen prep or service consumption)
+  recordUsage: async (
+    tenantId: string, 
+    ingredientId: string, 
+    options: { 
+      quantityUsed: number; 
+      reason?: string; 
+      user?: any; 
+    }
+  ) => {
+    if (options.quantityUsed <= 0) {
+      throw new Error('Quantity used must be greater than zero.');
+    }
+
+    const ingRef = doc(db, 'restaurants', tenantId, 'inventory', ingredientId);
+
+    return await runTransaction(db, async (transaction) => {
+      const ingSnap = await transaction.get(ingRef);
+      if (!ingSnap.exists()) {
+        throw new Error(`Ingredient with ID ${ingredientId} not found in inventory.`);
+      }
+
+      const ingData = ingSnap.data() as IStockIngredient;
+      const prevStock = ingData.currentStock || 0;
+      const newStock = Math.max(0, prevStock - options.quantityUsed);
+
+      const newStatus = inventoryService.calculateStockStatus(
+        newStock, 
+        ingData.minimumStock || 5, 
+        ingData.reorderLevel
+      );
+
+      const timestamp = new Date().toISOString();
+      const userId = options.user?.uid || options.user?.id || 'system';
+      const userName = options.user?.displayName || options.user?.name || options.user?.email || 'Kitchen Staff';
+      const userRole = options.user?.role || 'kitchen';
+
+      transaction.update(ingRef, {
+        currentStock: newStock,
+        status: newStatus,
+        updatedAt: timestamp
+      });
+
+      const movementId = `MVT-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      const movementRef = doc(db, 'restaurants', tenantId, 'stockMovements', movementId);
+
+      const movementRecord: IStockMovement = {
+        id: movementId,
+        ingredientId,
+        ingredientName: ingData.name,
+        quantity: -options.quantityUsed,
+        unit: ingData.unit,
+        previousStock: prevStock,
+        newStock: newStock,
+        type: 'consumption',
+        reason: options.reason || 'Kitchen prep & cooking usage',
+        submittedBy: userId,
+        submittedByName: userName,
+        performedByRole: userRole,
+        tenantId,
+        timestamp
+      };
+
+      transaction.set(movementRef, movementRecord);
+
+      if (newStatus === 'low' || newStatus === 'critical' || newStatus === 'out_of_stock') {
+        const eventType = newStatus === 'out_of_stock' ? 'Out of Stock' : newStatus === 'critical' ? 'Critical Stock' : 'Low Stock';
+        logEvent(tenantId, {
+          eventType,
+          eventCategory: 'Operational',
+          performedBy: userName,
+          performedByRole: userRole,
+          title: `${eventType}: ${ingData.name}`,
+          description: `Stock dropped to ${newStock} ${ingData.unit} after usage recorded by ${userName}.`,
+          metadata: { ingredientId, quantityUsed: options.quantityUsed, newStock }
+        });
+      }
+
+      return { previousStock: prevStock, newStock, status: newStatus };
     });
   }
 };

@@ -46,11 +46,16 @@ export interface IStockMovement {
   ingredientId: string;
   ingredientName: string;
   quantity: number; // positive for restock, negative for deduction
+  unit?: string;
+  previousStock?: number;
+  newStock?: number;
   type: 'purchase' | 'consumption' | 'adjustment' | 'waste' | 'spoilage' | 'manual_correction' | 'refund_restock' | 'cancellation_restock';
   reason: string;
   valueLost?: number; // in cents (optional)
   submittedBy: string; // userId or "system"
   submittedByName: string; // userName or "System Automation"
+  performedByRole?: string; // e.g. "kitchen", "owner", "admin"
+  tenantId?: string;
   timestamp: string; // ISO string
 }
 

@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import Card from '../../../components/ui/Card/Card';
 import { AlertTriangle, Check, X, ShoppingCart, Package } from 'lucide-react';
 
@@ -61,13 +62,21 @@ const IngredientAlertsPanel: React.FC<IIngredientAlertsPanelProps> = ({ menuItem
 
   return (
     <div className="space-y-2">
-      <h3 className="text-xs font-extrabold text-textPearl flex items-center space-x-1.5">
-        <Package className="w-3.5 h-3.5 text-orange-400" />
-        <span>Ingredient Alerts</span>
-        <span className="text-[9px] font-bold text-red-400 bg-red-500/10 border border-red-500/20 px-1.5 py-0.5 rounded-full">
-          {alerts.length}
-        </span>
-      </h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-extrabold text-textPearl flex items-center space-x-1.5">
+          <Package className="w-3.5 h-3.5 text-orange-400" />
+          <span>Ingredient Alerts</span>
+          <span className="text-[9px] font-bold text-red-400 bg-red-500/10 border border-red-500/20 px-1.5 py-0.5 rounded-full">
+            {alerts.length}
+          </span>
+        </h3>
+        <Link
+          to="/dashboard/kitchen/inventory"
+          className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold underline transition-colors"
+        >
+          View All Stock →
+        </Link>
+      </div>
 
       <div className="space-y-1.5">
         {alerts.map(alert => (

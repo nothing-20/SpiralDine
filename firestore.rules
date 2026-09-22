@@ -339,6 +339,35 @@ service cloud.firestore {
         allow write: if isAuth();
       }
 
+      // Canonical Inventory & Ingredients - accessible by authorized tenant staff (Owner, Admin, Manager, Kitchen)
+      match /inventory/{ingredientId} {
+        allow read: if isTenantStaff(tenantId);
+        allow create, update: if isTenantStaff(tenantId);
+        allow delete: if isTenantManager(tenantId);
+      }
+
+      // Stock Movements Audit Trail - append-only by authorized tenant staff, immutable once logged
+      match /stockMovements/{movementId} {
+        allow read, create: if isTenantStaff(tenantId);
+        allow update, delete: if false; // Strict immutable audit protection
+      }
+
+      // Kitchen & Restaurant Waste Logs
+      match /waste/{wasteId} {
+        allow read, create: if isTenantStaff(tenantId);
+        allow update, delete: if isTenantManager(tenantId);
+      }
+
+      // Purchase Suggestions & Recipes
+      match /purchaseSuggestions/{suggestionId} {
+        allow read, write: if isTenantStaff(tenantId);
+      }
+
+      match /recipes/{recipeId} {
+        allow read: if isTenantStaff(tenantId);
+        allow write: if isTenantManager(tenantId);
+      }
+
       // Universal rule for other management subcollections inside tenant workspace
       match /{subcollection}/{docId} {
         allow read: if isAuth() && (isTenant(tenantId) || isSuperAdmin());
