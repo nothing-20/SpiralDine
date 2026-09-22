@@ -103,6 +103,15 @@ export const CartPage: React.FC = () => {
   const handleTableChange = (table: ITableData) => {
     const tNum = String(table.tableNumber || table.number || '').replace(/^TBL-/i, '');
     const tId = table.tableId || table.id;
+    const prevTable = tableNumber || session?.tableNumber || session?.tableId;
+
+    if (prevTable && prevTable !== tNum && prevTable !== tId && activeTenantId) {
+      tableService.releaseTableBrowsing(activeTenantId, prevTable, {
+        customerId: user?.uid,
+        customerName: user?.displayName || undefined
+      }).catch(err => console.warn('Failed to release previous table browsing:', err));
+    }
+
     const newSession = {
       restaurantId: activeTenantId,
       tenantId: activeTenantId,

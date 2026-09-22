@@ -517,6 +517,18 @@ export const WaiterMatrix: React.FC = () => {
   }, [user?.tenantId, user?.uid]);
 
   useEffect(() => {
+    if (!user?.tenantId) return;
+
+    // Periodic sweep for abandoned browsing sessions older than 5 minutes
+    tableService.cleanupStaleBrowsingTables(user.tenantId, 5).catch(() => {});
+    const sweepInterval = setInterval(() => {
+      tableService.cleanupStaleBrowsingTables(user.tenantId, 5).catch(() => {});
+    }, 45000);
+
+    return () => clearInterval(sweepInterval);
+  }, [user?.tenantId]);
+
+  useEffect(() => {
     if (isLoading || !user?.tenantId || !shift.isActive) return;
 
     orders.forEach(o => {
@@ -2646,7 +2658,7 @@ export const WaiterMatrix: React.FC = () => {
                     }`}
                   >
                     <span className="w-2 h-2 rounded-full bg-[#16A34A]" />
-                    <span>Available ({tables.filter(t => isTableAvailable(t.status, t.isActive)).length})</span>
+                    <span>Available ({tables.filter(t => !findActiveOrderForTable(t, orders) && !isTableCleaning(t.status || (t as any).tableStatus) && !isTableBrowsing(t, 5)).length})</span>
                   </button>
 
                   <button
@@ -2658,7 +2670,7 @@ export const WaiterMatrix: React.FC = () => {
                     }`}
                   >
                     <span className="w-2 h-2 rounded-full bg-[#2563EB]" />
-                    <span>Browsing ({tables.filter(t => isTableBrowsing(t) || ((t.status === 'occupied' || (t as any).tableStatus === 'Occupied') && !findActiveOrderForTable(t, orders))).length})</span>
+                    <span>Browsing ({tables.filter(t => !findActiveOrderForTable(t, orders) && !isTableCleaning(t.status || (t as any).tableStatus) && isTableBrowsing(t, 5)).length})</span>
                   </button>
 
                   <button
@@ -2727,9 +2739,9 @@ export const WaiterMatrix: React.FC = () => {
                     const activeOrder = findActiveOrderForTable(t, orders);
                     const rawStatus = t.status || (t as any).tableStatus;
                     const isClean = isTableCleaning(rawStatus);
-                    const isAvail = isTableAvailable(rawStatus, t.isActive);
-                    const isBrowse = isTableBrowsing(t) || ((rawStatus === 'occupied' || rawStatus === 'Occupied') && !activeOrder);
                     const isDin = Boolean(activeOrder);
+                    const isBrowse = !isDin && !isClean && isTableBrowsing(t, 5);
+                    const isAvail = !isDin && !isClean && !isBrowse;
 
                     switch (floorFilter) {
                       case 'available': return isAvail;
@@ -2745,14 +2757,9 @@ export const WaiterMatrix: React.FC = () => {
                     const rawStatus = table.status || (table as any).tableStatus;
                     const activeOrderForTable = findActiveOrderForTable(table, orders);
                     const isOccupiedWithOrder = Boolean(activeOrderForTable);
-                    const isBrowsing = !isOccupiedWithOrder && (
-                      isTableBrowsing(table) || 
-                      table.subStatus === 'browsing' || 
-                      table.diningStatus === 'browsing' || 
-                      (isTableOccupied(rawStatus) && !activeOrderForTable)
-                    );
                     const isCleaning = isTableCleaning(rawStatus);
-                    const isAvailable = !isBrowsing && !isOccupiedWithOrder && !isCleaning && isTableAvailable(rawStatus, table.isActive);
+                    const isBrowsing = !isOccupiedWithOrder && !isCleaning && isTableBrowsing(table, 5);
+                    const isAvailable = !isOccupiedWithOrder && !isCleaning && !isBrowsing;
 
                     const orderStatus = activeOrderForTable ? (activeOrderForTable.status || '').toUpperCase() : '';
                     const isOrderPaid = activeOrderForTable ? (activeOrderForTable.paymentStatus || '').toLowerCase() === 'paid' : false;
@@ -2862,7 +2869,7 @@ export const WaiterMatrix: React.FC = () => {
                                 </div>
                                 <div className="text-xs font-bold text-[#18201D] truncate flex items-center gap-1.5">
                                   <User className="w-3.5 h-3.5 text-[#5F6875]" />
-                                  <span className="truncate">{customerName || 'Geetha Krishna Kumbha'}</span>
+                                  <span className="truncate">{customerName || 'Guest Diner'}</span>
                                 </div>
                                 <div className="text-[11px] text-[#71717A] flex items-center justify-between pt-0.5">
                                   <span>{seatedElapsedMins !== null ? `Seated ~${seatedElapsedMins}m ago` : 'Just arrived'}</span>

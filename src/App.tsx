@@ -9,6 +9,7 @@ import { CartProvider } from './context/CartContext';
 import { ThemeProvider } from './context/ThemeContext';
 import AppRoutes from './routes/AppRoutes';
 import { ToastContainer } from './components/ui/Toast/Toast';
+import { Toaster } from 'react-hot-toast';
 
 export const App: React.FC = () => {
   return (
@@ -25,6 +26,7 @@ export const App: React.FC = () => {
                     
                     {/* Global toast notification system overlay */}
                     <ToastContainer />
+                    <Toaster position="top-center" toastOptions={{ duration: 4000 }} />
                   </ThemeProvider>
                 </CartProvider>
               </CurrencyProvider>

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 
 import { isTableAvailable, isTableOccupied, isTableCleaning } from '../../../shared/domain/tables/types';
+import { useAuth } from '../../../context/AuthContext';
 
 export interface ITableData {
   id: string;
@@ -30,6 +31,13 @@ export interface ITableData {
   section?: string;
   status?: string;
   tableStatus?: string;
+  subStatus?: string;
+  diningStatus?: string;
+  lastActiveAt?: string;
+  customerName?: string;
+  customerId?: string;
+  activeOrderId?: string;
+  currentOrderId?: string;
   isActive?: boolean;
   branchId?: string;
 }
@@ -59,6 +67,8 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [selectedTable, setSelectedTable] = useState<ITableData | null>(null);
   const [reloadKey, setReloadKey] = useState<number>(0);
+
+  const { user } = useAuth();
 
   // Real-time listener for tables
   useEffect(() => {
@@ -90,6 +100,13 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
             section: data.section,
             status: data.status || data.tableStatus || 'Available',
             tableStatus: data.tableStatus || data.status,
+            subStatus: data.subStatus,
+            diningStatus: data.diningStatus,
+            lastActiveAt: data.lastActiveAt,
+            customerName: data.customerName,
+            customerId: data.customerId,
+            activeOrderId: data.activeOrderId || data.currentOrderId,
+            currentOrderId: data.currentOrderId,
             isActive: data.isActive !== false,
             branchId: data.branchId || 'main',
           });
@@ -138,13 +155,53 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
     };
   }, [isOpen, tenantId, branchId, currentTableId, reloadKey]);
 
+  const isTableOccupiedForUser = (t: ITableData): boolean => {
+    const rawStatus = (t.status || t.tableStatus || '').toLowerCase().trim();
+    if (isTableCleaning(rawStatus)) return false;
+
+    // Has actual active order placed
+    const hasOrder = Boolean(t.activeOrderId || t.currentOrderId);
+    if (hasOrder) return true;
+
+    // Confirmed dining status
+    if (rawStatus === 'dining') return true;
+
+    // Browsing sessions without orders are transient
+    const isBrowsingOnly = (
+      t.subStatus === 'browsing' || 
+      t.diningStatus === 'browsing' || 
+      rawStatus === 'browsing' ||
+      (rawStatus === 'occupied' && !hasOrder)
+    );
+
+    if (isBrowsingOnly) {
+      // If it's the current user's session, never lock them out
+      const isMyBrowsing = user && (
+        (t.customerId && t.customerId === user.uid) ||
+        (t.customerName && user.displayName && t.customerName.toLowerCase().trim() === user.displayName.toLowerCase().trim())
+      );
+      if (isMyBrowsing) return false;
+
+      // If it is stale (> 5 mins), treat as available
+      const timestamp = t.lastActiveAt;
+      if (timestamp && (Date.now() - new Date(timestamp).getTime()) > 5 * 60 * 1000) {
+        return false;
+      }
+
+      // Browsing without an order does not reserve the table exclusively
+      return false;
+    }
+
+    return isTableOccupied(t.status, t.subStatus, t.diningStatus);
+  };
+
   const availableCount = useMemo(() => {
-    return tables.filter(t => !isTableOccupied(t.status || t.tableStatus) && !isTableCleaning(t.status || t.tableStatus)).length;
-  }, [tables]);
+    return tables.filter(t => !isTableOccupiedForUser(t) && !isTableCleaning(t.status || t.tableStatus)).length;
+  }, [tables, user]);
 
   const occupiedCount = useMemo(() => {
-    return tables.filter(t => isTableOccupied(t.status || t.tableStatus)).length;
-  }, [tables]);
+    return tables.filter(t => isTableOccupiedForUser(t)).length;
+  }, [tables, user]);
 
   if (!isOpen) return null;
 
@@ -252,7 +309,7 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
                 {tables.map(table => {
                   const isSelected = selectedTable?.id === table.id;
                   const rawStatus = table.status || table.tableStatus || '';
-                  const isOccupied = isTableOccupied(rawStatus);
+                  const isOccupied = isTableOccupiedForUser(table);
                   const isCleaning = isTableCleaning(rawStatus);
 
                   return (

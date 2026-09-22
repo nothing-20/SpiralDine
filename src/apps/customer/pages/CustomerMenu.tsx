@@ -29,7 +29,8 @@ import {
   getActiveDiningSession, 
   saveActiveDiningSession, 
   generateSessionId, 
-  syncDiningSessionToFirestore 
+  syncDiningSessionToFirestore,
+  clearActiveDiningSession
 } from '../../../shared/utils/diningSession';
 import { tableService } from '../../../shared/services/tableService';
 
@@ -111,6 +112,12 @@ export const CustomerMenu: React.FC = () => {
 
   // Active Orders in this Session
   const [activeOrders, setActiveOrders] = useState<any[]>([]);
+  const activeOrdersRef = useRef<any[]>([]);
+  const orderPlacedRef = useRef(false);
+
+  useEffect(() => {
+    activeOrdersRef.current = activeOrders;
+  }, [activeOrders]);
 
   // Customization Modal State (for items with real variants / add-ons)
   const [customizingItem, setCustomizingItem] = useState<IMenuItem | null>(null);
@@ -178,7 +185,7 @@ export const CustomerMenu: React.FC = () => {
           tenantId,
           activeSession.tableNumber,
           activeSession.orderSource || 'app',
-          { name: user?.displayName || '', phone: user?.phoneNumber || '' }
+          { name: user?.displayName || '', phone: user?.phoneNumber || '', customerId: user?.uid || '' }
         ).catch(() => {});
       }
     }
@@ -187,12 +194,21 @@ export const CustomerMenu: React.FC = () => {
       const cleanParam = tableParam.replace(/^TBL-/i, '');
       setTableNumber(cleanParam);
 
+      // If user was previously browsing a different table in activeSession, release it
+      if (activeSession && activeSession.tableNumber && activeSession.tableNumber !== cleanParam) {
+        tableService.releaseTableBrowsing(
+          tenantId,
+          activeSession.tableNumber,
+          { name: user?.displayName || '', phone: user?.phoneNumber || '', customerId: user?.uid || '' }
+        ).catch(() => {});
+      }
+
       // Immediately notify waiter that customer is seated and viewing menu
       tableService.setTableBrowsing(
         tenantId,
         cleanParam,
         searchParams.get('source') === 'qr' ? 'qr' : 'app',
-        { name: user?.displayName || '', phone: user?.phoneNumber || '' }
+        { name: user?.displayName || '', phone: user?.phoneNumber || '', customerId: user?.uid || '' }
       ).catch(() => {});
 
       if (!activeSession || activeSession.tableNumber !== cleanParam) {
@@ -347,12 +363,30 @@ export const CustomerMenu: React.FC = () => {
       deviceId: localStorage.getItem('restaurantos_device_id') || 'unknown'
     }).catch(() => {});
 
+    // Periodic heartbeat to keep browsing fresh while actively looking at menu
+    const targetTableNum = tableParam ? tableParam.replace(/^TBL-/i, '') : activeSession?.tableNumber;
+    const heartbeatTimer = setInterval(() => {
+      if (targetTableNum) {
+        tableService.touchTableBrowsing(tenantId, targetTableNum).catch(() => {});
+      }
+    }, 45000);
+
     return () => {
       unsubCats();
       unsubItems();
       unsubVariants();
       unsubAddons();
       unsubCombos();
+      clearInterval(heartbeatTimer);
+
+      // If diner leaves the menu without placing an order, release the browsing table
+      if (targetTableNum && !orderPlacedRef.current && activeOrdersRef.current.length === 0) {
+        tableService.releaseTableBrowsing(
+          tenantId,
+          targetTableNum,
+          { name: user?.displayName || '', phone: user?.phoneNumber || '', customerId: user?.uid || '' }
+        ).catch(() => {});
+      }
     };
   }, [tenantId, searchParams]);
 
@@ -948,6 +982,7 @@ export const CustomerMenu: React.FC = () => {
       setPlacedOrderPrepTime(`${maxPrep} mins`);
 
       setPlacedOrderId(orderId);
+      orderPlacedRef.current = true;
       setIsMobileCartOpen(false);
       clearCart();
       toast.success('Order successfully sent to kitchen!');
@@ -1124,7 +1159,17 @@ export const CustomerMenu: React.FC = () => {
                 </div>
               )}
               <button
-                onClick={() => navigate(`/customer/restaurant/${tenantId}`)}
+                onClick={() => {
+                  if (tenantId && tableNumber && !orderPlacedRef.current && activeOrders.length === 0) {
+                    tableService.releaseTableBrowsing(
+                      tenantId,
+                      tableNumber,
+                      { name: user?.displayName || '', phone: user?.phoneNumber || '', customerId: user?.uid || '' }
+                    ).catch(() => {});
+                    clearActiveDiningSession();
+                  }
+                  navigate(`/customer/restaurant/${tenantId}`);
+                }}
                 className="bg-white/90 hover:bg-white text-[#202124] hover:text-[#C85A3F] px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1 cursor-pointer shadow-sm"
               >
                 <span>View Restaurant</span>
