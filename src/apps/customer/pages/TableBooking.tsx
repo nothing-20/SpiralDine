@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { collection, getDocs, doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { 
   Calendar, Users, Clock, CheckCircle2, ArrowLeft, MapPin, Sparkles, 
   Search, AlertCircle, Trash2, Edit2, Navigation, Lock, Utensils, 
-  ShieldCheck, Heart, Repeat, FileText, Star
+  ShieldCheck, Heart, Repeat, FileText, Star, LayoutGrid, UserCheck,
+  ChevronRight, ExternalLink
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useToastStore } from '../../../components/ui/Toast/Toast';
@@ -127,6 +128,111 @@ export const TableBooking: React.FC = () => {
   // Processing & Success states
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [bookingConfirmed, setBookingConfirmed] = useState<any | null>(null);
+
+  // Active Customer Reservations State (persisted & synced real-time)
+  const [customerReservations, setCustomerReservations] = useState<any[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('spiral_dine_customer_reservations') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  // Keep reservations visible until dining is completed/finished or until the booking is cancelled/rejected
+  const activeReservations = useMemo(() => {
+    return customerReservations.filter((res: any) => {
+      const s = (res?.status || 'pending').toLowerCase();
+      return (
+        s !== 'completed' &&
+        s !== 'finished' &&
+        s !== 'cancelled' &&
+        s !== 'rejected'
+      );
+    });
+  }, [customerReservations]);
+
+  // Real-time listener for customer reservations (both Firestore customer records and central restaurant updates)
+  useEffect(() => {
+    const unsubs: (() => void)[] = [];
+    const localKey = 'spiral_dine_customer_reservations';
+
+    // 1. Initial read from local storage
+    let initialList: any[] = [];
+    try {
+      initialList = JSON.parse(localStorage.getItem(localKey) || '[]');
+      if (Array.isArray(initialList) && initialList.length > 0) {
+        setCustomerReservations(initialList);
+      }
+    } catch (_) {}
+
+    // 2. Real-time Firestore customer reservations listener
+    if (user?.uid) {
+      try {
+        const custColRef = collection(db, 'customers', user.uid, 'reservations');
+        const unsubCust = onSnapshot(custColRef, (snapshot) => {
+          const fetched: any[] = [];
+          snapshot.forEach(d => {
+            fetched.push({ id: d.id, ...d.data() });
+          });
+          if (fetched.length > 0) {
+            setCustomerReservations(prev => {
+              const map = new Map<string, any>();
+              prev.forEach(item => { if (item?.id) map.set(item.id, item); });
+              fetched.forEach(item => { if (item?.id) map.set(item.id, { ...(map.get(item.id) || {}), ...item }); });
+              const merged = Array.from(map.values());
+              try {
+                localStorage.setItem(localKey, JSON.stringify(merged));
+              } catch (_) {}
+              return merged;
+            });
+          }
+        }, (err) => {
+          console.warn('[TableBooking] Customer reservations listener error:', err);
+        });
+        unsubs.push(unsubCust);
+      } catch (e) {
+        console.warn('[TableBooking] Error setting customer reservations listener:', e);
+      }
+    }
+
+    // 3. For every reservation in state/local storage, subscribe directly to the central restaurant reservation doc
+    // This guarantees that table assignments, waiter allocations, and acceptance from the Owner Dashboard reflect in real time!
+    const subscribedDocIds = new Set<string>();
+    const attachRestaurantDocListener = (resItem: any) => {
+      if (!resItem?.id || !resItem?.restaurantId || subscribedDocIds.has(resItem.id)) return;
+      subscribedDocIds.add(resItem.id);
+
+      try {
+        const restDocRef = doc(db, 'restaurants', resItem.restaurantId, 'reservations', resItem.id);
+        const unsubRestDoc = onSnapshot(restDocRef, (snap) => {
+          if (snap.exists()) {
+            const data = { id: snap.id, ...snap.data() };
+            setCustomerReservations(prev => {
+              const updated = prev.map(item => item.id === data.id ? { ...item, ...data } : item);
+              if (!prev.some(item => item.id === data.id)) {
+                updated.unshift(data);
+              }
+              try {
+                localStorage.setItem(localKey, JSON.stringify(updated));
+              } catch (_) {}
+              return updated;
+            });
+          }
+        }, (err) => {
+          console.warn('[TableBooking] Restaurant reservation doc listener error:', err);
+        });
+        unsubs.push(unsubRestDoc);
+      } catch (e) {
+        console.warn('[TableBooking] Failed to attach rest reservation listener:', e);
+      }
+    };
+
+    initialList.forEach(attachRestaurantDocListener);
+
+    return () => {
+      unsubs.forEach(u => u());
+    };
+  }, [user?.uid]);
 
   // Today's minimum selectable date
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
@@ -367,6 +473,12 @@ export const TableBooking: React.FC = () => {
         localStorage.setItem(localKey, JSON.stringify(updated));
       } catch (_) {}
 
+      // Update in-memory customer reservations state immediately
+      setCustomerReservations(prev => {
+        const filtered = prev.filter((item: any) => item.id !== bookingId);
+        return [bookingPayload, ...filtered];
+      });
+
       setBookingConfirmed(bookingPayload);
       showFeedback(isModifying ? 'Reservation successfully updated!' : 'Reservation successfully requested!', 'success');
       setIsModifying(false);
@@ -376,6 +488,82 @@ export const TableBooking: React.FC = () => {
       showFeedback(e?.message || 'Failed to register reservation details. Please try again.', 'error');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Modify active reservation from list (prefills form and scrolls to it)
+  const handleModifyActiveReservation = (res: any) => {
+    setIsModifying(true);
+    setModifyingBookingId(res.id);
+    
+    // Find restaurant record or build fallback
+    const matched = allRestaurants.find(r => r.id === res.restaurantId);
+    if (matched) {
+      setSelectedRest(matched);
+    } else {
+      setSelectedRest({
+        id: res.restaurantId,
+        name: res.restaurantName || 'Restaurant',
+        cuisine: 'Multi-Cuisine',
+        address: res.directions || '',
+        area: '',
+        city: 'Hyderabad',
+        maxGuests: 12,
+        availableTimeSlots: ['12:00 PM', '1:00 PM', '2:30 PM', '7:00 PM', '8:30 PM', '9:30 PM']
+      });
+    }
+    setGuestsCount(res.guests || 2);
+    setBookDate(res.date || todayStr);
+    setSelectedTime(res.time || '');
+    setSeatingPreference(res.seatingPreference || '');
+    setSpecialNotes(res.specialNotes || '');
+    setBookingConfirmed(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    showFeedback('Reservation details loaded. Update your preferred slot.', 'success');
+  };
+
+  // Cancel an active reservation directly from the active reservations card
+  const handleCancelActiveReservation = async (res: any) => {
+    const isConfirmed = window.confirm(`Are you sure you want to cancel your reservation #${res.bookingId || res.id} at ${res.restaurantName}?`);
+    if (!isConfirmed) return;
+
+    try {
+      const cancelPayload = { 
+        status: 'Cancelled', 
+        cancelledAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      // 1. Update in customer/user records
+      if (user?.uid) {
+        await Promise.allSettled([
+          updateDoc(doc(db, 'customers', user.uid, 'reservations', res.id), cancelPayload),
+          updateDoc(doc(db, 'users', user.uid, 'reservations', res.id), cancelPayload)
+        ]);
+      }
+
+      // 2. Update in restaurant / tenant records
+      if (res.restaurantId) {
+        await Promise.allSettled([
+          updateDoc(doc(db, 'restaurants', res.restaurantId, 'reservations', res.id), cancelPayload),
+          updateDoc(doc(db, 'tenants', res.restaurantId, 'reservations', res.id), cancelPayload)
+        ]);
+      }
+
+      // 3. Update localStorage
+      try {
+        const localKey = 'spiral_dine_customer_reservations';
+        const existing = JSON.parse(localStorage.getItem(localKey) || '[]');
+        const updated = existing.map((item: any) => item.id === res.id ? { ...item, ...cancelPayload } : item);
+        localStorage.setItem(localKey, JSON.stringify(updated));
+      } catch (_) {}
+
+      // 4. Update local state
+      setCustomerReservations(prev => prev.map((item: any) => item.id === res.id ? { ...item, ...cancelPayload } : item));
+      showFeedback('Reservation has been cancelled.', 'success');
+    } catch (e: any) {
+      console.error('[TableBooking] Error cancelling reservation:', e);
+      showFeedback('Failed to cancel reservation. Please try again.', 'error');
     }
   };
 
@@ -418,7 +606,8 @@ export const TableBooking: React.FC = () => {
         const updated = existing.filter((item: any) => item.id !== bookingConfirmed.id);
         localStorage.setItem(localKey, JSON.stringify(updated));
       } catch (_) {}
-      
+
+      setCustomerReservations(prev => prev.filter((item: any) => item.id !== bookingConfirmed.id));
       showFeedback('Reservation booking cancelled.', 'success');
       setBookingConfirmed(null);
       setSelectedRest(null);
@@ -633,7 +822,235 @@ export const TableBooking: React.FC = () => {
 
       {/* PHASE 1: SEARCH & CHOOSE RESTAURANT (When no restaurant is selected) */}
       {!selectedRest ? (
-        <div className="space-y-5">
+        <div className="space-y-6">
+
+          {/* ACTIVE & UPCOMING RESERVATIONS BANNER & CARDS */}
+          {activeReservations.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#2E8B57] opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#2E8B57]"></span>
+                  </span>
+                  <h2 className="text-base sm:text-lg font-display font-extrabold text-[#202124]">
+                    Your Active Reservations
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#F3E8DF] text-[#C85A3F] border border-[#E5DCD5]">
+                    {activeReservations.length} {activeReservations.length === 1 ? 'Booking' : 'Bookings'}
+                  </span>
+                </div>
+                <span className="text-[11px] font-bold text-[#756B64] hidden sm:inline-block">
+                  Live synced with Restaurant Host
+                </span>
+              </div>
+
+              <div className="space-y-4">
+                {activeReservations.map((res: any) => {
+                  const status = (res.status || 'Pending').toLowerCase();
+                  const isConfirmed = status === 'confirmed';
+                  const isSeated = status === 'seated';
+                  const isArrived = status === 'arrived';
+                  const isModified = status === 'modified';
+
+                  return (
+                    <div 
+                      key={res.id} 
+                      className="bg-white border-2 border-[#E5DCD5] hover:border-[#C85A3F]/50 rounded-3xl p-5 sm:p-6 shadow-xs hover:shadow-md transition-all space-y-4 text-left"
+                    >
+                      {/* Top Bar: Restaurant Name, Booking Ref, Status Pill */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#F3E8DF]">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-base sm:text-lg font-extrabold text-[#202124] tracking-tight">
+                              {res.restaurantName || 'Restaurant'}
+                            </h3>
+                            <span className="text-xs font-mono font-extrabold text-[#C85A3F] bg-[#F3E8DF] px-2.5 py-0.5 rounded-lg border border-[#E5DCD5]">
+                              Ref: {res.bookingId || res.id}
+                            </span>
+                          </div>
+                          {res.directions && (
+                            <p className="text-xs text-[#756B64] font-medium flex items-center gap-1.5 mt-1">
+                              <MapPin className="w-3.5 h-3.5 text-[#C85A3F] shrink-0" />
+                              <span className="truncate max-w-md">{res.directions}</span>
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Status Badge */}
+                        <div className="shrink-0">
+                          {isConfirmed && (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wide bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Confirmed by Host</span>
+                            </span>
+                          )}
+                          {isSeated && (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wide bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs">
+                              <span className="relative flex h-2 w-2">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-600"></span>
+                              </span>
+                              <span>Party Seated · Dining Active</span>
+                            </span>
+                          )}
+                          {isArrived && (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wide bg-blue-50 text-blue-700 border border-blue-200 shadow-2xs">
+                              <UserCheck className="w-3.5 h-3.5 text-blue-600" />
+                              <span>Guest Arrived</span>
+                            </span>
+                          )}
+                          {!isConfirmed && !isSeated && !isArrived && (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wide bg-amber-50 text-amber-800 border border-amber-200 shadow-2xs">
+                              <Clock className="w-3.5 h-3.5 text-amber-600" />
+                              <span>{isModified ? 'Modified · Awaiting Confirmation' : 'Awaiting Confirmation'}</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 4 Detail Badges */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {/* 1. Date & Time */}
+                        <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl p-3 space-y-1">
+                          <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider flex items-center gap-1">
+                            <Calendar className="w-3 h-3 text-[#C85A3F]" />
+                            <span>Date & Time</span>
+                          </span>
+                          <p className="text-xs font-extrabold text-[#202124]">
+                            {formatDisplayDate(res.date)}
+                          </p>
+                          <p className="text-[11px] font-bold text-[#C85A3F]">
+                            {res.time}
+                          </p>
+                        </div>
+
+                        {/* 2. Party Size */}
+                        <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl p-3 space-y-1">
+                          <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider flex items-center gap-1">
+                            <Users className="w-3 h-3 text-[#C85A3F]" />
+                            <span>Party Size</span>
+                          </span>
+                          <p className="text-xs font-extrabold text-[#202124]">
+                            {res.guests || 2} {Number(res.guests) === 1 ? 'Guest' : 'Guests'}
+                          </p>
+                          <p className="text-[11px] text-[#756B64] font-medium">
+                            {res.seatingPreference ? `${res.seatingPreference} Seating` : 'Reserved Table'}
+                          </p>
+                        </div>
+
+                        {/* 3. Table Assigned */}
+                        <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl p-3 space-y-1">
+                          <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider flex items-center gap-1">
+                            <LayoutGrid className="w-3 h-3 text-[#C85A3F]" />
+                            <span>Assigned Table</span>
+                          </span>
+                          <p className="text-xs font-extrabold text-[#202124]">
+                            {res.assignedTableNumber ? `Table ${res.assignedTableNumber}` : (res.assignedTableId || 'Allocated on arrival')}
+                          </p>
+                          <p className="text-[11px] text-[#756B64] font-medium">
+                            {res.assignedTableNumber ? 'Table Assigned' : 'Host allocates upon arrival'}
+                          </p>
+                        </div>
+
+                        {/* 4. Staff Waiter */}
+                        <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl p-3 space-y-1">
+                          <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider flex items-center gap-1">
+                            <UserCheck className="w-3 h-3 text-[#C85A3F]" />
+                            <span>Staff Waiter</span>
+                          </span>
+                          <p className="text-xs font-extrabold text-[#202124] truncate">
+                            {res.assignedWaiterName || 'Unassigned'}
+                          </p>
+                          <p className="text-[11px] text-[#756B64] font-medium">
+                            {res.assignedWaiterName ? 'Dedicated Server' : 'Floor service team'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Special Request */}
+                      {res.specialNotes && (
+                        <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl p-3 text-xs text-[#756B64] flex items-start gap-2">
+                          <FileText className="w-3.5 h-3.5 text-[#C85A3F] shrink-0 mt-0.5" />
+                          <p>
+                            <strong className="text-[#202124]">Special Note:</strong> {res.specialNotes}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Card Footer Actions */}
+                      <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-[#F3E8DF]">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {res.lat && res.lng && (
+                            <a 
+                              href={`https://www.google.com/maps/search/?api=1&query=${res.lat},${res.lng}`}
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-xs font-bold text-[#756B64] hover:text-[#C85A3F] bg-[#FCFAF7] hover:bg-white border border-[#E5DCD5] py-1.5 px-3 rounded-xl transition-colors"
+                            >
+                              <Navigation className="w-3.5 h-3.5 text-[#C85A3F]" />
+                              <span>Get Directions</span>
+                            </a>
+                          )}
+                          <button 
+                            type="button"
+                            onClick={() => navigate(`/customer/restaurant/${res.restaurantId}`)}
+                            className="inline-flex items-center gap-1 text-xs font-bold text-[#756B64] hover:text-[#202124] bg-[#FCFAF7] hover:bg-white border border-[#E5DCD5] py-1.5 px-3 rounded-xl transition-colors cursor-pointer"
+                          >
+                            <Utensils className="w-3.5 h-3.5 text-[#C85A3F]" />
+                            <span>View Restaurant</span>
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2 ml-auto">
+                          {isSeated && (
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/customer/restaurant/${res.restaurantId}`)}
+                              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-[#2E8B57] hover:bg-[#247045] text-white font-extrabold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                            >
+                              <Utensils className="w-3.5 h-3.5" />
+                              <span>View Menu & Orders</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleModifyActiveReservation(res)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-[#FCFAF7] hover:bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 text-[#202124] font-bold text-xs rounded-xl shadow-2xs transition-colors cursor-pointer"
+                          >
+                            <Edit2 className="w-3.5 h-3.5 text-[#C85A3F]" />
+                            <span>Modify</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCancelActiveReservation(res)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 font-bold text-xs rounded-xl shadow-2xs transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Cancel</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Sub-header for browsing more restaurants */}
+              <div className="pt-3 pb-1 border-t border-[#E5DCD5] flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                <div>
+                  <h3 className="text-sm font-extrabold text-[#202124]">
+                    Reserve Another Table or Explore Restaurants
+                  </h3>
+                  <p className="text-[11px] text-[#756B64]">
+                    Browse all available dining places across Hyderabad
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SEARCH BAR */}
           <div className="relative bg-white border border-[#E5DCD5] rounded-2xl shadow-xs focus-within:border-[#C85A3F]/60 transition-colors">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#756B64]" />
             <input 
