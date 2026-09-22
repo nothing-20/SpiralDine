@@ -37,7 +37,8 @@ import {
   Bell,
   FileSpreadsheet,
   ArrowLeftRight,
-  ShieldCheck
+  ShieldCheck,
+  UtensilsCrossed
 } from 'lucide-react';
 
 interface ISidebarLink {
@@ -147,7 +148,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
           badge: activeCookingCount > 0 ? activeCookingCount : undefined 
         },
         { to: '/dashboard/kitchen/inventory', label: 'Inventory', icon: Package },
-        { to: '/dashboard/kitchen/menu-control', label: 'Out of Stock', icon: PackageX },
+        { to: '/dashboard/kitchen/menu-control', label: 'Menu Operations', icon: PackageX },
         { to: 'divider-1', label: '', icon: () => null },
         { to: '/dashboard/kitchen/order-history', label: 'Order History', icon: History },
         { to: '/dashboard/kitchen/item-history', label: 'Item History', icon: ListOrdered },
@@ -175,6 +176,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
           icon: Utensils, 
           badge: activeCookingCount > 0 ? activeCookingCount : undefined 
         },
+        { to: '/dashboard/waiter/menu-availability', label: 'Menu Availability', icon: UtensilsCrossed },
         { to: 'divider-waiter-1', label: '', icon: () => null },
         { to: '/dashboard/waiter/billing', label: 'Billing', icon: DollarSign },
         { to: '/dashboard/waiter/order-history', label: 'Order History', icon: History },

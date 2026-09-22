@@ -316,28 +316,46 @@ service cloud.firestore {
         allow write: if isTenantStaff(tenantId);
       }
 
-      // Customer Service Requests & Dining Sessions
-      match /waiterRequests/{reqId} {
-        allow read: if true;
-        allow create: if true;
-        allow update: if isAuth();
-      }
+    // Helper to verify kitchen operational availability updates (price, name, category, publishing immutable)
+    function isKitchenAvailabilityUpdate(tenantId) {
+      return isTenantStaff(tenantId) &&
+        getUserData().get('role', '') in ['kitchen', 'chef'] &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'isAvailable', 'available', 'availability', 'availableServings', 
+          'lowStockThreshold', 'status', 'updatedAt', 'updatedBy'
+        ]) &&
+        request.resource.data.get('price', 0) == resource.data.get('price', 0) &&
+        request.resource.data.get('name', '') == resource.data.get('name', '') &&
+        request.resource.data.get('categoryId', '') == resource.data.get('categoryId', '') &&
+        request.resource.data.get('isPublished', true) == resource.data.get('isPublished', true);
+    }
 
-      match /requests/{reqId} {
-        allow read: if true;
-        allow create: if true;
-        allow update: if isAuth();
-      }
+    // Customer Service Requests & Dining Sessions
+    match /waiterRequests/{reqId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if isAuth();
+    }
 
-      match /diningSessions/{sessionId} {
-        allow read, create, update: if true;
-      }
+    match /requests/{reqId} {
+      allow read: if true;
+      allow create: if true;
+      allow update: if isAuth();
+    }
 
-      // Specific rule to match nested menu subcollections (categories, items, variants, addons)
-      match /menu/{menuDoc}/{nestedSubcollection}/{nestedDocId} {
-        allow read: if true;
-        allow write: if isAuth();
-      }
+    match /diningSessions/{sessionId} {
+      allow read, create, update: if true;
+    }
+
+    // Canonical Menu Subcollections (categories, items, variants, addons, combos)
+    // Read: public for diner viewing & staff operations
+    // Create/Delete: restricted to tenant management (Owner, Admin, Manager)
+    // Update: management has full control; Kitchen staff can only update operational availability
+    match /menu/{menuDoc}/{nestedSubcollection}/{nestedDocId} {
+      allow read: if true;
+      allow create, delete: if isTenantManager(tenantId);
+      allow update: if isTenantManager(tenantId) || isKitchenAvailabilityUpdate(tenantId);
+    }
 
       // Canonical Inventory & Ingredients - accessible by authorized tenant staff (Owner, Admin, Manager, Kitchen)
       match /inventory/{ingredientId} {

@@ -48,9 +48,59 @@ export interface IMenuItem {
   recommended?: boolean;
   prepTime?: number;
   vegetarian?: boolean;
+  isPublished?: boolean; // Customer-facing visibility
+  published?: boolean; // for backward compatibility
   flags?: {
     vegetarian?: boolean;
     bestseller?: boolean;
     recommended?: boolean;
+    published?: boolean;
   };
+}
+
+export interface IMenuVariant {
+  id: string;
+  itemId: string;
+  name: string; // e.g. 'Small', 'Medium', 'Large'
+  price: number; // in cents or direct currency units
+  priceOffset?: number; // relative to base item price
+  isAvailable: boolean;
+  available?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface IMenuAddon {
+  id: string;
+  itemId?: string; // specific item or optional if global
+  name: string; // e.g. 'Extra Cheese', 'Truffle Sauce'
+  price: number;
+  isAvailable: boolean;
+  available?: boolean;
+  isGlobal?: boolean;
+  applicableItems?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface IMenuComboItem {
+  itemId: string;
+  itemName?: string;
+  quantity: number;
+}
+
+export interface IMenuCombo {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  items: IMenuComboItem[];
+  image?: string;
+  imageUrl?: string;
+  isAvailable: boolean;
+  available?: boolean;
+  isPublished: boolean;
+  published?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
