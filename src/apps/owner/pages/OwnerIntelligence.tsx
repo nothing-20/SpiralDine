@@ -496,7 +496,7 @@ export const OwnerIntelligence: React.FC = () => {
 
             {/* Sandbox Response Output JSON preview */}
             {sandboxResponse && (
-              <div className="bg-slate-950/80 border border-slate-855 rounded-2xl p-4.5 space-y-3.5 text-xs">
+              <div className="bg-slate-950/80 border border-slate-855 rounded-2xl p-5 space-y-3.5 text-xs">
                 <div className="flex justify-between items-center border-b border-slate-850/60 pb-2.5">
                   <span className="text-[10px] text-emerald-450 font-bold uppercase tracking-wider flex items-center gap-1.5">
                     <CheckCircle className="w-4 h-4 text-emerald-450" />

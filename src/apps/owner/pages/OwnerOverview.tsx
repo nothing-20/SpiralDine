@@ -2290,48 +2290,56 @@ export const OwnerOverview: React.FC = () => {
 
           {/* Stats KPI cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white border border-[#E5E0D9] rounded-2xl p-4.5 shadow-xs relative overflow-hidden text-left hover:border-slate-400 transition-colors">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-[#7B8794] font-extrabold uppercase tracking-wider">Total Bookings</span>
-                <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700">
+            <div className="bg-white border border-[#E5E0D9] rounded-2xl p-5 shadow-xs text-left hover:border-slate-400 transition-colors flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10.5px] text-[#7B8794] font-extrabold uppercase tracking-wider">Total Bookings</span>
+                <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700 shrink-0">
                   <Calendar className="w-4 h-4" />
                 </div>
               </div>
-              <h3 className="text-2xl font-display font-black text-[#17202A] mt-1.5">{reservations.length}</h3>
-              <p className="text-[11px] text-[#7B8794] mt-0.5 font-medium">All registered table bookings</p>
+              <div className="mt-3">
+                <h3 className="text-2xl sm:text-3xl font-display font-black text-[#17202A]">{reservations.length}</h3>
+                <p className="text-[11px] text-[#7B8794] mt-0.5 font-medium">All registered table bookings</p>
+              </div>
             </div>
 
-            <div className="bg-white border border-amber-200/90 rounded-2xl p-4.5 shadow-xs relative overflow-hidden text-left bg-gradient-to-br from-white to-amber-50/40 hover:border-amber-300 transition-colors">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-amber-700 font-extrabold uppercase tracking-wider">Pending Requests</span>
-                <div className="w-8 h-8 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700">
+            <div className="bg-white border border-amber-200/90 rounded-2xl p-5 shadow-xs text-left bg-gradient-to-br from-white to-amber-50/40 hover:border-amber-300 transition-colors flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10.5px] text-amber-700 font-extrabold uppercase tracking-wider">Pending Requests</span>
+                <div className="w-8 h-8 rounded-xl bg-amber-100 flex items-center justify-center text-amber-700 shrink-0">
                   <Clock className="w-4 h-4" />
                 </div>
               </div>
-              <h3 className="text-2xl font-display font-black text-amber-600 mt-1.5">{reservations.filter(r => r.status === 'Pending').length}</h3>
-              <p className="text-[11px] text-amber-800/80 mt-0.5 font-medium">Awaiting host confirmation</p>
+              <div className="mt-3">
+                <h3 className="text-2xl sm:text-3xl font-display font-black text-amber-600">{reservations.filter(r => r.status === 'Pending').length}</h3>
+                <p className="text-[11px] text-amber-800/80 mt-0.5 font-medium">Awaiting host confirmation</p>
+              </div>
             </div>
 
-            <div className="bg-white border border-emerald-200/90 rounded-2xl p-4.5 shadow-xs relative overflow-hidden text-left bg-gradient-to-br from-white to-emerald-50/40 hover:border-emerald-300 transition-colors">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-emerald-700 font-extrabold uppercase tracking-wider">Confirmed & Seated</span>
-                <div className="w-8 h-8 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700">
+            <div className="bg-white border border-emerald-200/90 rounded-2xl p-5 shadow-xs text-left bg-gradient-to-br from-white to-emerald-50/40 hover:border-emerald-300 transition-colors flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10.5px] text-emerald-700 font-extrabold uppercase tracking-wider">Confirmed & Seated</span>
+                <div className="w-8 h-8 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-700 shrink-0">
                   <CheckCircle2 className="w-4 h-4" />
                 </div>
               </div>
-              <h3 className="text-2xl font-display font-black text-emerald-600 mt-1.5">{reservations.filter(r => r.status === 'Seated').length}</h3>
-              <p className="text-[11px] text-emerald-800/80 mt-0.5 font-medium">Currently dining in restaurant</p>
+              <div className="mt-3">
+                <h3 className="text-2xl sm:text-3xl font-display font-black text-emerald-600">{reservations.filter(r => r.status === 'Seated').length}</h3>
+                <p className="text-[11px] text-emerald-800/80 mt-0.5 font-medium">Currently dining in restaurant</p>
+              </div>
             </div>
 
-            <div className="bg-white border border-[#E5DCD5] rounded-2xl p-4.5 shadow-xs relative overflow-hidden text-left bg-gradient-to-br from-white to-[#F3E8DF]/30 hover:border-[#C85A3F]/50 transition-colors">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-[#C85A3F] font-extrabold uppercase tracking-wider">Upcoming Today</span>
-                <div className="w-8 h-8 rounded-xl bg-[#F3E8DF] flex items-center justify-center text-[#C85A3F]">
+            <div className="bg-white border border-[#E5DCD5] rounded-2xl p-5 shadow-xs text-left bg-gradient-to-br from-white to-[#F3E8DF]/30 hover:border-[#C85A3F]/50 transition-colors flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10.5px] text-[#C85A3F] font-extrabold uppercase tracking-wider">Upcoming Today</span>
+                <div className="w-8 h-8 rounded-xl bg-[#F3E8DF] flex items-center justify-center text-[#C85A3F] shrink-0">
                   <CalendarDays className="w-4 h-4" />
                 </div>
               </div>
-              <h3 className="text-2xl font-display font-black text-[#C85A3F] mt-1.5">{reservations.filter(r => r.status === 'Confirmed' || r.status === 'Arrived').length}</h3>
-              <p className="text-[11px] text-[#7B8794] mt-0.5 font-medium">Expected guest arrivals</p>
+              <div className="mt-3">
+                <h3 className="text-2xl sm:text-3xl font-display font-black text-[#C85A3F]">{reservations.filter(r => r.status === 'Confirmed' || r.status === 'Arrived').length}</h3>
+                <p className="text-[11px] text-[#7B8794] mt-0.5 font-medium">Expected guest arrivals</p>
+              </div>
             </div>
           </div>
 

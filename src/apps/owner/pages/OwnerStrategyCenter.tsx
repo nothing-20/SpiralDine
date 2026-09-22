@@ -369,7 +369,7 @@ export const OwnerStrategyCenter: React.FC = () => {
               </div>
             ) : (
               strategyPlans.filter(p => p.category === activeTab).map((plan: any) => (
-              <div key={plan.id} className="bg-slate-950/40 p-4.5 border border-slate-855 rounded-2xl flex flex-col justify-between space-y-4 select-none">
+              <div key={plan.id} className="bg-slate-950/40 p-5 border border-slate-855 rounded-2xl flex flex-col justify-between space-y-4 select-none">
                 <div className="space-y-2">
                   <div className="flex justify-between items-start gap-3">
                     <strong className="text-textPearl font-bold text-sm block leading-tight">{plan.title}</strong>
