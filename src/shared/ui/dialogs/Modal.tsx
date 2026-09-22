@@ -14,6 +14,7 @@ export interface IModalProps {
   contentClassName?: string;
   size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl' | '6xl' | '7xl' | 'max';
   closeAriaLabel?: string;
+  variant?: 'dark' | 'light';
 }
 
 export const Modal: React.FC<IModalProps> = ({
@@ -26,7 +27,8 @@ export const Modal: React.FC<IModalProps> = ({
   className,
   contentClassName,
   size = 'lg',
-  closeAriaLabel = 'Close dialog'
+  closeAriaLabel = 'Close dialog',
+  variant = 'dark'
 }) => {
   // Prevent background scrolling while modal is open & listen for Escape key
   useEffect(() => {
@@ -63,11 +65,13 @@ export const Modal: React.FC<IModalProps> = ({
     max: 'max-w-[95vw]'
   };
 
+  const isLight = variant === 'light';
+
   const modalNode = (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 md:p-6 overflow-hidden">
       {/* Background Overlay */}
       <div 
-        className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm transition-opacity" 
+        className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm transition-opacity" 
         onClick={onClose} 
       />
 
@@ -77,36 +81,61 @@ export const Modal: React.FC<IModalProps> = ({
         aria-modal="true"
         aria-labelledby={title && !hideHeader ? "modal-dialog-title" : undefined}
         className={cn(
-          "w-full bg-slate-900 border border-slate-800 backdrop-blur-md shadow-2xl rounded-2xl relative z-10 flex flex-col max-h-[min(90vh,860px)] animate-in fade-in zoom-in-95 duration-200 overflow-hidden",
+          "w-full shadow-2xl relative z-10 flex flex-col max-h-[min(90vh,860px)] animate-in fade-in zoom-in-95 duration-200 overflow-hidden",
+          isLight
+            ? "bg-white border border-[#E5E0D9] rounded-3xl text-[#17202A]"
+            : "bg-slate-900 border border-slate-800 backdrop-blur-md rounded-2xl text-slate-100",
           sizeClasses[size] || 'max-w-lg',
           className
         )}
       >
         {/* Fixed Header (omitted if hideHeader is true or title is explicitly empty) */}
         {!hideHeader && title !== '' && (
-          <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-slate-800/60 shrink-0">
-            <h3 id="modal-dialog-title" className="font-display font-bold text-base sm:text-lg text-textPearl pr-3">
+          <div className={cn(
+            "flex items-center justify-between px-5 sm:px-6 py-4 shrink-0",
+            isLight
+              ? "border-b border-[#F0EBE4] bg-[#FCFAF7]"
+              : "border-b border-slate-800/60"
+          )}>
+            <h3 id="modal-dialog-title" className={cn(
+              "font-display font-extrabold text-base sm:text-lg pr-3",
+              isLight ? "text-[#17202A]" : "text-textPearl"
+            )}>
               {title || 'Dialog'}
             </h3>
             <button 
               type="button"
               onClick={onClose}
-              className="w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center text-mutedAsh hover:text-textPearl hover:bg-slate-800/80 rounded-xl transition-all cursor-pointer"
+              className={cn(
+                "w-9 h-9 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl transition-all cursor-pointer",
+                isLight 
+                  ? "text-[#7B8794] hover:text-[#17202A] hover:bg-[#F3E8DF]/60" 
+                  : "text-mutedAsh hover:text-textPearl hover:bg-slate-800/80"
+              )}
               aria-label={closeAriaLabel}
             >
-              <X className="w-5 h-5" />
+              <X className="w-4.5 h-4.5" />
             </button>
           </div>
         )}
 
         {/* Scrollable Content Body */}
-        <div className={cn("flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-4 text-sm text-slate-300 overscroll-contain", contentClassName)}>
+        <div className={cn(
+          "flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-5 overscroll-contain",
+          isLight ? "text-[#17202A]" : "text-sm text-slate-300",
+          contentClassName
+        )}>
           {children}
         </div>
 
         {/* Fixed Footer */}
         {footer && (
-          <div className="flex items-center justify-end px-5 sm:px-6 py-3.5 border-t border-slate-800/60 shrink-0 bg-slate-900/50">
+          <div className={cn(
+            "flex items-center justify-end px-5 sm:px-6 py-3.5 shrink-0",
+            isLight
+              ? "border-t border-[#F0EBE4] bg-[#FCFAF7]"
+              : "border-t border-slate-800/60 bg-slate-900/50"
+          )}>
             {footer}
           </div>
         )}

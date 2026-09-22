@@ -2600,219 +2600,521 @@ export const OwnerOverview: React.FC = () => {
           <Modal
             isOpen={selectedRes !== null && resActionType !== null}
             onClose={() => { setSelectedRes(null); setResActionType(null); }}
+            variant="light"
+            size="lg"
             title={
-              resActionType === 'AssignWaiter' ? 'Assign Staff Waiter' :
-              resActionType === 'AssignTable' ? 'Assign Dining Table' :
-              resActionType === 'Seat' ? 'Seat Guest Party' :
-              resActionType === 'Modify' ? 'Modify Reservation' :
+              resActionType === 'AssignWaiter' ? 'Assign Dedicated Server' :
+              resActionType === 'AssignTable' ? 'Select Dining Table' :
+              resActionType === 'Seat' ? 'Seat Arrived Party' :
+              resActionType === 'Modify' ? 'Modify Reservation Details' :
               resActionType === 'Accept' ? 'Approve Reservation' :
               resActionType === 'Reject' ? 'Decline Reservation' : 'Reservation Action'
             }
-            className="max-w-md"
           >
             {selectedRes && (
-              <div className="space-y-4 text-left text-xs">
+              <div className="space-y-4 text-left">
                 
-                {/* Guest Summary Card */}
-                <div className="p-3.5 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-[#C85A3F]/20 border border-[#C85A3F]/30 flex items-center justify-center text-[#C85A3F] font-extrabold text-sm shrink-0">
+                {/* Guest Details Overview Banner */}
+                <div className="p-4 bg-gradient-to-r from-[#FFF8F5] via-white to-[#FBF8F5] border border-[#F3E3D8] rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#E85D3F] to-[#C84A38] text-white flex items-center justify-center font-extrabold text-base shadow-sm shrink-0">
                       {selectedRes.customerName ? selectedRes.customerName.charAt(0).toUpperCase() : 'G'}
                     </div>
                     <div>
-                      <h4 className="font-extrabold text-sm text-white">{selectedRes.customerName}</h4>
-                      <p className="text-[11px] text-slate-400">Ref: <span className="font-mono text-slate-300">{selectedRes.id}</span> · Party of <span className="text-white font-bold">{selectedRes.guests} Diners</span></p>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-extrabold text-sm sm:text-base text-[#17202A]">{selectedRes.customerName}</h4>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10.5px] font-extrabold bg-[#FDF0EB] text-[#C84A38] border border-[#F6D3C7]">
+                          {selectedRes.guests} Diners
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-[#7B8794] mt-0.5 flex-wrap">
+                        <span>Ref: <strong className="font-mono text-[#334155]">{selectedRes.id}</strong></span>
+                        {selectedRes.customerPhone && (
+                          <>
+                            <span>•</span>
+                            <span className="font-medium">{selectedRes.customerPhone}</span>
+                          </>
+                        )}
+                        {selectedRes.assignedTableNumber && (
+                          <>
+                            <span>•</span>
+                            <span className="font-bold text-[#17202A]">Table {selectedRes.assignedTableNumber}</span>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Date & Time</span>
-                    <span className="font-extrabold text-xs text-white">{selectedRes.date} @ {selectedRes.time}</span>
+                  <div className="text-left sm:text-right shrink-0 bg-white border border-[#E5E0D9] px-3.5 py-2 rounded-xl shadow-2xs">
+                    <span className="text-[9.5px] uppercase font-extrabold text-[#7B8794] block tracking-wider">Date & Time</span>
+                    <span className="font-extrabold text-xs text-[#17202A] flex items-center gap-1.5 mt-0.5">
+                      <Clock className="w-3.5 h-3.5 text-[#C85A3F]" />
+                      {selectedRes.date} @ {selectedRes.time}
+                    </span>
                   </div>
                 </div>
 
                 {/* 1. APPROVE / DECLINE PROMPT */}
                 {resActionType === 'Accept' && (
-                  <div className="p-4 bg-emerald-950/30 border border-emerald-800/50 rounded-xl space-y-1">
-                    <h5 className="font-extrabold text-emerald-400 text-xs flex items-center gap-1.5">
-                      <Check className="w-4 h-4" />
+                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl space-y-2">
+                    <div className="flex items-center gap-2 text-emerald-800 font-extrabold text-sm">
+                      <Check className="w-5 h-5 text-emerald-600" />
                       <span>Confirm this table reservation?</span>
-                    </h5>
-                    <p className="text-[11px] text-slate-300 leading-relaxed">
-                      Approving will mark this booking as Confirmed and notify the customer that their table is reserved.
+                    </div>
+                    <p className="text-xs text-emerald-900/80 leading-relaxed">
+                      Confirming will mark this booking as <strong>Confirmed</strong> and send a confirmation notice to {selectedRes.customerName} for their party of {selectedRes.guests}.
                     </p>
                   </div>
                 )}
 
                 {resActionType === 'Reject' && (
-                  <div className="p-4 bg-rose-950/30 border border-rose-800/50 rounded-xl space-y-1">
-                    <h5 className="font-extrabold text-rose-400 text-xs flex items-center gap-1.5">
-                      <X className="w-4 h-4" />
+                  <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl space-y-2">
+                    <div className="flex items-center gap-2 text-rose-800 font-extrabold text-sm">
+                      <X className="w-5 h-5 text-rose-600" />
                       <span>Decline this table reservation?</span>
-                    </h5>
-                    <p className="text-[11px] text-slate-300 leading-relaxed">
-                      Declining will update the status to Rejected and notify the diner that the requested slot is unavailable.
+                    </div>
+                    <p className="text-xs text-rose-900/80 leading-relaxed">
+                      Declining will mark this booking as <strong>Rejected</strong> and notify {selectedRes.customerName} that requested slots are at capacity.
                     </p>
                   </div>
                 )}
 
                 {/* 2. MODIFY RESERVATION */}
                 {resActionType === 'Modify' && (
-                  <div className="space-y-3.5">
-                    <div className="space-y-1">
-                      <label className="text-[10.5px] uppercase font-extrabold text-slate-400 flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-[#C85A3F]" />
+                  <div className="space-y-4">
+                    {/* Booking Date */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs uppercase font-extrabold text-[#17202A] flex items-center gap-1.5">
+                        <Calendar className="w-4 h-4 text-[#C85A3F]" />
                         <span>Booking Date</span>
                       </label>
                       <input 
                         type="date" 
                         value={resDateInput} 
                         onChange={(e) => setResDateInput(e.target.value)} 
-                        className="w-full p-2.5 bg-slate-950 border border-slate-800 text-white rounded-xl outline-none focus:border-[#C85A3F]"
+                        className="w-full p-3 bg-white border border-[#E5E0D9] focus:border-[#C85A3F] focus:ring-2 focus:ring-[#C85A3F]/15 text-[#17202A] rounded-xl outline-none font-semibold text-xs transition-all"
                       />
                     </div>
 
-                    <div className="space-y-1">
-                      <label className="text-[10.5px] uppercase font-extrabold text-slate-400 flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5 text-[#C85A3F]" />
+                    {/* Time Slot */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs uppercase font-extrabold text-[#17202A] flex items-center gap-1.5">
+                        <Clock className="w-4 h-4 text-[#C85A3F]" />
                         <span>Time Slot</span>
                       </label>
-                      <input 
-                        type="text" 
-                        value={resTimeInput} 
-                        onChange={(e) => setResTimeInput(e.target.value)} 
-                        placeholder="e.g. 7:30 PM"
-                        className="w-full p-2.5 bg-slate-950 border border-slate-800 text-white rounded-xl outline-none focus:border-[#C85A3F]" 
-                      />
+                      <div className="space-y-2">
+                        <input 
+                          type="text" 
+                          value={resTimeInput} 
+                          onChange={(e) => setResTimeInput(e.target.value)} 
+                          placeholder="e.g. 12:00 PM or 7:30 PM"
+                          className="w-full p-3 bg-white border border-[#E5E0D9] focus:border-[#C85A3F] focus:ring-2 focus:ring-[#C85A3F]/15 text-[#17202A] rounded-xl outline-none font-semibold text-xs transition-all"
+                        />
+                        {/* Quick select pills */}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {['12:00 PM', '1:00 PM', '2:00 PM', '7:00 PM', '8:00 PM', '9:00 PM'].map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => setResTimeInput(t)}
+                              className={cn(
+                                "px-2.5 py-1 rounded-lg text-[10.5px] font-extrabold border transition-all cursor-pointer",
+                                resTimeInput === t
+                                  ? "bg-[#FFF8F5] border-[#E85D3F] text-[#C85A3F]"
+                                  : "bg-white border-[#E5E0D9] text-[#52606D] hover:bg-[#FAF7F2]"
+                              )}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="space-y-1">
-                      <label className="text-[10.5px] uppercase font-extrabold text-slate-400 flex items-center gap-1.5">
-                        <Users className="w-3.5 h-3.5 text-[#C85A3F]" />
+                    {/* Party Size Stepper */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs uppercase font-extrabold text-[#17202A] flex items-center gap-1.5">
+                        <Users className="w-4 h-4 text-[#C85A3F]" />
                         <span>Party Size (Guests)</span>
                       </label>
-                      <input 
-                        type="number" 
-                        min={1}
-                        max={20}
-                        value={resGuestsInput} 
-                        onChange={(e) => setResGuestsInput(Number(e.target.value))} 
-                        className="w-full p-2.5 bg-slate-950 border border-slate-800 text-white rounded-xl outline-none focus:border-[#C85A3F]" 
-                      />
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setResGuestsInput(Math.max(1, (resGuestsInput || 1) - 1))}
+                          className="w-10 h-10 rounded-xl bg-white border border-[#E5E0D9] hover:bg-slate-50 text-[#17202A] font-extrabold flex items-center justify-center cursor-pointer shadow-2xs text-base active:scale-95"
+                        >
+                          -
+                        </button>
+                        <div className="flex-1 relative">
+                          <input 
+                            type="number" 
+                            min={1}
+                            max={30}
+                            value={resGuestsInput} 
+                            onChange={(e) => setResGuestsInput(Number(e.target.value))} 
+                            className="w-full p-2.5 text-center bg-white border border-[#E5E0D9] focus:border-[#C85A3F] focus:ring-2 focus:ring-[#C85A3F]/15 text-[#17202A] rounded-xl outline-none font-extrabold text-sm" 
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-[#7B8794] font-bold pointer-events-none">
+                            Guests
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setResGuestsInput(Math.min(30, (resGuestsInput || 1) + 1))}
+                          className="w-10 h-10 rounded-xl bg-white border border-[#E5E0D9] hover:bg-slate-50 text-[#17202A] font-extrabold flex items-center justify-center cursor-pointer shadow-2xs text-base active:scale-95"
+                        >
+                          +
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {/* 3. ASSIGN TABLE */}
+                {/* 3. ASSIGN TABLE (Interactive Table Grid) */}
                 {resActionType === 'AssignTable' && (
-                  <div className="space-y-2">
-                    <label className="text-[10.5px] uppercase font-extrabold text-slate-400 flex items-center gap-1.5">
-                      <LayoutGrid className="w-3.5 h-3.5 text-[#C85A3F]" />
-                      <span>Select Seating Table</span>
-                    </label>
-                    <select
-                      value={resTableInput}
-                      onChange={(e) => setResTableInput(e.target.value)}
-                      className="w-full p-3 bg-slate-950 border border-slate-800 focus:border-[#C85A3F] text-white rounded-xl outline-none text-xs"
-                    >
-                      <option value="">-- Unassigned --</option>
-                      {tables.map(t => (
-                        <option key={t.id} value={t.id}>
-                          Table {t.number || t.tableNumber} (Cap: {t.capacity} seats · Floor: {t.floor || 'Ground'} · {t.status})
-                        </option>
-                      ))}
-                    </select>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <label className="text-xs uppercase font-extrabold text-[#17202A] flex items-center gap-1.5">
+                          <LayoutGrid className="w-4 h-4 text-[#C85A3F]" />
+                          <span>Choose Dining Table</span>
+                        </label>
+                        <p className="text-[11.5px] text-[#7B8794] mt-0.5">
+                          Select an available table that comfortably accommodates this party of {selectedRes.guests} guests.
+                        </p>
+                      </div>
+                      {resTableInput && (
+                        <button
+                          type="button"
+                          onClick={() => setResTableInput('')}
+                          className="text-[11px] font-bold text-[#C85A3F] hover:underline cursor-pointer"
+                        >
+                          Clear Selection
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Table Cards Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[300px] overflow-y-auto pr-1">
+                      {/* Option: Unassigned */}
+                      <button
+                        type="button"
+                        onClick={() => setResTableInput('')}
+                        className={cn(
+                          "p-3 rounded-2xl border text-left transition-all flex items-center justify-between cursor-pointer",
+                          !resTableInput 
+                            ? "bg-[#FFF8F5] border-[#E85D3F] ring-2 ring-[#E85D3F]/20 shadow-xs" 
+                            : "bg-white border-[#E5E0D9] hover:border-slate-300 hover:bg-[#FAFAF7]"
+                        )}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-xs">
+                            --
+                          </div>
+                          <div>
+                            <h5 className="font-extrabold text-xs text-[#17202A]">Unassigned</h5>
+                            <p className="text-[10px] text-[#7B8794]">Assign table later upon arrival</p>
+                          </div>
+                        </div>
+                        {!resTableInput && (
+                          <div className="w-5 h-5 rounded-full bg-[#E85D3F] text-white flex items-center justify-center shrink-0">
+                            <Check className="w-3 h-3 stroke-[3]" />
+                          </div>
+                        )}
+                      </button>
+
+                      {/* Actual tables */}
+                      {tables.map(t => {
+                        const isSelected = resTableInput === t.id;
+                        const isOccupied = t.status === 'Occupied';
+                        const fitsParty = Number(t.capacity || 2) >= Number(selectedRes.guests || 2);
+                        
+                        return (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => setResTableInput(t.id)}
+                            className={cn(
+                              "p-3 rounded-2xl border text-left transition-all flex items-center justify-between cursor-pointer relative",
+                              isSelected
+                                ? "bg-[#FFF8F5] border-[#E85D3F] ring-2 ring-[#E85D3F]/20 shadow-xs"
+                                : "bg-white border-[#E5E0D9] hover:border-[#C85A3F]/50 hover:bg-[#FAF7F2]/40"
+                            )}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <div className={cn(
+                                "w-9 h-9 rounded-xl flex items-center justify-center font-extrabold text-xs shrink-0",
+                                isSelected
+                                  ? "bg-[#E85D3F] text-white shadow-xs"
+                                  : isOccupied 
+                                    ? "bg-slate-100 text-slate-500" 
+                                    : "bg-[#F3E8DF] text-[#C85A3F]"
+                              )}>
+                                T{t.number || t.tableNumber}
+                              </div>
+                              <div>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <h5 className="font-extrabold text-xs text-[#17202A]">Table {t.number || t.tableNumber}</h5>
+                                  {fitsParty && (
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                      Fits
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 text-[10px] text-[#7B8794] mt-0.5">
+                                  <span className="flex items-center gap-0.5 font-semibold text-slate-700">
+                                    <Users className="w-3 h-3 text-slate-400" /> {t.capacity} seats
+                                  </span>
+                                  <span>•</span>
+                                  <span>{t.floor || 'Ground Floor'}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className={cn(
+                                "px-2 py-0.5 rounded-full text-[9.5px] font-extrabold border",
+                                isOccupied
+                                  ? "bg-amber-50 text-amber-700 border-amber-200"
+                                  : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                              )}>
+                                {isOccupied ? 'Occupied' : 'Available'}
+                              </span>
+                              {isSelected && (
+                                <div className="w-5 h-5 rounded-full bg-[#E85D3F] text-white flex items-center justify-center shrink-0">
+                                  <Check className="w-3 h-3 stroke-[3]" />
+                                </div>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 
-                {/* 4. ASSIGN WAITER (Strictly filtered to waiter role only!) */}
+                {/* 4. ASSIGN WAITER (Interactive Waiter Cards Grid) */}
                 {resActionType === 'AssignWaiter' && (
                   <div className="space-y-3">
-                    <div className="space-y-1">
-                      <label className="text-[10.5px] uppercase font-extrabold text-slate-400 flex items-center gap-1.5">
-                        <UserCheck className="w-3.5 h-3.5 text-[#C85A3F]" />
-                        <span>Select Service Waiter</span>
-                      </label>
-                      <p className="text-[11px] text-slate-400 leading-tight">
-                        Choose a front-of-house waiter to attend to this party. Kitchen and chef staff are excluded.
+                    <div className="p-3 bg-[#FCFAF7] border border-[#E5E0D9] rounded-2xl flex items-start gap-2.5 text-[11.5px] text-[#52606D]">
+                      <UserCheck className="w-4 h-4 text-[#C85A3F] shrink-0 mt-0.5" />
+                      <p className="leading-relaxed">
+                        Select a dedicated front-of-house server to attend to this reservation. All diner service calls and bill requests will route to their device. (Kitchen and back-of-house staff are excluded).
                       </p>
                     </div>
 
-                    <select
-                      value={resWaiterInput}
-                      onChange={(e) => setResWaiterInput(e.target.value)}
-                      className="w-full p-3 bg-slate-950 border border-slate-800 focus:border-[#C85A3F] text-white rounded-xl outline-none text-xs"
-                    >
-                      <option value="">-- Unassigned --</option>
-                      {waiterEmployees.length === 0 ? (
-                        <option value="" disabled>No waiters found. Please add a waiter in Staff Management.</option>
-                      ) : (
-                        waiterEmployees.map(w => (
-                          <option key={w.id} value={w.id}>
-                            {w.fullName || w.name} (waiter)
-                          </option>
-                        ))
-                      )}
-                    </select>
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                      {/* Option: Unassigned */}
+                      <button
+                        type="button"
+                        onClick={() => setResWaiterInput('')}
+                        className={cn(
+                          "w-full p-3.5 rounded-2xl border text-left transition-all flex items-center justify-between cursor-pointer",
+                          !resWaiterInput
+                            ? "bg-[#FFF8F5] border-[#E85D3F] ring-2 ring-[#E85D3F]/20 shadow-xs"
+                            : "bg-white border-[#E5E0D9] hover:border-slate-300 hover:bg-[#FAFAF7]"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-500 font-extrabold text-sm">
+                            <Users className="w-5 h-5 text-slate-400" />
+                          </div>
+                          <div>
+                            <h5 className="font-extrabold text-xs text-[#17202A]">Unassigned / Service Pool</h5>
+                            <p className="text-[11px] text-[#7B8794]">Any on-duty server can attend to this party</p>
+                          </div>
+                        </div>
+                        {!resWaiterInput && (
+                          <div className="w-5 h-5 rounded-full bg-[#E85D3F] text-white flex items-center justify-center shrink-0">
+                            <Check className="w-3 h-3 stroke-[3]" />
+                          </div>
+                        )}
+                      </button>
 
-                    {waiterEmployees.length === 0 && (
-                      <div className="p-3 bg-amber-950/40 border border-amber-800/60 rounded-xl text-[11px] text-amber-300">
-                        <p className="font-bold">No dedicated waiters found!</p>
-                        <p className="text-slate-400 mt-0.5">Existing staff are registered as kitchen or other roles. Please register staff with the "waiter" role under the Staff Management section.</p>
-                      </div>
-                    )}
+                      {/* Waiters */}
+                      {waiterEmployees.length === 0 ? (
+                        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-800 space-y-1">
+                          <p className="font-extrabold text-amber-900">No Waitstaff Found</p>
+                          <p className="text-[11px] text-amber-700">All registered employees currently have other roles (e.g. kitchen/chef). You can add or assign the "waiter" role in Staff Management.</p>
+                        </div>
+                      ) : (
+                        waiterEmployees.map(w => {
+                          const isSelected = resWaiterInput === w.id;
+                          const name = w.fullName || w.name || 'Waiter';
+                          const initials = name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase();
+
+                          return (
+                            <button
+                              key={w.id}
+                              type="button"
+                              onClick={() => setResWaiterInput(w.id)}
+                              className={cn(
+                                "w-full p-3.5 rounded-2xl border text-left transition-all flex items-center justify-between cursor-pointer",
+                                isSelected
+                                  ? "bg-[#FFF8F5] border-[#E85D3F] ring-2 ring-[#E85D3F]/20 shadow-xs"
+                                  : "bg-white border-[#E5E0D9] hover:border-[#C85A3F]/50 hover:bg-[#FAF7F2]/40"
+                              )}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className={cn(
+                                  "w-10 h-10 rounded-2xl flex items-center justify-center font-extrabold text-sm shrink-0",
+                                  isSelected
+                                    ? "bg-[#E85D3F] text-white shadow-xs"
+                                    : "bg-[#F3E8DF] text-[#C85A3F]"
+                                )}>
+                                  {initials}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h5 className="font-extrabold text-xs sm:text-sm text-[#17202A]">{name}</h5>
+                                    <span className="px-2 py-0.5 rounded-full text-[9.5px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200">
+                                      Front-of-House Waiter
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-[10.5px] text-[#7B8794] mt-0.5">
+                                    <span className="flex items-center gap-1 text-emerald-600 font-semibold">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Active On Duty
+                                    </span>
+                                    {w.phone && (
+                                      <>
+                                        <span>•</span>
+                                        <span>{w.phone}</span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {isSelected && (
+                                <div className="w-6 h-6 rounded-full bg-[#E85D3F] text-white flex items-center justify-center shrink-0">
+                                  <Check className="w-3.5 h-3.5 stroke-[3]" />
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
                 )}
 
-                {/* 5. SEAT PARTY EXPLANATION & TABLE SELECTION */}
+                {/* 5. SEAT PARTY (Interactive Seating & Table Selection) */}
                 {resActionType === 'Seat' && (
-                  <div className="space-y-3">
-                    <div className="p-3 bg-amber-950/30 border border-amber-800/50 rounded-xl text-[11px] text-slate-300 space-y-1">
-                      <h5 className="font-extrabold text-amber-400 text-xs flex items-center gap-1.5">
-                        <Utensils className="w-3.5 h-3.5 text-amber-400" />
-                        <span>What happens when you Seat Party?</span>
-                      </h5>
-                      <p className="leading-relaxed">
-                        The dining party has arrived at the restaurant. Seating them sets their reservation status to <strong>Seated</strong>, marks the assigned table as <strong>Occupied</strong> on the floor layout, and starts an active dining session for taking orders.
+                  <div className="space-y-3.5">
+                    {/* Explanation Banner */}
+                    <div className="p-3.5 bg-gradient-to-r from-amber-50 to-[#FFF8F2] border border-amber-200/90 rounded-2xl space-y-1.5">
+                      <div className="flex items-center gap-2 text-amber-800 font-extrabold text-xs">
+                        <Utensils className="w-4 h-4 text-[#C85A3F]" />
+                        <span>Seating Dining Party</span>
+                      </div>
+                      <p className="text-[11.5px] text-amber-900/80 leading-relaxed">
+                        Guests have arrived. Confirming this action marks their reservation as <strong>Seated</strong>, updates the chosen table status to <strong>Occupied</strong>, and initializes their live dining order session.
                       </p>
                     </div>
 
-                    <div className="space-y-1.5">
-                      <label className="text-[10.5px] uppercase font-extrabold text-slate-400 flex items-center gap-1.5">
-                        <LayoutGrid className="w-3.5 h-3.5 text-[#C85A3F]" />
-                        <span>Choose Seating Table for Party</span>
+                    {/* Table picker for seating */}
+                    <div className="space-y-2">
+                      <label className="text-xs uppercase font-extrabold text-[#17202A] flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <LayoutGrid className="w-4 h-4 text-[#C85A3F]" />
+                          <span>Select Table to Seat Guests (Required)</span>
+                        </span>
+                        {resTableInput && (
+                          <span className="text-[11px] font-extrabold text-emerald-600 flex items-center gap-1">
+                            <Check className="w-3.5 h-3.5" /> Table Selected
+                          </span>
+                        )}
                       </label>
-                      <select
-                        value={resTableInput}
-                        onChange={(e) => setResTableInput(e.target.value)}
-                        className="w-full p-3 bg-slate-950 border border-slate-800 focus:border-[#C85A3F] text-white rounded-xl outline-none text-xs"
-                      >
-                        <option value="">-- Select Available Table --</option>
-                        {tables.map(t => (
-                          <option key={t.id} value={t.id}>
-                            Table {t.number || t.tableNumber} (Cap: {t.capacity} seats, Status: {t.status})
-                          </option>
-                        ))}
-                      </select>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-[260px] overflow-y-auto pr-1">
+                        {tables.map(t => {
+                          const isSelected = resTableInput === t.id;
+                          const isOccupied = t.status === 'Occupied';
+                          const fitsParty = Number(t.capacity || 2) >= Number(selectedRes.guests || 2);
+
+                          return (
+                            <button
+                              key={t.id}
+                              type="button"
+                              onClick={() => setResTableInput(t.id)}
+                              className={cn(
+                                "p-3 rounded-2xl border text-left transition-all flex items-center justify-between cursor-pointer",
+                                isSelected
+                                  ? "bg-[#FFF8F5] border-[#E85D3F] ring-2 ring-[#E85D3F]/20 shadow-xs"
+                                  : "bg-white border-[#E5E0D9] hover:border-[#C85A3F]/50 hover:bg-[#FAF7F2]/40"
+                              )}
+                            >
+                              <div className="flex items-center gap-2.5">
+                                <div className={cn(
+                                  "w-9 h-9 rounded-xl flex items-center justify-center font-extrabold text-xs shrink-0",
+                                  isSelected
+                                    ? "bg-[#E85D3F] text-white shadow-xs"
+                                    : isOccupied 
+                                      ? "bg-slate-100 text-slate-500" 
+                                      : "bg-[#F3E8DF] text-[#C85A3F]"
+                                )}>
+                                  T{t.number || t.tableNumber}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <h5 className="font-extrabold text-xs text-[#17202A]">Table {t.number || t.tableNumber}</h5>
+                                    {fitsParty && (
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                        Fits
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-2 text-[10px] text-[#7B8794] mt-0.5">
+                                    <span className="font-semibold text-slate-700">{t.capacity} seats</span>
+                                    <span>•</span>
+                                    <span>{t.floor || 'Ground'}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className={cn(
+                                  "px-2 py-0.5 rounded-full text-[9px] font-extrabold border",
+                                  isOccupied
+                                    ? "bg-amber-50 text-amber-700 border-amber-200"
+                                    : "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                )}>
+                                  {isOccupied ? 'Occupied' : 'Available'}
+                                </span>
+                                {isSelected && (
+                                  <div className="w-5 h-5 rounded-full bg-[#E85D3F] text-white flex items-center justify-center shrink-0">
+                                    <Check className="w-3 h-3 stroke-[3]" />
+                                  </div>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 )}
 
                 {/* Footer action buttons */}
-                <div className="flex gap-2.5 pt-3">
-                  <Button variant="secondary" className="flex-1 text-xs font-bold" onClick={() => { setSelectedRes(null); setResActionType(null); }}>
+                <div className="flex items-center gap-3 pt-4 border-t border-[#F0EBE4] mt-2">
+                  <button
+                    type="button"
+                    className="flex-1 py-3 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-[#475569] font-extrabold text-xs transition-colors cursor-pointer"
+                    onClick={() => { setSelectedRes(null); setResActionType(null); }}
+                  >
                     Cancel
-                  </Button>
-                  <Button 
-                    className="flex-1 bg-[#C85A3F] hover:bg-[#A94332] text-white text-xs font-bold" 
-                    onClick={handleReservationActionSubmit} 
+                  </button>
+                  <button
+                    type="button"
+                    className="flex-1 py-3 px-5 rounded-xl bg-gradient-to-r from-[#E85D3F] to-[#C84A38] hover:from-[#D74E32] hover:to-[#B63E2D] active:scale-[0.99] text-white font-extrabold text-xs transition-all shadow-sm hover:shadow-md cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleReservationActionSubmit}
                     disabled={resActionType === 'Seat' && !resTableInput}
                   >
                     {resActionType === 'Accept' ? 'Confirm Approval' :
                      resActionType === 'Reject' ? 'Confirm Decline' :
                      resActionType === 'Seat' ? 'Seat Party Now' :
-                     resActionType === 'AssignTable' ? 'Assign Table' :
-                     resActionType === 'AssignWaiter' ? 'Assign Waiter' : 'Confirm Action'}
-                  </Button>
+                     resActionType === 'AssignTable' ? 'Confirm Table' :
+                     resActionType === 'AssignWaiter' ? 'Confirm Waiter' : 'Save Changes'}
+                  </button>
                 </div>
               </div>
             )}
