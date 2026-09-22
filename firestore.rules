@@ -282,6 +282,31 @@ service cloud.firestore {
         allow delete: if isTenantManager(tenantId);
       }
 
+      // Table Reservations - customer/guest booking and diner management, full control by tenant staff
+      match /reservations/{reservationId} {
+        allow read: if true;
+        allow create: if (
+          request.resource.data.get('restaurantId', '') == tenantId &&
+          (isTenantStaff(tenantId) || 
+           !isAuth() || 
+           request.resource.data.get('customerId', '') == request.auth.uid ||
+           request.resource.data.get('customerId', '') == 'guest-uid')
+        );
+        allow update: if isTenantStaff(tenantId) || (
+          (!isAuth() || resource.data.get('customerId', '') in ['', 'guest-uid'] || resource.data.get('customerId', '') == request.auth.uid)
+        );
+        allow delete: if isTenantStaff(tenantId) || (
+          isAuth() && resource.data.get('customerId', '') == request.auth.uid
+        );
+      }
+
+      // Operational Notifications subcollection (e.g. alerts when an order or reservation is created)
+      match /notifications/{notifId} {
+        allow read: if isTenantStaff(tenantId);
+        allow create: if true;
+        allow update, delete: if isTenantStaff(tenantId);
+      }
+
       // Canonical Bills - strictly isolated by tenant, branch, staff role and authentic order verification
       match /bills/{billId} {
         // Diner can only get their own order's bill; Staff can get bills in their tenant/branch; listing strictly restricted to authorized tenant staff

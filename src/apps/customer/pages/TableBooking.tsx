@@ -9,6 +9,18 @@ import {
   ShieldCheck, Heart, Repeat, FileText, Star
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useToastStore } from '../../../components/ui/Toast/Toast';
+
+const showFeedback = (msg: string, type: 'success' | 'error') => {
+  if (type === 'success') {
+    toast.success(msg);
+  } else {
+    toast.error(msg);
+  }
+  try {
+    useToastStore.getState().addToast(msg, type);
+  } catch (_) {}
+};
 
 const HYDERABAD_AREAS = [
   'Jubilee Hills', 'Banjara Hills', 'Hitech City', 'Gachibowli', 'Madhapur', 
@@ -210,7 +222,7 @@ export const TableBooking: React.FC = () => {
       console.error('[TableBooking] Failed to load restaurants:', e);
       setAllRestaurants([]);
       setLoadError('Unable to load restaurants. Please try again.');
-      toast.error('Failed to load restaurants.');
+      showFeedback('Failed to load restaurants.', 'error');
     } finally {
       setIsLoading(false);
     }
@@ -260,16 +272,27 @@ export const TableBooking: React.FC = () => {
   };
 
   // Submit Reservation
-  const handleSubmitBooking = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedRest) return;
-    if (!selectedTime) {
-      toast.error('Please select an available time slot.');
+  const handleSubmitBooking = async (e?: React.FormEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (!selectedRest) {
+      showFeedback('Please select a restaurant first.', 'error');
       return;
     }
+    if (!selectedTime) {
+      showFeedback('Please select an available time slot.', 'error');
+      return;
+    }
+    if (!bookDate) {
+      showFeedback('Please select a booking date.', 'error');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const bookingId = isModifying ? modifyingBookingId : `RES-${Math.floor(100000 + Math.random() * 900000)}`;
+      const bookingId = isModifying && modifyingBookingId ? modifyingBookingId : `RES-${Math.floor(100000 + Math.random() * 900000)}`;
       const notifId = `NOT-${Math.floor(100000 + Math.random() * 900000)}`;
       
       const bookingPayload = {
@@ -277,13 +300,15 @@ export const TableBooking: React.FC = () => {
         bookingId,
         customerId: user?.uid || 'guest-uid',
         customerName: user?.displayName || user?.email || 'Guest Diner',
+        customerEmail: user?.email || '',
+        customerPhone: user?.phoneNumber || '',
         restaurantId: selectedRest.id,
         restaurantName: selectedRest.name,
         date: bookDate,
         time: selectedTime,
         guests: guestsCount,
         seatingPreference: selectedRest.supportsSeatPreference ? seatingPreference : '',
-        specialNotes,
+        specialNotes: (specialNotes || '').trim(),
         status: isModifying ? 'Modified' : 'Pending',
         directions: `${selectedRest.landmark ? `Near ${selectedRest.landmark}, ` : ''}${selectedRest.address || formatLocalityCity(selectedRest.area, selectedRest.city)}`,
         lat: selectedRest.latitude || null,
@@ -291,42 +316,64 @@ export const TableBooking: React.FC = () => {
         createdAt: new Date().toISOString()
       };
 
-      // 1. Write booking details to Customer Profile Reservations History (customers/{uid})
+      // 1. Write booking details to Customer Profile Reservations History (both customers/{uid} and users/{uid})
       if (user?.uid) {
-        await setDoc(doc(db, 'customers', user.uid, 'reservations', bookingId), bookingPayload);
+        await Promise.allSettled([
+          setDoc(doc(db, 'customers', user.uid, 'reservations', bookingId), bookingPayload),
+          setDoc(doc(db, 'users', user.uid, 'reservations', bookingId), bookingPayload)
+        ]);
       }
       
       // 2. Write booking details to Restaurant central reservations collection
-      await setDoc(doc(db, 'restaurants', selectedRest.id, 'reservations', bookingId), bookingPayload);
+      try {
+        await setDoc(doc(db, 'restaurants', selectedRest.id, 'reservations', bookingId), bookingPayload);
+      } catch (restErr) {
+        console.warn('[TableBooking] Primary restaurants reservations write warning, trying fallback:', restErr);
+        try {
+          await setDoc(doc(db, 'tenants', selectedRest.id, 'reservations', bookingId), bookingPayload);
+        } catch (_) {}
+      }
 
-      // 3. Generate Central Booking Notification for Dashboards
-      const notificationPayload = {
-        id: notifId,
-        type: 'reservation',
-        bookingId,
-        customerName: user?.displayName || user?.email || 'Guest Diner',
-        guests: guestsCount,
-        date: bookDate,
-        time: selectedTime,
-        restaurantName: selectedRest.name,
-        restaurantId: selectedRest.id,
-        branchName: 'Main Branch',
-        tableStatus: isModifying ? 'Modified' : 'Pending',
-        specialNotes,
-        bookingStatus: isModifying ? 'Modified' : 'Pending',
-        notificationStatus: 'unread',
-        timestamp: new Date().toISOString()
-      };
-      
-      await setDoc(doc(db, 'restaurants', selectedRest.id, 'notifications', notifId), notificationPayload);
+      // 3. Generate Central Booking Notification for Dashboards (non-blocking)
+      try {
+        const notificationPayload = {
+          id: notifId,
+          type: 'reservation',
+          bookingId,
+          customerName: user?.displayName || user?.email || 'Guest Diner',
+          guests: guestsCount,
+          date: bookDate,
+          time: selectedTime,
+          restaurantName: selectedRest.name,
+          restaurantId: selectedRest.id,
+          branchName: 'Main Branch',
+          tableStatus: isModifying ? 'Modified' : 'Pending',
+          specialNotes: (specialNotes || '').trim(),
+          bookingStatus: isModifying ? 'Modified' : 'Pending',
+          notificationStatus: 'unread',
+          timestamp: new Date().toISOString()
+        };
+        
+        await setDoc(doc(db, 'restaurants', selectedRest.id, 'notifications', notifId), notificationPayload);
+      } catch (notifErr) {
+        console.warn('[TableBooking] Notification write warning (non-fatal):', notifErr);
+      }
+
+      // 4. Save to local storage for persistent guest/customer reservation history
+      try {
+        const localKey = 'spiral_dine_customer_reservations';
+        const existing = JSON.parse(localStorage.getItem(localKey) || '[]');
+        const updated = [bookingPayload, ...existing.filter((item: any) => item.id !== bookingId)];
+        localStorage.setItem(localKey, JSON.stringify(updated));
+      } catch (_) {}
 
       setBookingConfirmed(bookingPayload);
-      toast.success(isModifying ? 'Reservation successfully updated!' : 'Reservation successfully requested!');
+      showFeedback(isModifying ? 'Reservation successfully updated!' : 'Reservation successfully requested!', 'success');
       setIsModifying(false);
       setModifyingBookingId('');
-    } catch (e) {
+    } catch (e: any) {
       console.error('[TableBooking] Error submitting reservation:', e);
-      toast.error('Failed to register reservation details.');
+      showFeedback(e?.message || 'Failed to register reservation details. Please try again.', 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -349,7 +396,7 @@ export const TableBooking: React.FC = () => {
     setSeatingPreference(bookingConfirmed.seatingPreference || '');
     setSpecialNotes(bookingConfirmed.specialNotes || '');
     setBookingConfirmed(null);
-    toast.success('Form loaded. Update your reservation details.');
+    showFeedback('Form loaded. Update your reservation details.', 'success');
   };
 
   // Cancel Reservation
@@ -361,15 +408,24 @@ export const TableBooking: React.FC = () => {
         await deleteDoc(doc(db, 'customers', user.uid, 'reservations', bookingConfirmed.id)).catch(() => {});
         await deleteDoc(doc(db, 'users', user.uid, 'reservations', bookingConfirmed.id)).catch(() => {});
       }
-      await deleteDoc(doc(db, 'restaurants', bookingConfirmed.restaurantId, 'reservations', bookingConfirmed.id));
+      await deleteDoc(doc(db, 'restaurants', bookingConfirmed.restaurantId, 'reservations', bookingConfirmed.id)).catch(() => {});
+      await deleteDoc(doc(db, 'tenants', bookingConfirmed.restaurantId, 'reservations', bookingConfirmed.id)).catch(() => {});
+
+      // Remove from local storage
+      try {
+        const localKey = 'spiral_dine_customer_reservations';
+        const existing = JSON.parse(localStorage.getItem(localKey) || '[]');
+        const updated = existing.filter((item: any) => item.id !== bookingConfirmed.id);
+        localStorage.setItem(localKey, JSON.stringify(updated));
+      } catch (_) {}
       
-      toast.success('Reservation booking cancelled.');
+      showFeedback('Reservation booking cancelled.', 'success');
       setBookingConfirmed(null);
       setSelectedRest(null);
       setIsModifying(false);
     } catch (e) {
       console.error('[TableBooking] Error cancelling booking:', e);
-      toast.error('Failed to cancel reservation.');
+      showFeedback('Failed to cancel reservation.', 'error');
     }
   };
 
@@ -950,12 +1006,23 @@ export const TableBooking: React.FC = () => {
             {/* 6. PRIMARY CTA: CONFIRM BOOKING */}
             <div className="pt-2 space-y-2">
               <button
-                type="submit"
-                disabled={isSubmitting || !selectedTime}
-                className="w-full h-14 bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold rounded-xl flex items-center justify-center gap-2 text-sm sm:text-base shadow-sm hover:shadow transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.99]"
+                type="button"
+                id="confirm-booking-btn"
+                onClick={() => handleSubmitBooking()}
+                disabled={isSubmitting}
+                className="w-full h-14 bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold rounded-xl flex items-center justify-center gap-2 text-sm sm:text-base shadow-sm hover:shadow transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed active:scale-[0.99]"
               >
-                <Calendar className="w-4.5 h-4.5" />
-                <span>{isSubmitting ? 'Confirming...' : isModifying ? 'Update Booking Slot' : 'Confirm Booking →'}</span>
+                {isSubmitting ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Confirming Reservation...</span>
+                  </>
+                ) : (
+                  <>
+                    <Calendar className="w-4.5 h-4.5" />
+                    <span>{isModifying ? 'Update Booking Slot' : 'Confirm Booking →'}</span>
+                  </>
+                )}
               </button>
 
               <p className="text-[11px] text-center text-[#756B64] font-medium flex items-center justify-center gap-1.5 pt-1">
