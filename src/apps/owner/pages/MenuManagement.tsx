@@ -23,6 +23,10 @@ import {
   getMenuItemPath
 } from '../../../firebase/collections';
 import { menuService } from '../../../shared/services/menuService';
+import { MenuVariantsTab } from './menu/MenuVariantsTab';
+import { MenuAddonsTab } from './menu/MenuAddonsTab';
+import { MenuCombosTab } from './menu/MenuCombosTab';
+import { MenuAnalyticsTab } from './menu/MenuAnalyticsTab';
 
 // UI Kit Primitives
 import Button from '../../../components/ui/Button/Button';
@@ -121,6 +125,7 @@ const menuItemSchema = z.object({
   ),
   isVeg: z.boolean().default(false),
   isAvailable: z.boolean().default(true),
+  isPublished: z.boolean().default(true),
   isBestSeller: z.boolean().default(false),
   isRecommended: z.boolean().default(false),
   spiceLevel: z.string().default('none'),
@@ -194,13 +199,14 @@ export const MenuManagement: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
 
   // Tab State
-  const [activeTab, setActiveTab] = useState<'categories' | 'items' | 'availability' | 'pricing' | 'preview' | 'tests'>('categories');
+  const [activeTab, setActiveTab] = useState<'categories' | 'items' | 'variants' | 'addons' | 'combos' | 'analytics' | 'availability' | 'pricing' | 'preview' | 'tests'>('categories');
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterVeg, setFilterVeg] = useState('all'); // 'all' | 'veg' | 'non-veg'
   const [filterAvailable, setFilterAvailable] = useState('all'); // 'all' | 'available' | 'out-of-stock'
+  const [filterPublish, setFilterPublish] = useState('all'); // 'all' | 'published' | 'draft'
   const [sortBy, setSortBy] = useState('name-asc'); // 'name-asc' | 'name-desc' | 'price-asc' | 'price-desc' | 'newest'
 
   // Modal / Dialog States
@@ -227,7 +233,6 @@ export const MenuManagement: React.FC = () => {
   const [lastSelectedCategoryId, setLastSelectedCategoryId] = useState<string>('');
   const [testResults, setTestResults] = useState<{ name: string; status: 'idle' | 'running' | 'success' | 'failed'; details?: string }[]>([]);
   const [isTesting, setIsTesting] = useState(false);
-  const [isSeeding, setIsSeeding] = useState(false);
 
   // React Hook Forms
   const {
@@ -253,6 +258,7 @@ export const MenuManagement: React.FC = () => {
     defaultValues: {
       isVeg: false,
       isAvailable: true,
+      isPublished: true,
       isBestSeller: false,
       isRecommended: false,
       spiceLevel: 'none',
@@ -270,6 +276,7 @@ export const MenuManagement: React.FC = () => {
 
   const watchIsVeg = watchItem('isVeg');
   const watchIsAvailable = watchItem('isAvailable');
+  const watchIsPublished = watchItem('isPublished');
   const watchIsBestSeller = watchItem('isBestSeller');
   const watchIsRecommended = watchItem('isRecommended');
   const watchImage = watchItem('image');
@@ -759,165 +766,27 @@ export const MenuManagement: React.FC = () => {
     setIsTesting(false);
   };
 
-  const seedSampleItems = async () => {
-    if (!import.meta.env.DEV) {
-      toast.error('Sample menu seeding is strictly disabled in production.');
-      return;
-    }
+  // ----------------------------------------------------
+  // QUICK PUBLISH / DRAFT TOGGLE
+  // ----------------------------------------------------
+  const toggleItemPublished = async (item: IMenuItem) => {
     if (!user?.tenantId) return;
-    setIsSeeding(true);
     try {
-      const findOrCreateCategory = async (name: string, desc: string, order: number) => {
-        const existing = categories.find(c => c.name.toLowerCase() === name.toLowerCase());
-        if (existing) return existing.id;
-        const catId = `CAT-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-        await menuService.createCategory({
-          name,
-          description: desc,
-          displayOrder: order,
-          isActive: true,
-          image: ''
-        }, user.tenantId);
-        return catId;
-      };
-
-      const appCatId = await findOrCreateCategory('Appetizers', 'Delicious starters to kickstart your meal.', 1);
-      const mainCatId = await findOrCreateCategory('Main Course', 'Hearty and fulfilling main dishes.', 2);
-      const bevCatId = await findOrCreateCategory('Beverages', 'Refreshing drinks and coffees.', 3);
-      const desCatId = await findOrCreateCategory('Desserts', 'Sweet treats and dessert delights.', 4);
-
-      const samples = [
+      const nextPublished = item.isPublished === false ? true : false;
+      await menuService.updateItem(
+        item.id,
         {
-          name: 'Paneer Tikka',
-          description: 'Clay oven cooked cottage cheese skewers marinated in spiced yogurt.',
-          categoryId: appCatId,
-          price: 1299,
-          isVeg: true,
-          isAvailable: true,
-          isBestSeller: true,
-          isRecommended: false,
-          spiceLevel: 'medium',
-          preparationTime: 15,
-          image: 'https://images.unsplash.com/photo-1567188040759-fb8a883dc6d8?w=500'
+          isPublished: nextPublished,
+          status: nextPublished ? (item.isAvailable ? 'active' : 'inactive') : 'draft',
+          updatedBy: user.email || 'Owner',
+          updatedAt: new Date().toISOString()
         },
-        {
-          name: 'Veg Burger',
-          description: 'Crispy veggie patty with fresh lettuce, tomatoes, and chef sauce.',
-          categoryId: mainCatId,
-          price: 1099,
-          isVeg: true,
-          isAvailable: true,
-          isBestSeller: true,
-          isRecommended: false,
-          spiceLevel: 'none',
-          preparationTime: 12,
-          image: 'https://images.unsplash.com/photo-1550547660-d9450f859349?w=500'
-        },
-        {
-          name: 'Chicken Biryani',
-          description: 'Fragrant basmati rice layered with spiced marinated chicken.',
-          categoryId: mainCatId,
-          price: 1899,
-          isVeg: false,
-          isAvailable: true,
-          isBestSeller: true,
-          isRecommended: false,
-          spiceLevel: 'medium',
-          preparationTime: 25,
-          image: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=500'
-        },
-        {
-          name: 'Margherita Pizza',
-          description: 'Classic Neapolitan pizza with mozzarella and fresh basil.',
-          categoryId: mainCatId,
-          price: 1599,
-          isVeg: true,
-          isAvailable: true,
-          isBestSeller: false,
-          isRecommended: true,
-          spiceLevel: 'none',
-          preparationTime: 20,
-          image: 'https://images.unsplash.com/photo-1604068549290-dea0e4a305ca?w=500'
-        },
-        {
-          name: 'French Fries',
-          description: 'Crispy golden potato fries lightly salted.',
-          categoryId: appCatId,
-          price: 699,
-          isVeg: true,
-          isAvailable: true,
-          isBestSeller: false,
-          isRecommended: false,
-          spiceLevel: 'none',
-          preparationTime: 8,
-          image: 'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?w=500'
-        },
-        {
-          name: 'Cappuccino',
-          description: 'Rich espresso with steamed milk foam and cocoa dusting.',
-          categoryId: bevCatId,
-          price: 499,
-          isVeg: true,
-          isAvailable: true,
-          isBestSeller: false,
-          isRecommended: true,
-          spiceLevel: 'none',
-          preparationTime: 5,
-          image: 'https://images.unsplash.com/photo-1572442388796-11668a67e53d?w=500'
-        }
-      ];
-
-      for (const item of samples) {
-        const isDup = menuItems.some(i => i.name?.toLowerCase() === item.name.toLowerCase());
-        if (!isDup) {
-          const itemId = `ITEM-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-          const itemData = {
-            id: itemId,
-            tenantId: user.tenantId,
-            categoryId: item.categoryId,
-            category: categories.find(c => c.id === item.categoryId)?.name || '',
-            name: item.name,
-            description: item.description,
-            price: item.price,
-            discountPrice: undefined,
-            image: item.image,
-            imageUrl: item.image,
-            preparationTime: item.preparationTime,
-            prepTime: item.preparationTime,
-            isVeg: item.isVeg,
-            veg: item.isVeg,
-            vegetarian: item.isVeg,
-            isAvailable: item.isAvailable,
-            available: item.isAvailable,
-            availability: item.isAvailable,
-            isBestSeller: item.isBestSeller,
-            bestseller: item.isBestSeller,
-            isRecommended: item.isRecommended,
-            recommended: item.isRecommended,
-            spiceLevel: item.spiceLevel,
-            tags: [item.isVeg ? 'Veg' : 'Non-Veg'],
-            flags: {
-              vegetarian: item.isVeg,
-              bestseller: item.isBestSeller,
-              recommended: item.isRecommended
-            },
-            status: item.isAvailable ? 'active' : 'inactive',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            createdBy: user.email || 'Owner',
-            updatedBy: user.email || 'Owner'
-          };
-          const firestoreItem = cleanObject(itemData);
-          await menuService.createItem(firestoreItem, user.tenantId);
-        }
-      }
-
-      toast.success('Successfully seeded sample menu items!');
-    } catch (err: any) {
+        user.tenantId
+      );
+      toast.success(nextPublished ? `"${item.name}" published to customers.` : `"${item.name}" moved to draft (hidden from customers).`);
+    } catch (err) {
       console.error(err);
-      toast.error('Failed to seed sample items.');
-    } finally {
-      setIsSeeding(false);
+      toast.error('Failed to update published status.');
     }
   };
 
@@ -936,6 +805,7 @@ export const MenuManagement: React.FC = () => {
       discountPrice: undefined,
       isVeg: false,
       isAvailable: true,
+      isPublished: true,
       isBestSeller: false,
       isRecommended: false,
       spiceLevel: 'none',
@@ -965,6 +835,7 @@ export const MenuManagement: React.FC = () => {
       discountPrice: item.discountPrice ? item.discountPrice / 100 : undefined,
       isVeg: item.isVeg,
       isAvailable: item.isAvailable,
+      isPublished: item.isPublished !== false,
       isBestSeller: item.isBestSeller,
       isRecommended: item.isRecommended,
       spiceLevel: item.spiceLevel || 'none',
@@ -1046,6 +917,7 @@ export const MenuManagement: React.FC = () => {
         isAvailable: data.isAvailable,
         available: data.isAvailable, // compat
         availability: data.isAvailable, // compat
+        isPublished: data.isPublished !== false,
         isBestSeller: data.isBestSeller,
         bestseller: data.isBestSeller, // compat
         isRecommended: data.isRecommended,
@@ -1057,7 +929,7 @@ export const MenuManagement: React.FC = () => {
           bestseller: data.isBestSeller,
           recommended: data.isRecommended
         },
-        status: data.isAvailable ? 'active' : 'inactive', // compat
+        status: data.isPublished === false ? 'draft' : (data.isAvailable ? 'active' : 'inactive'),
         productionMode: data.productionMode,
         preparationMethod: data.productionMode === 'Batch Production' ? 'batch' : 'fresh',
         createdAt: editingItem ? editingItem.createdAt : new Date().toISOString(),
@@ -1240,6 +1112,10 @@ export const MenuManagement: React.FC = () => {
       if (filterAvailable === 'available' && !item.isAvailable) return false;
       if (filterAvailable === 'out-of-stock' && item.isAvailable) return false;
 
+      // Published / Draft filter
+      if (filterPublish === 'published' && item.isPublished === false) return false;
+      if (filterPublish === 'draft' && item.isPublished !== false) return false;
+
       return true;
     }).sort((a, b) => {
       switch (sortBy) {
@@ -1307,6 +1183,10 @@ export const MenuManagement: React.FC = () => {
         {[
           { id: 'categories', label: 'Categories', icon: Layers },
           { id: 'items', label: 'Menu Items', icon: Grid },
+          { id: 'variants', label: 'Portions & Sizes', icon: UtensilsCrossed },
+          { id: 'addons', label: 'Add-ons & Modifiers', icon: Plus },
+          { id: 'combos', label: 'Combos & Bundles', icon: ShoppingBag },
+          { id: 'analytics', label: 'Menu Analytics', icon: TrendingUp },
           { id: 'availability', label: 'Availability', icon: Grid },
           { id: 'pricing', label: 'Pricing', icon: DollarSign },
           { id: 'preview', label: 'Menu Preview', icon: Eye },
@@ -1441,7 +1321,7 @@ export const MenuManagement: React.FC = () => {
 
               {/* Filters Panel */}
               <Card className="p-3 border-slate-850 bg-slate-900/20">
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
                   <Select 
                     options={[{ value: 'all', label: 'All Categories' }, ...categories.map(c => ({ value: c.id, label: c.name }))]}
                     value={filterCategory}
@@ -1467,6 +1347,15 @@ export const MenuManagement: React.FC = () => {
                   />
                   <Select 
                     options={[
+                      { value: 'all', label: 'All Statuses' },
+                      { value: 'published', label: 'Published' },
+                      { value: 'draft', label: 'Draft / Hidden' }
+                    ]}
+                    value={filterPublish}
+                    onChange={(e) => setFilterPublish(e.target.value)}
+                  />
+                  <Select 
+                    options={[
                       { value: 'name-asc', label: 'Name: A-Z' },
                       { value: 'name-desc', label: 'Name: Z-A' },
                       { value: 'price-asc', label: 'Price: Low to High' },
@@ -1484,6 +1373,7 @@ export const MenuManagement: React.FC = () => {
                       setFilterCategory('all');
                       setFilterVeg('all');
                       setFilterAvailable('all');
+                      setFilterPublish('all');
                       setSortBy('name-asc');
                     }}
                     className="col-span-2 md:col-span-1"
@@ -1526,6 +1416,23 @@ export const MenuManagement: React.FC = () => {
                           {item.isVeg ? <Badge variant="success">Veg</Badge> : <Badge variant="danger">Non-Veg</Badge>}
                           {item.isBestSeller && <Badge variant="primary">Bestseller</Badge>}
                           {item.isRecommended && <Badge variant="warning">Recommended</Badge>}
+                        </div>
+                        <div className="absolute top-2 right-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleItemPublished(item);
+                            }}
+                            className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide border shadow-sm backdrop-blur transition-all ${
+                              item.isPublished !== false
+                                ? 'bg-emerald-500/90 text-white border-emerald-400 hover:bg-emerald-600'
+                                : 'bg-amber-500/90 text-white border-amber-400 hover:bg-amber-600'
+                            }`}
+                            title={item.isPublished !== false ? 'Published (Click to hide/draft)' : 'Draft (Click to publish)'}
+                          >
+                            {item.isPublished !== false ? 'Published' : 'Draft'}
+                          </button>
                         </div>
                         <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-slate-950/80 backdrop-blur text-[10px] font-bold text-textPearl">
                           {item.preparationTime} mins
@@ -1609,6 +1516,26 @@ export const MenuManagement: React.FC = () => {
                 </div>
               )}
             </div>
+          )}
+
+          {/* PORTIONS & VARIANTS TAB */}
+          {activeTab === 'variants' && user?.tenantId && (
+            <MenuVariantsTab tenantId={user.tenantId} menuItems={menuItems} />
+          )}
+
+          {/* ADD-ONS & MODIFIERS TAB */}
+          {activeTab === 'addons' && user?.tenantId && (
+            <MenuAddonsTab tenantId={user.tenantId} menuItems={menuItems} />
+          )}
+
+          {/* COMBOS & BUNDLES TAB */}
+          {activeTab === 'combos' && user?.tenantId && (
+            <MenuCombosTab tenantId={user.tenantId} menuItems={menuItems} />
+          )}
+
+          {/* MENU ANALYTICS TAB */}
+          {activeTab === 'analytics' && user?.tenantId && (
+            <MenuAnalyticsTab tenantId={user.tenantId} menuItems={menuItems} categories={categories} />
           )}
 
           {/* AVAILABILITY TAB */}
@@ -1865,17 +1792,8 @@ export const MenuManagement: React.FC = () => {
                 </div>
                 <div className="flex space-x-3">
                   <Button 
-                    onClick={seedSampleItems} 
-                    disabled={isSeeding || isTesting}
-                    isLoading={isSeeding}
-                    variant="outline"
-                    className="flex items-center space-x-2"
-                  >
-                    <span>Seed Sample Items</span>
-                  </Button>
-                  <Button 
                     onClick={runAutoTests} 
-                    disabled={isTesting || isSeeding}
+                    disabled={isTesting}
                     isLoading={isTesting}
                     className="flex items-center space-x-2 bg-primary text-background hover:bg-primary-hover shadow-lg"
                   >
@@ -2189,6 +2107,11 @@ export const MenuManagement: React.FC = () => {
                       checked={watchIsAvailable}
                       onChange={(val) => setValueItem('isAvailable', val)}
                       label="In Stock"
+                    />
+                    <Switch 
+                      checked={watchIsPublished !== false}
+                      onChange={(val) => setValueItem('isPublished', val)}
+                      label="Published"
                     />
                     <Switch 
                       checked={watchIsBestSeller}

@@ -16,7 +16,8 @@ import {
   getMenuItemPath,
   getMenuCategoryPath,
   getMenuVariantPath,
-  getMenuAddonPath
+  getMenuAddonPath,
+  getMenuComboPath
 } from '../../../shared/firebase/collections';
 import { IMenuItem, IOrderItem } from '../../../shared/types';
 import { useCart } from '../../../shared/services/CartContext';
@@ -98,6 +99,7 @@ export const CustomerMenu: React.FC = () => {
   const [categories, setCategories] = useState<{ id: string; name: string; displayOrder: number }[]>([]);
   const [variantsList, setVariantsList] = useState<any[]>([]);
   const [addonsList, setAddonsList] = useState<any[]>([]);
+  const [combosList, setCombosList] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -155,6 +157,7 @@ export const CustomerMenu: React.FC = () => {
     setCategories([]);
     setVariantsList([]);
     setAddonsList([]);
+    setCombosList([]);
     setRestaurantName('Loading...');
     setCoverImage('');
     setLogoUrl('');
@@ -329,6 +332,14 @@ export const CustomerMenu: React.FC = () => {
       setAddonsList(list);
     }, () => {});
 
+    // Fetch Combos in real-time (restaurants/{tenantId}/menu/default/combos)
+    const combosColRef = collection(db, getMenuComboPath(tenantId));
+    const unsubCombos = onSnapshot(query(combosColRef), (snap) => {
+      const list: any[] = [];
+      snap.forEach((d) => list.push({ id: d.id, ...d.data() }));
+      setCombosList(list);
+    }, () => {});
+
     // Log Menu Viewed Event (non-blocking)
     customerService.logCustomerEvent(tenantId, 'Menu Viewed', `Customer opened menu for ${tenantId}`, {
       tenantId,
@@ -341,6 +352,7 @@ export const CustomerMenu: React.FC = () => {
       unsubItems();
       unsubVariants();
       unsubAddons();
+      unsubCombos();
     };
   }, [tenantId, searchParams]);
 
@@ -415,6 +427,9 @@ export const CustomerMenu: React.FC = () => {
   // -------------------------------------------------------------
   const filteredItems = useMemo(() => {
     let result = [...menuItems];
+
+    // Omit unpublished dishes from customer menu
+    result = result.filter(item => item.isPublished !== false && item.published !== false && item.status !== 'unpublished');
 
     // Filter by Category
     if (activeCategory !== 'all') {
@@ -558,6 +573,12 @@ export const CustomerMenu: React.FC = () => {
           </div>
         </div>
       ), { duration: 6000 });
+      return;
+    }
+
+    // Out of stock guard: cannot add unavailable dishes to cart
+    if (item.isAvailable === false || item.available === false || item.availability === false) {
+      toast.error(`"${item.name}" is currently sold out and cannot be added.`);
       return;
     }
 
@@ -713,17 +734,90 @@ export const CustomerMenu: React.FC = () => {
         }
       }
 
-      // Check item availability
-      const unavailableItem = cartItems.find(ci => {
-        const matching = menuItems.find(m => m.id === ci.itemId);
-        return matching && (matching.available === false || matching.isAvailable === false);
-      });
+      // CANONICAL FIRESTORE REVALIDATION: Re-verify availability and pricing directly against Firestore
+      let verifiedSubtotal = 0;
+      const verifiedItems: any[] = [];
 
-      if (unavailableItem) {
-        toast.error(`"${unavailableItem.name}" is currently sold out. Please remove it from basket.`);
-        setIsPlacingOrder(false);
-        return;
+      for (const cartItem of cartItems) {
+        // Fetch canonical item document directly from Firestore
+        const itemDocRef = doc(db, getMenuItemPath(tenantId), cartItem.itemId);
+        const itemSnap = await getDoc(itemDocRef);
+
+        if (!itemSnap.exists()) {
+          // Check if item is a combo
+          const comboDocRef = doc(db, getMenuComboPath(tenantId), cartItem.itemId);
+          const comboSnap = await getDoc(comboDocRef);
+
+          if (!comboSnap.exists()) {
+            toast.error(`"${cartItem.name}" is no longer on the restaurant menu.`);
+            setIsPlacingOrder(false);
+            return;
+          }
+
+          const comboData = comboSnap.data();
+          if (comboData.isPublished === false || comboData.status === 'unpublished') {
+            toast.error(`"${comboData.name || cartItem.name}" is currently unavailable.`);
+            setIsPlacingOrder(false);
+            return;
+          }
+
+          if (comboData.isAvailable === false || comboData.available === false) {
+            toast.error(`"${comboData.name || cartItem.name}" is currently unavailable. Please remove it from your basket.`);
+            setIsPlacingOrder(false);
+            return;
+          }
+
+          const canonicalComboPrice = Number(comboData.price ?? cartItem.pricePerUnit);
+          verifiedSubtotal += canonicalComboPrice * cartItem.count;
+          verifiedItems.push({
+            itemId: cartItem.itemId,
+            name: comboData.name || cartItem.name,
+            count: cartItem.count,
+            notes: cartItem.notes || '',
+            pricePerUnit: canonicalComboPrice,
+            image: comboData.image || comboData.imageUrl || cartItem.image || '',
+            isVeg: false
+          });
+          continue;
+        }
+
+        const itemData = itemSnap.data();
+
+        // Check if item is unpublished
+        if (itemData.isPublished === false || itemData.published === false || itemData.status === 'unpublished') {
+          toast.error(`"${itemData.name || cartItem.name}" is currently unavailable. Please remove it from your basket.`);
+          setIsPlacingOrder(false);
+          return;
+        }
+
+        // Check canonical availability
+        if (itemData.isAvailable === false || itemData.available === false || itemData.availability === false) {
+          toast.error(`"${itemData.name || cartItem.name}" is currently unavailable. Please remove it from your basket.`);
+          setIsPlacingOrder(false);
+          return;
+        }
+
+        // Use canonical pricing from Firestore (prevents client-side price tampering)
+        const canonicalItemPrice = Number(itemData.discountPrice || itemData.price || cartItem.pricePerUnit);
+        // Include variant / addon offsets if present
+        const effectiveUnitCost = canonicalItemPrice > 0 ? canonicalItemPrice : cartItem.pricePerUnit;
+        verifiedSubtotal += effectiveUnitCost * cartItem.count;
+
+        verifiedItems.push({
+          itemId: cartItem.itemId,
+          name: itemData.name || cartItem.name,
+          count: cartItem.count,
+          notes: cartItem.notes || '',
+          pricePerUnit: effectiveUnitCost,
+          image: itemData.image || itemData.imageUrl || cartItem.image || '',
+          isVeg: itemData.isVeg ?? itemData.veg ?? itemData.vegetarian ?? cartItem.isVeg
+        });
       }
+
+      // Re-derive canonical taxes and totals
+      const verifiedTax = Math.round(verifiedSubtotal * 0.05);
+      const verifiedServiceCharge = Math.round(verifiedSubtotal * 0.05);
+      const verifiedTotal = verifiedSubtotal + verifiedTax + verifiedServiceCharge;
 
       // Ensure active dining session exists and has a valid sessionId
       let currentSession = session || getActiveDiningSession(tenantId);
@@ -765,21 +859,13 @@ export const CustomerMenu: React.FC = () => {
         tableName: currentSession?.tableName || `Table ${cleanTableNum}`,
         orderType: 'dine_in',
         orderSource: currentSession?.orderSource || (searchParams.get('source') === 'qr' ? 'qr' : 'app'),
-        items: cartItems.map(item => ({
-          itemId: item.itemId,
-          name: item.name,
-          count: item.count,
-          notes: item.notes || '',
-          pricePerUnit: item.pricePerUnit,
-          image: item.image || item.imageUrl || '',
-          isVeg: item.isVeg ?? item.veg
-        })),
-        subtotal: cartSubtotal,
-        tax: gstCharge,
-        serviceCharge: serviceCharge,
+        items: verifiedItems,
+        subtotal: verifiedSubtotal,
+        tax: verifiedTax,
+        serviceCharge: verifiedServiceCharge,
         discount: 0,
-        totalAmount: totalCartCost,
-        total: totalCartCost,
+        totalAmount: verifiedTotal,
+        total: verifiedTotal,
         status: 'NEW',
         paymentStatus: 'pending',
         createdAt: new Date().toISOString(),
@@ -791,6 +877,7 @@ export const CustomerMenu: React.FC = () => {
       };
 
       await setDoc(orderRef, orderPayload);
+
 
       // Persist order reference to customer profile if authenticated
       if (user?.uid) {

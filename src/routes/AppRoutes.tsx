@@ -76,6 +76,7 @@ const WaiterPerformancePage = React.lazy(() => import('../apps/owner/waiter/Wait
 const WaiterTimelinePage = React.lazy(() => import('../apps/owner/waiter/WaiterTimelinePage'));
 const WaiterShiftReportPage = React.lazy(() => import('../apps/owner/waiter/WaiterShiftReportPage'));
 const WaiterBillingPage = React.lazy(() => import('../apps/owner/waiter/WaiterBillingPage'));
+const WaiterMenuAvailabilityPage = React.lazy(() => import('../apps/owner/waiter/WaiterMenuAvailabilityPage'));
 
 // Super Admin
 const SuperAdminLayout = React.lazy(() => import('../apps/super-admin/layouts/SuperAdminLayout'));
@@ -388,6 +389,7 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/dashboard/waiter" element={<WaiterMatrix />} />
                 <Route path="/dashboard/waiter/alerts" element={<WaiterAlerts />} />
                 <Route path="/dashboard/waiter/live-orders" element={<WaiterLiveOrdersPage />} />
+                <Route path="/dashboard/waiter/menu-availability" element={<WaiterMenuAvailabilityPage />} />
                 <Route path="/dashboard/waiter/orders" element={<Navigate to="/dashboard/waiter/live-orders" replace />} />
                 <Route path="/dashboard/waiter/assigned-tables" element={<WaiterAssignedTablesPage />} />
                 <Route path="/dashboard/waiter/order-history" element={<WaiterOrderHistoryPage />} />

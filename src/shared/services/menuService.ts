@@ -1,82 +1,63 @@
-import { menuItemsService, menuCategoriesService } from '../firebase/firestore';
-import { IMenuItem, IMenuCategory } from '../domain/menu/types';
+import { 
+  menuItemsService, 
+  menuCategoriesService, 
+  menuVariantsService, 
+  menuAddonsService, 
+  menuCombosService 
+} from '../firebase/firestore';
+import { 
+  IMenuItem, 
+  IMenuCategory, 
+  IMenuVariant, 
+  IMenuAddon, 
+  IMenuCombo 
+} from '../domain/menu/types';
 
 /**
- * Service for handling Menu Items and Menu Categories operational CRUD.
- * Interacts with Firestore collections.
+ * Service for handling Menu Items, Categories, Variants, Addons, and Combos CRUD.
+ * Interacts with Firestore canonical collections.
  */
 export const menuService = {
-  /**
-   * Retrieves all menu items for the tenant.
-   * 
-   * @param tenantId - Optional tenant identifier.
-   * @returns A promise resolving to an array of menu items.
-   */
+  // --- ITEMS ---
   getItems: (tenantId?: string) => menuItemsService.getAll(tenantId) as Promise<IMenuItem[]>,
-
-  /**
-   * Creates a new menu item.
-   * 
-   * @param data - The menu item object data excluding the ID.
-   * @param tenantId - Optional tenant identifier.
-   * @returns A promise resolving to the created item.
-   */
   createItem: (data: Omit<IMenuItem, 'id'> & { id?: string }, tenantId?: string) => menuItemsService.create(data, tenantId),
-
-  /**
-   * Updates an existing menu item.
-   * 
-   * @param id - The unique ID of the menu item.
-   * @param data - Partial fields to update.
-   * @param tenantId - Optional tenant identifier.
-   * @returns A promise resolving when the update completes.
-   */
   updateItem: (id: string, data: Partial<IMenuItem>, tenantId?: string) => menuItemsService.update(id, data, tenantId),
-
-  /**
-   * Deletes a menu item.
-   * 
-   * @param id - The unique ID of the menu item to delete.
-   * @param tenantId - Optional tenant identifier.
-   * @returns A promise resolving when the deletion completes.
-   */
   deleteItem: (id: string, tenantId?: string) => menuItemsService.delete(id, tenantId),
+  listenItems: (callback: (items: IMenuItem[]) => void, tenantId?: string) => 
+    menuItemsService.listen((items) => callback(items as IMenuItem[]), tenantId),
 
-  /**
-   * Retrieves all menu categories for the tenant.
-   * 
-   * @param tenantId - Optional tenant identifier.
-   * @returns A promise resolving to an array of menu categories.
-   */
+  // --- CATEGORIES ---
   getCategories: (tenantId?: string) => menuCategoriesService.getAll(tenantId) as Promise<IMenuCategory[]>,
-
-  /**
-   * Creates a new menu category.
-   * 
-   * @param data - The category object data excluding the ID.
-   * @param tenantId - Optional tenant identifier.
-   * @returns A promise resolving to the created category.
-   */
   createCategory: (data: Omit<IMenuCategory, 'id'> & { id?: string }, tenantId?: string) => menuCategoriesService.create(data, tenantId),
-
-  /**
-   * Updates an existing menu category.
-   * 
-   * @param id - The unique ID of the category.
-   * @param data - Partial fields to update.
-   * @param tenantId - Optional tenant identifier.
-   * @returns A promise resolving when the update completes.
-   */
   updateCategory: (id: string, data: Partial<IMenuCategory>, tenantId?: string) => menuCategoriesService.update(id, data, tenantId),
-
-  /**
-   * Deletes a menu category.
-   * 
-   * @param id - The unique ID of the category to delete.
-   * @param tenantId - Optional tenant identifier.
-   * @returns A promise resolving when the deletion completes.
-   */
   deleteCategory: (id: string, tenantId?: string) => menuCategoriesService.delete(id, tenantId),
+  listenCategories: (callback: (categories: IMenuCategory[]) => void, tenantId?: string) => 
+    menuCategoriesService.listen((categories) => callback(categories as IMenuCategory[]), tenantId),
+
+  // --- VARIANTS ---
+  getVariants: (tenantId?: string) => menuVariantsService.getAll(tenantId) as Promise<IMenuVariant[]>,
+  createVariant: (data: Omit<IMenuVariant, 'id'> & { id?: string }, tenantId?: string) => menuVariantsService.create(data, tenantId),
+  updateVariant: (id: string, data: Partial<IMenuVariant>, tenantId?: string) => menuVariantsService.update(id, data, tenantId),
+  deleteVariant: (id: string, tenantId?: string) => menuVariantsService.delete(id, tenantId),
+  listenVariants: (callback: (variants: IMenuVariant[]) => void, tenantId?: string) => 
+    menuVariantsService.listen((variants) => callback(variants as IMenuVariant[]), tenantId),
+
+  // --- ADDONS ---
+  getAddons: (tenantId?: string) => menuAddonsService.getAll(tenantId) as Promise<IMenuAddon[]>,
+  createAddon: (data: Omit<IMenuAddon, 'id'> & { id?: string }, tenantId?: string) => menuAddonsService.create(data, tenantId),
+  updateAddon: (id: string, data: Partial<IMenuAddon>, tenantId?: string) => menuAddonsService.update(id, data, tenantId),
+  deleteAddon: (id: string, tenantId?: string) => menuAddonsService.delete(id, tenantId),
+  listenAddons: (callback: (addons: IMenuAddon[]) => void, tenantId?: string) => 
+    menuAddonsService.listen((addons) => callback(addons as IMenuAddon[]), tenantId),
+
+  // --- COMBOS ---
+  getCombos: (tenantId?: string) => menuCombosService.getAll(tenantId) as Promise<IMenuCombo[]>,
+  createCombo: (data: Omit<IMenuCombo, 'id'> & { id?: string }, tenantId?: string) => menuCombosService.create(data, tenantId),
+  updateCombo: (id: string, data: Partial<IMenuCombo>, tenantId?: string) => menuCombosService.update(id, data, tenantId),
+  deleteCombo: (id: string, tenantId?: string) => menuCombosService.delete(id, tenantId),
+  listenCombos: (callback: (combos: IMenuCombo[]) => void, tenantId?: string) => 
+    menuCombosService.listen((combos) => callback(combos as IMenuCombo[]), tenantId),
 };
 export default menuService;
+
 
