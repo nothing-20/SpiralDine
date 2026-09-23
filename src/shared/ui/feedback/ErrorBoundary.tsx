@@ -45,14 +45,20 @@ export class ErrorBoundary extends Component<Props, State> {
 
             <div className="space-y-1.5">
               <h2 className="text-lg font-extrabold text-[#202124] tracking-tight font-display">
-                {this.props.fallbackTitle || 'Explore failed to load'}
+                {this.props.fallbackTitle || 'Application Notice'}
               </h2>
               <p className="text-xs text-[#756B64] font-medium leading-relaxed max-w-sm mx-auto">
-                {this.props.fallbackSubtitle || 'Something went wrong while opening restaurant discovery.'}
+                {this.props.fallbackSubtitle || 'An unexpected issue occurred while rendering this view.'}
               </p>
             </div>
 
-            <div className="pt-2 flex justify-center">
+            {this.state.error?.message && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-[11px] text-red-700 font-mono break-all text-left max-h-32 overflow-y-auto">
+                {this.state.error.message}
+              </div>
+            )}
+
+            <div className="pt-2 flex justify-center gap-3">
               <button
                 type="button"
                 onClick={this.handleRetry}
@@ -60,6 +66,15 @@ export class ErrorBoundary extends Component<Props, State> {
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>Retry</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = '/owner/dashboard';
+                }}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl transition-all"
+              >
+                Go to Dashboard
               </button>
             </div>
           </div>

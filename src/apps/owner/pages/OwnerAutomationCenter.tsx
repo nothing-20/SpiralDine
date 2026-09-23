@@ -465,7 +465,7 @@ export const OwnerAutomationCenter: React.FC = () => {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {automationRules.map(rule => (
-                <div key={rule.id} className="bg-slate-950/40 p-4.5 border border-slate-855 rounded-2xl flex flex-col justify-between space-y-4 select-none">
+                <div key={rule.id} className="bg-slate-950/40 p-5 border border-slate-855 rounded-2xl flex flex-col justify-between space-y-4 select-none">
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-start gap-3">
                       <strong className="text-textPearl font-bold text-sm block">{rule.name}</strong>
