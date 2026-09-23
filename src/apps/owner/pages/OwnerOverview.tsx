@@ -160,11 +160,11 @@ export const OwnerOverview: React.FC = () => {
 
   // Operational Reservation Segmentation: Active arrivals vs Completed historical records
   const activeReservationsList = useMemo(() => {
-    return reservations.filter(r => r.status !== 'Completed' && r.status !== 'Cancelled');
+    return (reservations || []).filter(r => r && r.status !== 'Completed' && r.status !== 'Cancelled');
   }, [reservations]);
 
   const completedReservationsList = useMemo(() => {
-    return reservations.filter(r => r.status === 'Completed');
+    return (reservations || []).filter(r => r && r.status === 'Completed');
   }, [reservations]);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -463,8 +463,10 @@ export const OwnerOverview: React.FC = () => {
 
   // Realtime synchronization: Reconcile seated reservations whose dining lifecycle (table Available + paid) has finished
   useEffect(() => {
-    if (!tenantId || reservations.length === 0 || tables.length === 0) return;
-    reservationService.syncCompletedReservations(tenantId, tables, orders, reservations);
+    if (!tenantId || !Array.isArray(reservations) || reservations.length === 0 || !Array.isArray(tables) || tables.length === 0) return;
+    reservationService.syncCompletedReservations(tenantId, tables, orders, reservations).catch((err) => {
+      console.warn('[OwnerOverview] syncCompletedReservations background notice:', err);
+    });
   }, [tenantId, reservations, tables, orders]);
 
   // Compile intelligence variables once on load and whenever orders/inventory updates

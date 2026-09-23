@@ -132,5 +132,15 @@ export const isTableCleaning = (status?: string): boolean => {
   return s === 'cleaning' || s === 'needs_cleaning' || s === 'sanitizing';
 };
 
+/**
+ * Normalizes a table identifier string or number, stripping "Table " / "TBL-" prefixes and trimming whitespace.
+ */
+export const cleanTableIdentifier = (val?: string | number): string => {
+  return String(val || '')
+    .trim()
+    .replace(/^(table|tbl)[-\s]*/i, '')
+    .trim();
+};
+
 
 

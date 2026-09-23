@@ -186,8 +186,10 @@ export const OwnerReservations: React.FC = () => {
 
   // Realtime synchronization: Reconcile seated reservations whose dining lifecycle (table Available + paid) has finished
   useEffect(() => {
-    if (!tenantId || reservations.length === 0 || tables.length === 0) return;
-    reservationService.syncCompletedReservations(tenantId, tables, orders, reservations);
+    if (!tenantId || !Array.isArray(reservations) || reservations.length === 0 || !Array.isArray(tables) || tables.length === 0) return;
+    reservationService.syncCompletedReservations(tenantId, tables, orders, reservations).catch((err) => {
+      console.warn('[OwnerReservations] syncCompletedReservations background notice:', err);
+    });
   }, [tenantId, reservations, tables, orders]);
 
   // Filter reservations based on tabs, search, and date

@@ -11,14 +11,9 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { tablesService } from '../firebase/firestore';
-import { ITable, TTableStatus } from '../domain/tables/types';
+import { ITable, TTableStatus, cleanTableIdentifier } from '../domain/tables/types';
 
-export const cleanTableIdentifier = (val?: string | number): string => {
-  return String(val || '')
-    .trim()
-    .replace(/^(table|tbl)[-\s]*/i, '')
-    .trim();
-};
+export { cleanTableIdentifier };
 
 export const tableService = {
   getTables: (tenantId?: string) => tablesService.getAll(tenantId) as Promise<ITable[]>,

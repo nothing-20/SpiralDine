@@ -9,9 +9,8 @@ import {
   limit
 } from 'firebase/firestore';
 import { db } from '../../config/firebase';
-import { ITable, isTableAvailable } from '../domain/tables/types';
+import { ITable, isTableAvailable, cleanTableIdentifier } from '../domain/tables/types';
 import { IOrder } from '../domain/orders/types';
-import { cleanTableIdentifier } from './tableService';
 import { logAuditEvent } from './auditService';
 import { logEvent } from './eventEngine';
 

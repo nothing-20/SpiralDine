@@ -7,6 +7,7 @@ import { collection, query, where, limit, onSnapshot, getDocs } from 'firebase/f
 import { db } from '../../firebase/config';
 import { inventoryService } from '../../services/inventoryService';
 import { automationService } from '../../services/automationService';
+import ErrorBoundary from '../feedback/ErrorBoundary';
 
 export const useInventoryAutomation = () => {
   const { user } = useAuth();
@@ -201,7 +202,9 @@ export const DashboardLayout: React.FC = () => {
             </>
           )}
           <div className="relative z-10 max-w-7xl mx-auto">
-            <Outlet />
+            <ErrorBoundary fallbackTitle="Dashboard Page Notice" fallbackSubtitle="This view encountered an issue while loading.">
+              <Outlet />
+            </ErrorBoundary>
           </div>
         </main>
       </div>
