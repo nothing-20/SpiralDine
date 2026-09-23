@@ -30,8 +30,17 @@ export const orderService = {
    * @param tenantId - Optional tenant identifier.
    * @returns A promise resolving to the created order's ID or write result.
    */
-  createOrder: (data: Omit<IOrder, 'id'> & { tenantId?: string }, tenantId?: string) =>
-    ordersService.create(data, { tenantId: tenantId || data.tenantId }),
+  createOrder: (data: Omit<IOrder, 'id'> & { tenantId?: string }, tenantId?: string) => {
+    // Hard validation rule: Zero-item food orders must never be created
+    if (!data.items || !Array.isArray(data.items) || data.items.length === 0) {
+      throw new Error('Order creation rejected: An order must contain at least one valid menu item.');
+    }
+    const orderTotal = Number(data.total ?? (data as any).totalAmount ?? 0);
+    if (orderTotal <= 0 && data.items.length === 0) {
+      throw new Error('Order creation rejected: Order total cannot be zero with no items.');
+    }
+    return ordersService.create(data, { tenantId: tenantId || data.tenantId });
+  },
 
   /**
    * Updates an existing order's fields in Firestore.

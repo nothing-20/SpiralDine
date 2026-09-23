@@ -84,6 +84,10 @@ export const isOrderTerminal = (order?: {
  * a terminal status and whose payment or service is still pending.
  */
 export const isOrderActive = (order?: { 
+  items?: any[];
+  itemsCount?: number;
+  total?: number;
+  totalAmount?: number;
   status?: string; 
   orderStatus?: string; 
   paymentStatus?: string; 
@@ -91,6 +95,13 @@ export const isOrderActive = (order?: {
   isPaid?: boolean;
 } | null): boolean => {
   if (!order) return false;
+  // Hard validation: An order with no items or 0 items is NOT an active food order
+  if (Array.isArray(order.items) && order.items.length === 0) {
+    return false;
+  }
+  if (typeof order.itemsCount === 'number' && order.itemsCount === 0 && (!order.items || order.items.length === 0)) {
+    return false;
+  }
   return !isOrderTerminal(order);
 };
 

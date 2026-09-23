@@ -1461,49 +1461,35 @@ export const OwnerOverview: React.FC = () => {
       } else if (resActionType === 'Seat') {
         const nowIso = new Date().toISOString();
         const targetTable = tables.find(t => t.id === resTableInput);
-        const orderId = `ORD-${Math.floor(100000 + Math.random() * 900000)}`;
         
-        // Seat guests with complete table & order linkage
+        // Seat guests with complete table assignment (Table session != Order)
         const resUpdateObj = { 
           status: 'Seated', 
           seatedAt: nowIso,
           assignedTableId: targetTable?.id || resTableInput,
           assignedTableNumber: targetTable ? (targetTable.tableNumber || targetTable.number || '') : '',
-          activeOrderId: orderId,
-          orderId: orderId,
           updatedAt: nowIso
         };
         batch.update(resRef, resUpdateObj);
         if (custResRef) batch.update(custResRef, resUpdateObj);
         
-        // Update physical Table
+        // Update physical Table — guest is seated & browsing; no food order exists yet
         if (targetTable) {
           const tableRef = doc(db, 'restaurants', tenantId, 'tables', targetTable.id);
-          const orderRef = doc(db, 'restaurants', tenantId, 'orders', orderId);
-          
-          // Create blank order to start dining session linked to reservation
-          batch.set(orderRef, {
-            id: orderId,
-            orderId,
-            reservationId: selectedRes.id,
-            customerId: selectedRes.customerId,
-            customerName: selectedRes.customerName,
-            tableNumber: targetTable.tableNumber || targetTable.number,
-            tableId: targetTable.id,
-            tenantId: tenantId,
-            items: [],
-            status: 'ACCEPTED',
-            subtotal: 0,
-            total: 0,
-            createdAt: nowIso,
-            updatedAt: nowIso
-          });
-
           batch.update(tableRef, {
             status: 'Occupied',
-            activeOrderId: orderId,
+            tableStatus: 'Occupied',
+            subStatus: 'browsing',
+            diningStatus: 'browsing',
+            customerPresent: true,
+            activeOrderId: null,
+            currentOrderId: null,
             reservationId: selectedRes.id,
             seatingTime: nowIso,
+            seatedAt: nowIso,
+            customerName: selectedRes.customerName || 'Guest Diner',
+            customerPhone: selectedRes.customerPhone || '',
+            customerId: selectedRes.customerId || '',
             guestsCount: selectedRes.guests || 2,
             assignedWaiterId: user?.uid || '',
             assignedWaiterName: user?.displayName || user?.email || 'Host'

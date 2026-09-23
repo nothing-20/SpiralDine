@@ -287,8 +287,13 @@ export const CartPage: React.FC = () => {
   // 6. Checkout / Order Placement Handler
   const handleCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (cartItems.length === 0) {
+    if (isPlacingOrder) return;
+    if (!cartItems || cartItems.length === 0) {
       toast.error('Your cart is empty.');
+      return;
+    }
+    if (subtotal <= 0 || grandTotal <= 0) {
+      toast.error('Order total must be greater than ₹0.00 to place an order.');
       return;
     }
 
