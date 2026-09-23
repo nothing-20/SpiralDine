@@ -53,8 +53,13 @@ export class ErrorBoundary extends Component<Props, State> {
             </div>
 
             {this.state.error?.message && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-[11px] text-red-700 font-mono break-all text-left max-h-32 overflow-y-auto">
-                {this.state.error.message}
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-[11px] text-red-700 font-mono break-all text-left max-h-48 overflow-y-auto">
+                <div className="font-bold mb-1">{this.state.error.message}</div>
+                {this.state.error.stack && (
+                  <pre className="text-[10px] text-red-600/80 whitespace-pre-wrap font-mono mt-2 pt-2 border-t border-red-200">
+                    {this.state.error.stack}
+                  </pre>
+                )}
               </div>
             )}
 
