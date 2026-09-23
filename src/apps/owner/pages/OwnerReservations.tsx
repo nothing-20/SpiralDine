@@ -8,11 +8,13 @@ import {
   setDoc, 
   updateDoc, 
   deleteDoc, 
-  where 
+  where,
+  limit
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { restaurantService } from '../../../shared/services/restaurantService';
+import { reservationService } from '../../../shared/services/reservationService';
 import { logAuditEvent } from '../../../shared/services/auditService';
 
 // UI Kit components
@@ -78,6 +80,7 @@ export const OwnerReservations: React.FC = () => {
 
   const [reservations, setReservations] = useState<IReservationRecord[]>([]);
   const [tables, setTables] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
   const [restaurants, setRestaurants] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
@@ -128,19 +131,28 @@ export const OwnerReservations: React.FC = () => {
     };
     fetchRestaurants();
 
-    // Fetch tables for assignment
-    const fetchTables = async () => {
-      try {
-        const snapTables = await getDocs(collection(db, 'restaurants', targetTenant, 'tables'));
+    // Real-time listener for tables
+    const unsubTables = onSnapshot(
+      collection(db, 'restaurants', targetTenant, 'tables'),
+      (snap) => {
         const tList: any[] = [];
-        snapTables.forEach(d => tList.push({ id: d.id, ...d.data() }));
+        snap.forEach(d => tList.push({ id: d.id, ...d.data() }));
         setTables(tList);
-      } catch (_) {}
-    };
-    fetchTables();
+      }
+    );
+
+    // Real-time listener for recent orders
+    const unsubOrders = onSnapshot(
+      query(collection(db, 'restaurants', targetTenant, 'orders'), limit(200)),
+      (snap) => {
+        const oList: any[] = [];
+        snap.forEach(d => oList.push({ id: d.id, ...d.data() }));
+        setOrders(oList);
+      }
+    );
 
     // Real-time listener for reservations
-    const unsub = onSnapshot(
+    const unsubRes = onSnapshot(
       collection(db, 'restaurants', targetTenant, 'reservations'),
       (snapshot) => {
         const list: IReservationRecord[] = [];
@@ -165,8 +177,18 @@ export const OwnerReservations: React.FC = () => {
       }
     );
 
-    return () => unsub();
+    return () => {
+      unsubTables();
+      unsubOrders();
+      unsubRes();
+    };
   }, [user, tenantId]);
+
+  // Realtime synchronization: Reconcile seated reservations whose dining lifecycle (table Available + paid) has finished
+  useEffect(() => {
+    if (!tenantId || reservations.length === 0 || tables.length === 0) return;
+    reservationService.syncCompletedReservations(tenantId, tables, orders, reservations);
+  }, [tenantId, reservations, tables, orders]);
 
   // Filter reservations based on tabs, search, and date
   const filteredReservations = useMemo(() => {

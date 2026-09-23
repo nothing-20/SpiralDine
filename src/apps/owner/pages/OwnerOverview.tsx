@@ -25,6 +25,7 @@ import { calculateBusinessHealth, IBusinessHealthReport } from '../../../shared/
 import { automationService } from '../../../shared/services/automationService';
 import { inventoryService } from '../../../shared/services/inventoryService';
 import { logEvent } from '../../../shared/services/eventEngine';
+import { reservationService } from '../../../shared/services/reservationService';
 import { featureFlags } from '../../../config/featureFlags';
 
 // UI Kit components
@@ -156,6 +157,15 @@ export const OwnerOverview: React.FC = () => {
       return r === 'waiter' || r === 'server' || r === 'waitstaff';
     });
   }, [employees]);
+
+  // Operational Reservation Segmentation: Active arrivals vs Completed historical records
+  const activeReservationsList = useMemo(() => {
+    return reservations.filter(r => r.status !== 'Completed' && r.status !== 'Cancelled');
+  }, [reservations]);
+
+  const completedReservationsList = useMemo(() => {
+    return reservations.filter(r => r.status === 'Completed');
+  }, [reservations]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isHealthModalOpen, setIsHealthModalOpen] = useState(false);
@@ -450,6 +460,12 @@ export const OwnerOverview: React.FC = () => {
       unsubReservations();
     };
   }, [tenantId]);
+
+  // Realtime synchronization: Reconcile seated reservations whose dining lifecycle (table Available + paid) has finished
+  useEffect(() => {
+    if (!tenantId || reservations.length === 0 || tables.length === 0) return;
+    reservationService.syncCompletedReservations(tenantId, tables, orders, reservations);
+  }, [tenantId, reservations, tables, orders]);
 
   // Compile intelligence variables once on load and whenever orders/inventory updates
   useEffect(() => {
@@ -1425,23 +1441,33 @@ export const OwnerOverview: React.FC = () => {
         if (custResRef) batch.update(custResRef, updateObj);
         toast.success('Service staff waiter assigned.');
       } else if (resActionType === 'Seat') {
-        // Seat guests
-        batch.update(resRef, { status: 'Seated', seatedAt: new Date().toISOString() });
-        if (custResRef) batch.update(custResRef, { status: 'Seated', seatedAt: new Date().toISOString() });
+        const nowIso = new Date().toISOString();
+        const targetTable = tables.find(t => t.id === resTableInput);
+        const orderId = `ORD-${Math.floor(100000 + Math.random() * 900000)}`;
+        
+        // Seat guests with complete table & order linkage
+        const resUpdateObj = { 
+          status: 'Seated', 
+          seatedAt: nowIso,
+          assignedTableId: targetTable?.id || resTableInput,
+          assignedTableNumber: targetTable ? (targetTable.tableNumber || targetTable.number || '') : '',
+          activeOrderId: orderId,
+          orderId: orderId,
+          updatedAt: nowIso
+        };
+        batch.update(resRef, resUpdateObj);
+        if (custResRef) batch.update(custResRef, resUpdateObj);
         
         // Update physical Table
-        const targetTable = tables.find(t => t.id === resTableInput);
         if (targetTable) {
           const tableRef = doc(db, 'restaurants', tenantId, 'tables', targetTable.id);
-          
-          // Generate activeOrderId
-          const orderId = `ORD-${Math.floor(100000 + Math.random() * 900000)}`;
           const orderRef = doc(db, 'restaurants', tenantId, 'orders', orderId);
           
-          // Create blank order to start dining session
+          // Create blank order to start dining session linked to reservation
           batch.set(orderRef, {
             id: orderId,
             orderId,
+            reservationId: selectedRes.id,
             customerId: selectedRes.customerId,
             customerName: selectedRes.customerName,
             tableNumber: targetTable.tableNumber || targetTable.number,
@@ -1451,14 +1477,15 @@ export const OwnerOverview: React.FC = () => {
             status: 'ACCEPTED',
             subtotal: 0,
             total: 0,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
+            createdAt: nowIso,
+            updatedAt: nowIso
           });
 
           batch.update(tableRef, {
             status: 'Occupied',
             activeOrderId: orderId,
-            seatingTime: new Date().toISOString(),
+            reservationId: selectedRes.id,
+            seatingTime: nowIso,
             guestsCount: selectedRes.guests || 2,
             assignedWaiterId: user?.uid || '',
             assignedWaiterName: user?.displayName || user?.email || 'Host'
@@ -2289,7 +2316,7 @@ export const OwnerOverview: React.FC = () => {
           </div>
 
           {/* Stats KPI cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="bg-white border border-[#E5E0D9] rounded-2xl p-5 shadow-xs text-left hover:border-slate-400 transition-colors flex flex-col justify-between">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10.5px] text-[#7B8794] font-extrabold uppercase tracking-wider">Total Bookings</span>
@@ -2341,6 +2368,19 @@ export const OwnerOverview: React.FC = () => {
                 <p className="text-[11px] text-[#7B8794] mt-0.5 font-medium">Expected guest arrivals</p>
               </div>
             </div>
+
+            <div className="bg-white border border-blue-200/90 rounded-2xl p-5 shadow-xs text-left bg-gradient-to-br from-white to-blue-50/40 hover:border-blue-300 transition-colors flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10.5px] text-blue-700 font-extrabold uppercase tracking-wider">Completed</span>
+                <div className="w-8 h-8 rounded-xl bg-blue-100 flex items-center justify-center text-blue-700 shrink-0">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-3">
+                <h3 className="text-2xl sm:text-3xl font-display font-black text-blue-600">{reservations.filter(r => r.status === 'Completed').length}</h3>
+                <p className="text-[11px] text-blue-800/80 mt-0.5 font-medium">Dining completed</p>
+              </div>
+            </div>
           </div>
 
           {/* Table Booking Calendar & List */}
@@ -2352,22 +2392,22 @@ export const OwnerOverview: React.FC = () => {
                 <h3 className="text-xs font-extrabold text-[#17202A] uppercase tracking-wider flex items-center gap-1.5">
                   <span>Bookings Arrivals Feed</span>
                   <span className="px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full text-[10px]">
-                    {reservations.length}
+                    {activeReservationsList.length}
                   </span>
                 </h3>
               </div>
               
-              {reservations.length === 0 ? (
+              {activeReservationsList.length === 0 ? (
                 <div className="h-64 flex flex-col items-center justify-center text-slate-400 bg-white border border-dashed border-[#E5E0D9] rounded-3xl p-8 text-center">
                   <div className="w-12 h-12 rounded-full bg-[#FCFAF7] border border-[#E5E0D9] flex items-center justify-center text-[#C85A3F] mb-3">
                     <Calendar className="w-6 h-6" />
                   </div>
-                  <h4 className="text-sm font-extrabold text-[#17202A]">No bookings registered yet</h4>
+                  <h4 className="text-sm font-extrabold text-[#17202A]">No active bookings currently</h4>
                   <p className="text-xs text-[#7B8794] mt-1 max-w-sm">New customer table reservation requests submitted from the web portal will appear here in real-time.</p>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {reservations.map((res) => {
+                  {activeReservationsList.map((res) => {
                     const statusVariant = 
                       res.status === 'Seated' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
                       res.status === 'Confirmed' ? 'bg-blue-50 text-blue-700 border-blue-200' :
@@ -2540,6 +2580,76 @@ export const OwnerOverview: React.FC = () => {
                   })}
                 </div>
               )}
+
+              {/* Completed Dinings History Section */}
+              {completedReservationsList.length > 0 && (
+                <div className="space-y-3 pt-4 border-t border-slate-200/80 text-left">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-extrabold text-[#52606D] uppercase tracking-wider flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <span>Completed Dinings History</span>
+                      <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200/80 rounded-full text-[10px] font-bold">
+                        {completedReservationsList.length}
+                      </span>
+                    </h4>
+                  </div>
+
+                  <div className="space-y-3">
+                    {completedReservationsList.map((res) => (
+                      <div key={res.id} className="p-4 bg-[#FCFAF7] border border-[#E5E0D9] rounded-2xl flex flex-col gap-3 text-xs shadow-2xs opacity-90 hover:opacity-100 transition-opacity">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-200/60">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-slate-200/80 border border-slate-300 flex items-center justify-center text-slate-700 font-extrabold text-sm shrink-0">
+                              {res.customerName ? res.customerName.charAt(0).toUpperCase() : 'G'}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h5 className="font-extrabold text-sm text-[#17202A]">{res.customerName}</h5>
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide border bg-slate-100 text-slate-700 border-slate-300">
+                                  COMPLETED
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-[#7B8794] font-medium mt-0.5">
+                                Ref: <span className="font-mono font-bold text-[#17202A]">{res.id}</span> · Party of <span className="font-bold text-[#17202A]">{res.guests} {res.guests === 1 ? 'Diner' : 'Diners'}</span>
+                              </p>
+                            </div>
+                          </div>
+                          <span className="text-[10.5px] font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/80 w-fit flex items-center gap-1">
+                            <Check className="w-3 h-3 text-emerald-600" />
+                            Dining completed
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-white p-2.5 rounded-xl border border-[#E5E0D9] text-[11px]">
+                          <div className="flex items-center gap-2">
+                            <Calendar className="w-3.5 h-3.5 text-[#7B8794] shrink-0" />
+                            <div>
+                              <span className="text-[#7B8794] block text-[9px] font-bold uppercase">Date & Time</span>
+                              <span className="font-bold text-[#17202A]">{res.date} @ {res.time}</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <LayoutGrid className="w-3.5 h-3.5 text-[#7B8794] shrink-0" />
+                            <div>
+                              <span className="text-[#7B8794] block text-[9px] font-bold uppercase">Table</span>
+                              <span className="font-bold text-[#17202A]">Table {res.assignedTableNumber || res.tableNumber || 'Assigned'}</span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Clock className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <div>
+                              <span className="text-[#7B8794] block text-[9px] font-bold uppercase">Completion</span>
+                              <span className="font-bold text-emerald-800">
+                                {res.completedAt ? new Date(res.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Finished'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Right sidebar: Reservation Calendar Summary */}
@@ -2567,7 +2677,10 @@ export const OwnerOverview: React.FC = () => {
                     <p className="text-xs text-slate-400 py-4 text-center">No floor tables configured.</p>
                   ) : (
                     tables.map(t => {
-                      const assignedRes = reservations.find(r => (r.assignedTableId === t.id || r.assignedTableNumber === String(t.number || t.tableNumber)) && r.status !== 'Seated' && r.status !== 'Cancelled' && r.status !== 'Rejected');
+                      const assignedRes = reservations.find(r => 
+                        (r.assignedTableId === t.id || r.assignedTableNumber === String(t.number || t.tableNumber)) && 
+                        (r.status === 'Confirmed' || r.status === 'Arrived' || r.status === 'Pending')
+                      );
                       const isOccupied = t.status === 'Occupied';
                       
                       return (

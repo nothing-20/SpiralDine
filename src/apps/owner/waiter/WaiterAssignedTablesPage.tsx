@@ -7,6 +7,7 @@ import { generateUniqueOrderId } from '../../../shared/utils/orderUtils';
 import { formatPrice } from '../../../utils/format';
 import { logEvent } from '../../../services/eventEngine';
 import { tableService } from '../../../shared/services/tableService';
+import { reservationService } from '../../../shared/services/reservationService';
 import Card from '../../../components/ui/Card/Card';
 import Badge from '../../../components/ui/Badge/Badge';
 import Button from '../../../components/ui/Button/Button';
@@ -234,29 +235,39 @@ export const WaiterAssignedTablesPage: React.FC = () => {
     try {
       const batch = writeBatch(db);
       
-      // 1. Update reservation doc status to Seated
+      const nowIso = new Date().toISOString();
+      const targetTable = tables.find(t => t.id === checkInTableId);
+      const orderId = generateUniqueOrderId();
+
+      // 1. Update reservation doc status to Seated with table & order linkage
       const resRef = doc(db, 'restaurants', user.tenantId, 'reservations', activeCheckInRes.id);
-      batch.update(resRef, { status: 'Seated', seatedAt: new Date().toISOString() });
+      const resUpdatePayload = { 
+        status: 'Seated', 
+        seatedAt: nowIso,
+        assignedTableId: targetTable?.id || checkInTableId,
+        assignedTableNumber: targetTable?.tableNumber || targetTable?.number || '',
+        activeOrderId: orderId,
+        orderId: orderId,
+        updatedAt: nowIso
+      };
+      batch.update(resRef, resUpdatePayload);
       
       // Update customer record too if exists
       if (activeCheckInRes.customerId && activeCheckInRes.customerId !== 'guest-uid') {
         const custResRef = doc(db, 'customers', activeCheckInRes.customerId, 'reservations', activeCheckInRes.id);
-        batch.update(custResRef, { status: 'Seated', seatedAt: new Date().toISOString() });
+        batch.update(custResRef, resUpdatePayload);
       }
 
       // 2. Update physical Table doc status to Occupied/Dining
-      const targetTable = tables.find(t => t.id === checkInTableId);
       if (targetTable) {
         const tableRef = doc(db, 'restaurants', user.tenantId, 'tables', targetTable.id);
-        
-        // Generate activeOrderId
-        const orderId = generateUniqueOrderId();
         const orderRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
         
-        // Create blank order to start dining session
+        // Create blank order to start dining session linked to reservation
         batch.set(orderRef, {
           id: orderId,
           orderId,
+          reservationId: activeCheckInRes.id,
           customerId: activeCheckInRes.customerId,
           customerName: activeCheckInRes.customerName,
           tableNumber: targetTable.tableNumber || targetTable.number,
@@ -266,14 +277,15 @@ export const WaiterAssignedTablesPage: React.FC = () => {
           status: 'ACCEPTED',
           subtotal: 0,
           total: 0,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
+          createdAt: nowIso,
+          updatedAt: nowIso
         });
 
         batch.update(tableRef, {
           status: 'Occupied',
           activeOrderId: orderId,
-          seatingTime: new Date().toISOString(),
+          reservationId: activeCheckInRes.id,
+          seatingTime: nowIso,
           guestsCount: activeCheckInRes.guests || 2,
           assignedWaiterId: user.uid,
           assignedWaiterName: user.displayName || user.email
@@ -688,6 +700,16 @@ export const WaiterAssignedTablesPage: React.FC = () => {
 
       await batch.commit();
       toast.success(`Table ${table.number} released.`);
+
+      // Trigger canonical reservation completion if payment lifecycle is fulfilled
+      try {
+        await reservationService.completeReservationIfEligible(user.tenantId, table.id, {
+          actorName: user.displayName || user.email || 'Waiter',
+          actorRole: user.role || 'waiter'
+        });
+      } catch (resErr) {
+        console.warn('[WaiterAssignedTablesPage] Reservation completion error:', resErr);
+      }
     } catch (e) {
       console.error(e);
       toast.error('Failed to close table.');

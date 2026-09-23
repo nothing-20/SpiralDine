@@ -429,6 +429,17 @@ export const tableService = {
         customerPhone: null,
         updatedAt: nowIso
       }, { merge: true });
+
+      // Trigger canonical reservation lifecycle completion if eligible
+      try {
+        const { reservationService } = await import('./reservationService');
+        await reservationService.completeReservationIfEligible(tenantId, targetTableId, {
+          actorName: 'Table Service',
+          actorRole: 'system'
+        });
+      } catch (resErr) {
+        console.warn('[tableService] Complete reservation check error:', resErr);
+      }
     } catch (err) {
       console.warn('[tableService] setTableAvailable warning:', err);
     }
@@ -482,6 +493,16 @@ export const tableService = {
       }
 
       await setDoc(tableRef, patch, { merge: true });
+
+      if (statusLower === 'available' || statusLower === 'empty') {
+        try {
+          const { reservationService } = await import('./reservationService');
+          await reservationService.completeReservationIfEligible(tenantId, targetTableId, {
+            actorName: extraData.assignedWaiterName || 'Staff Waiter',
+            actorRole: 'waiter'
+          });
+        } catch (_) {}
+      }
     } catch (err) {
       console.error('[tableService] updateTableStatusDirect error:', err);
       throw err;
