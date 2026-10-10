@@ -54,6 +54,18 @@ import com.spiraldine.printbridge.theme.StatusGreen
 import com.spiraldine.printbridge.theme.StatusRed
 import com.spiraldine.printbridge.ui.viewmodel.MainViewModel
 
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import com.spiraldine.printbridge.transport.BluetoothDeviceHelper
+import com.spiraldine.printbridge.transport.BluetoothDeviceInfo
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
@@ -61,6 +73,7 @@ fun HomeScreen(
     viewModel: MainViewModel = viewModel { MainViewModel(DefaultPrintBridgeRepository()) }
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
@@ -105,6 +118,12 @@ fun HomeScreen(
     ) { innerPadding ->
         HomeScreenContent(
             state = state,
+            onSetConnectionType = { viewModel.setConnectionType(it) },
+            onSelectBluetoothDevice = { name, address -> viewModel.setBluetoothDevice(name, address) },
+            onSetNetworkPrinter = { host, port -> viewModel.setNetworkPrinter(host, port) },
+            onSetPaperWidth = { viewModel.setPaperWidth(it) },
+            onTriggerTestPrint = { viewModel.triggerTestPrint(context) },
+            onDismissTestPrintMessage = { viewModel.dismissTestPrintMessage() },
             modifier = Modifier
                 .padding(innerPadding)
                 .fillMaxSize()
@@ -115,9 +134,87 @@ fun HomeScreen(
 @Composable
 fun HomeScreenContent(
     state: PrintBridgeUiState,
+    onSetConnectionType: (String) -> Unit = {},
+    onSelectBluetoothDevice: (String, String) -> Unit = { _, _ -> },
+    onSetNetworkPrinter: (String, Int) -> Unit = { _, _ -> },
+    onSetPaperWidth: (Int) -> Unit = {},
+    onTriggerTestPrint: () -> Unit = {},
+    onDismissTestPrintMessage: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val scrollState = rememberScrollState()
+    var showBtDeviceDialog by remember { mutableStateOf(false) }
+    var networkHostInput by remember(state.config.networkHost) { mutableStateOf(state.config.networkHost) }
+    var networkPortInput by remember(state.config.networkPort) { mutableStateOf(state.config.networkPort.toString()) }
+
+    if (showBtDeviceDialog) {
+        val pairedDevices = remember { BluetoothDeviceHelper.getBondedDevices(context) }
+        AlertDialog(
+            onDismissRequest = { showBtDeviceDialog = false },
+            title = { Text("Select Paired Thermal Printer") },
+            text = {
+                if (pairedDevices.isEmpty()) {
+                    Column {
+                        Text(
+                            text = "No paired Bluetooth devices found.\n\nPlease pair your ESC/POS thermal printer in Android Bluetooth Settings first.",
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        pairedDevices.forEach { device ->
+                            Card(
+                                onClick = {
+                                    onSelectBluetoothDevice(device.name, device.address)
+                                    showBtDeviceDialog = false
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (device.address == state.config.bluetoothAddress) {
+                                        SpiralAmberPrimary.copy(alpha = 0.15f)
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant
+                                    }
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = device.name,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp
+                                        )
+                                        Text(
+                                            text = device.address + if (device.isLikelyPrinter) " (Thermal Printer)" else "",
+                                            fontSize = 12.sp,
+                                            color = Slate400
+                                        )
+                                    }
+                                    if (device.address == state.config.bluetoothAddress) {
+                                        Text("Selected", color = SpiralAmberPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showBtDeviceDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
 
     Column(
         modifier = modifier
@@ -172,7 +269,7 @@ fun HomeScreenContent(
 
         // 3. Thermal Printer Status Section
         StatusSectionCard(
-            title = "2. Thermal Printer Hardware",
+            title = "2. Thermal Printer Hardware Status",
             statusTitle = when (state.printerStatus) {
                 is ThermalPrinterStatus.Connected -> "Ready: ${(state.printerStatus as ThermalPrinterStatus.Connected).deviceName}"
                 is ThermalPrinterStatus.Connecting -> "Connecting to ${(state.printerStatus as ThermalPrinterStatus.Connecting).deviceName}..."
@@ -182,8 +279,8 @@ fun HomeScreenContent(
             statusSubtitle = when (state.printerStatus) {
                 is ThermalPrinterStatus.Connected -> "Connection: ${(state.printerStatus as ThermalPrinterStatus.Connected).connectionType} (${(state.printerStatus as ThermalPrinterStatus.Connected).paperWidthMm}mm roll)"
                 is ThermalPrinterStatus.Connecting -> "Establishing communication channel..."
-                ThermalPrinterStatus.NotConfigured -> "Select a Bluetooth, Network (TCP Port 9100), or USB thermal printer below."
-                is ThermalPrinterStatus.Error -> "Check power, paper roll, and Bluetooth/LAN connectivity."
+                ThermalPrinterStatus.NotConfigured -> "Configure Bluetooth SPP or TCP Port 9100 below."
+                is ThermalPrinterStatus.Error -> "Check power, paper roll, IP address, or Bluetooth pairing."
             },
             statusColor = when (state.printerStatus) {
                 is ThermalPrinterStatus.Connected -> StatusGreen
@@ -232,7 +329,7 @@ fun HomeScreenContent(
             }
         }
 
-        // 5. Settings Placeholder for Future Configuration
+        // 5. Hardware Configuration Card (Interactive)
         Card(
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(
@@ -242,43 +339,204 @@ fun HomeScreenContent(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "Hardware Configuration",
+                    text = "4. Thermal Printer Setup",
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                ConfigRow(label = "Printer Transport", value = state.config.connectionType)
-                ConfigRow(label = "Target Station", value = state.config.targetStation)
-                ConfigRow(label = "Paper Roll Size", value = "${state.config.paperWidthMm}mm (ESC/POS)")
-                ConfigRow(label = "Auto Cutter", value = if (state.config.autoCutEnabled) "Enabled" else "Disabled")
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Transport Selector
+                Text(text = "Connection Transport", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Slate600)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        RadioButton(
+                            selected = state.config.connectionType == "Bluetooth",
+                            onClick = { onSetConnectionType("Bluetooth") }
+                        )
+                        Text("Bluetooth SPP", fontSize = 13.sp)
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        RadioButton(
+                            selected = state.config.connectionType == "Network",
+                            onClick = { onSetConnectionType("Network") }
+                        )
+                        Text("TCP/IP Raw (9100)", fontSize = 13.sp)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Connection Specific Controls
+                if (state.config.connectionType == "Bluetooth") {
+                    Text(text = "Selected Bluetooth Printer:", fontSize = 12.sp, color = Slate400)
+                    Text(
+                        text = if (state.config.bluetoothAddress.isNotBlank()) {
+                            "${state.config.bluetoothName} (${state.config.bluetoothAddress})"
+                        } else {
+                            "No paired printer selected"
+                        },
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { showBtDeviceDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Choose Paired Bluetooth Printer")
+                    }
+                } else {
+                    Text(text = "Printer Network Address:", fontSize = 12.sp, color = Slate400)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = networkHostInput,
+                        onValueChange = {
+                            networkHostInput = it
+                            val port = networkPortInput.toIntOrNull() ?: 9100
+                            onSetNetworkPrinter(it, port)
+                        },
+                        label = { Text("Printer IP / Hostname") },
+                        placeholder = { Text("192.168.1.100") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = networkPortInput,
+                        onValueChange = {
+                            networkPortInput = it
+                            val port = it.toIntOrNull() ?: 9100
+                            onSetNetworkPrinter(networkHostInput, port)
+                        },
+                        label = { Text("TCP Port (Default: 9100)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Paper Width Selector
+                Text(text = "Thermal Paper Roll Width", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Slate600)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        RadioButton(
+                            selected = state.config.paperWidthMm == 80,
+                            onClick = { onSetPaperWidth(80) }
+                        )
+                        Text("80mm (Standard)", fontSize = 13.sp)
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        RadioButton(
+                            selected = state.config.paperWidthMm == 58,
+                            onClick = { onSetPaperWidth(58) }
+                        )
+                        Text("58mm (Compact)", fontSize = 13.sp)
+                    }
+                }
             }
         }
 
-        // 6. Action Controls (Placeholders)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        // 6. Test Print & Feedback Section
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
-            Button(
-                onClick = { /* Module 2/3 */ },
-                colors = ButtonDefaults.buttonColors(containerColor = SpiralAmberPrimary),
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("Pair Restaurant")
-            }
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "5. Hardware Verification",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Prints an unmistakable hardware test slip (NOT a KOT) to verify communication, column formatting, and auto-cutter.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+                Spacer(modifier = Modifier.height(12.dp))
 
-            OutlinedButton(
-                onClick = { /* Module 3 */ },
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("Select Printer")
+                Button(
+                    onClick = onTriggerTestPrint,
+                    enabled = !state.isTestPrintInProgress,
+                    colors = ButtonDefaults.buttonColors(containerColor = SpiralAmberPrimary),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    if (state.isTestPrintInProgress) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Transmitting to Printer...")
+                    } else {
+                        Text("Print Hardware Test Slip")
+                    }
+                }
+
+                if (state.testPrintMessage != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    val isSuccess = state.testPrintMessage.startsWith("SUCCESS")
+                    Card(
+                        shape = RoundedCornerShape(8.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSuccess) StatusGreen.copy(alpha = 0.12f) else StatusRed.copy(alpha = 0.12f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = if (isSuccess) "Test Print Transport Confirmed" else "Test Print Failed",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = if (isSuccess) StatusGreen else StatusRed
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = state.testPrintMessage,
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            TextButton(onClick = onDismissTestPrintMessage) {
+                                Text("Dismiss", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 }
+
 
 @Composable
 fun StatusSectionCard(

@@ -239,6 +239,56 @@ class EscPosKOTFormatter(
         return lines
     }
 
+    /**
+     * Formats an unmistakable hardware verification test slip.
+     * Cannot be confused with a production customer KOT.
+     */
+    fun formatTestSlip(
+        paperWidth: ThermalPaperWidth = ThermalPaperWidth.WIDTH_80MM,
+        transportInfo: String = "LOOPBACK_TEST",
+        timestamp: String = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())
+    ): ByteArray {
+        val stream = ByteArrayOutputStream()
+        val width = paperWidth.lineLength
+
+        stream.write(ESC_INIT)
+        stream.write(ALIGN_CENTER)
+        stream.write(BOLD_ON)
+        stream.write(FONT_NORMAL)
+        stream.writeTextLn("=".repeat(width))
+        stream.write(FONT_DOUBLE_HEIGHT)
+        stream.writeTextLn("SPIRALDINE PRINT BRIDGE")
+        stream.write(FONT_NORMAL)
+        stream.writeTextLn("*** HARDWARE TEST SLIP ***")
+        stream.writeTextLn("NOT A KITCHEN ORDER TICKET")
+        stream.writeTextLn("=".repeat(width))
+        stream.write(BOLD_OFF)
+
+        stream.write(ALIGN_LEFT)
+        stream.writeTextLn("Timestamp:    $timestamp")
+        stream.writeTextLn("Transport:    $transportInfo")
+        stream.writeTextLn("Paper Width:  ${if (paperWidth == ThermalPaperWidth.WIDTH_58MM) "58mm (32 Col)" else "80mm (48 Col)"}")
+        stream.writeTextLn("Self-Test:    TRANSPORT_OK")
+        stream.writeTextLn("-".repeat(width))
+
+        stream.writeTextLn("CHARSET VERIFICATION:")
+        stream.writeTextLn("0123456789")
+        stream.writeTextLn("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        stream.writeTextLn("abcdefghijklmnopqrstuvwxyz")
+        stream.writeTextLn("-".repeat(width))
+
+        stream.write(ALIGN_CENTER)
+        stream.write(BOLD_ON)
+        stream.writeTextLn("DO NOT PREPARE FOOD")
+        stream.writeTextLn("TEST PRINT COMPLETE")
+        stream.write(BOLD_OFF)
+
+        stream.write(FEED_3_LINES)
+        stream.write(PARTIAL_CUT)
+
+        return stream.toByteArray()
+    }
+
     private fun ByteArrayOutputStream.writeTextLn(text: String) {
         val bytes = text.toByteArray(charset)
         write(bytes)
@@ -249,3 +299,4 @@ class EscPosKOTFormatter(
         write(LF.toInt())
     }
 }
+

@@ -42,7 +42,11 @@ data class PrintQueueStatus(
  * Represents hardware and station filtering configuration.
  */
 data class PrinterHardwareConfig(
-    val connectionType: String = "Bluetooth",
+    val connectionType: String = "Bluetooth", // "Bluetooth" or "Network"
+    val bluetoothAddress: String = "",
+    val bluetoothName: String = "",
+    val networkHost: String = "192.168.1.100",
+    val networkPort: Int = 9100,
     val targetStation: String = "ALL", // "ALL", "GRILL", "FRYER", "DESSERT", "BAR", "GENERAL"
     val paperWidthMm: Int = 80,
     val autoCutEnabled: Boolean = true
@@ -55,5 +59,8 @@ data class PrintBridgeUiState(
     val cloudStatus: CloudSyncStatus = CloudSyncStatus.Disconnected,
     val printerStatus: ThermalPrinterStatus = ThermalPrinterStatus.NotConfigured,
     val queueStatus: PrintQueueStatus = PrintQueueStatus(),
-    val config: PrinterHardwareConfig = PrinterHardwareConfig()
+    val config: PrinterHardwareConfig = PrinterHardwareConfig(),
+    val testPrintMessage: String? = null,
+    val isTestPrintInProgress: Boolean = false
 )
+

@@ -146,7 +146,7 @@ class PrintJobRepository(
     }
 
     private fun serializeTicketPayload(ticket: KotTicket): String {
-        val itemsSummary = ticket.items.joinToString(";") { "${it.name}:${it.quantity}" }
-        return "TICKET_ID=${ticket.ticketId}|ORDER=${ticket.orderId}|TABLE=${ticket.tableNumber}|ITEMS=[$itemsSummary]|REPRINT=${ticket.isReprint}"
+        return com.spiraldine.printbridge.model.KotTicketJson.toJson(ticket)
     }
 }
+

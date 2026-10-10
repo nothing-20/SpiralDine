@@ -166,4 +166,42 @@ class EscPosKOTFormatterTest {
         assertTrue(text.contains("TOTAL ITEMS: 0"))
         assertTrue(text.contains("SPIRALDINE KITCHEN"))
     }
+
+    @Test
+    fun formatTestSlip_containsClearHardwareVerificationLabelsAndNotAKotBanner() {
+        val bytes = formatter.formatTestSlip(
+            paperWidth = ThermalPaperWidth.WIDTH_80MM,
+            transportInfo = "Bluetooth SPP (POS-80)",
+            timestamp = "2026-10-10 14:00:00"
+        )
+        val text = String(bytes, charset)
+
+        assertTrue("Must have hardware test slip banner", text.contains("*** HARDWARE TEST SLIP ***"))
+        assertTrue("Must have NOT A KOT warning", text.contains("NOT A KITCHEN ORDER TICKET"))
+        assertTrue("Must have DO NOT PREPARE FOOD warning", text.contains("DO NOT PREPARE FOOD"))
+        assertTrue("Must include transport info", text.contains("Bluetooth SPP (POS-80)"))
+        assertTrue("Must include timestamp", text.contains("2026-10-10 14:00:00"))
+        assertTrue("Must include charset test", text.contains("ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+
+        // Must include partial cut bytes (GS V 66 0)
+        val len = bytes.size
+        assertEquals(0x1D.toByte(), bytes[len - 4])
+        assertEquals(0x56.toByte(), bytes[len - 3])
+        assertEquals(0x42.toByte(), bytes[len - 2])
+        assertEquals(0x00.toByte(), bytes[len - 1])
+    }
+
+
+    @Test
+    fun formatTestSlip_supports58mmWidth() {
+        val bytes = formatter.formatTestSlip(
+            paperWidth = ThermalPaperWidth.WIDTH_58MM,
+            transportInfo = "TCP/IP 192.168.1.100:9100"
+        )
+        val text = String(bytes, charset)
+
+        assertTrue(text.contains("58mm (32 Col)"))
+        assertTrue("Separator lines must match 32 columns", text.contains("=".repeat(32)))
+    }
 }
+
