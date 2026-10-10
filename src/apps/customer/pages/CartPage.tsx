@@ -15,6 +15,7 @@ import {
   syncDiningSessionToFirestore 
 } from '../../../shared/utils/diningSession';
 import { tableService } from '../../../shared/services/tableService';
+import { kotService } from '../../../shared/services/kotService';
 import { 
   ShoppingBag, Trash2, ArrowLeft, ArrowRight, Minus, Plus, 
   Tag, Check, Sparkles, ShieldCheck, Utensils, Heart, 
@@ -421,6 +422,18 @@ export const CartPage: React.FC = () => {
 
       // Write order directly to restaurants/{tenantId}/orders/{orderId}
       await setDoc(doc(db, 'restaurants', tenantId, 'orders', orderId), orderPayload);
+
+      // Primary Kitchen Workflow: Create persistent canonical KOT record
+      try {
+        await kotService.createKotForOrder(tenantId, orderPayload as any, {
+          source: currentSession?.orderSource === 'qr' ? 'customer_qr' : 'customer_app',
+          customerName: user?.displayName || currentSession?.customerName || 'Guest Diner',
+          round: orderSequence,
+          isSupplementary: isAdditional
+        });
+      } catch (kotErr) {
+        console.warn('[CartPage] KOT generation warning:', kotErr);
+      }
 
       // Persist order reference to customer profile if authenticated
       if (user?.uid) {

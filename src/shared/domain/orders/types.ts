@@ -284,3 +284,69 @@ export interface IVoiceNotification {
   createdAt: string;
   acknowledged: boolean;
 }
+
+// ── Kitchen Order Ticket (KOT) Types ─────────────────────────────────────────
+
+export type TKotStatus = 'NEW' | 'ACCEPTED' | 'PREPARING' | 'READY' | 'SERVED' | 'CANCELLED';
+
+export type TKotPrintStatus = 'unprinted' | 'printed' | 'failed';
+
+export interface IKotItem {
+  itemId: string;
+  name: string;
+  count: number;
+  notes?: string;
+  pricePerUnit?: number;
+  station?: string;
+  isVeg?: boolean;
+  specialInstructions?: string;
+}
+
+export interface IKitchenTicket {
+  id: string;                      // Unique ticket ID e.g. KOT-XXXX
+  ticketNumber: string;            // Human-readable ticket number e.g. #101
+  numericTicketNumber?: number;    // Sequential number for sorting/generation
+  tenantId: string;
+  branchId: string;
+  orderId: string;                 // Canonical order ID reference
+  tableId?: string;
+  tableNumber: string;
+  tableName?: string;
+  sessionId?: string;
+  round: number;                   // 1 for initial, 2+ for supplementary
+  isSupplementary: boolean;
+  items: IKotItem[];
+  specialInstructions?: string;
+  station: string;                 // Station assignment (e.g. 'Main Kitchen', 'Grill', etc.)
+  status: TKotStatus;
+  source: 'customer_qr' | 'customer_app' | 'waiter' | 'pos';
+  customerName?: string;
+  waiterId?: string;
+  waiterName?: string;
+  assignedChefId?: string;
+  assignedChefName?: string;
+  
+  // Timestamps
+  createdAt: string;               // ISO
+  acceptedAt?: string;
+  cookingStartedAt?: string;
+  readyAt?: string;
+  servedAt?: string;
+  cancelledAt?: string;
+  cancellationReason?: string;
+  updatedAt?: string;
+
+  // Print tracking
+  printStatus: TKotPrintStatus;
+  printedAt?: string;
+  printCount: number;
+  lastPrintAttemptAt?: string;
+  lastPrintError?: string;
+  reprintsLog?: Array<{
+    reprintedAt: string;
+    reprintedBy: string;
+    reprintedByName?: string;
+    reason?: string;
+  }>;
+}
+

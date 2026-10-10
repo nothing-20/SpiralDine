@@ -1,5 +1,6 @@
 import { ordersService, kitchenTicketsService } from '../firebase/firestore';
 import { IOrder } from '../domain/orders/types';
+import { kotService } from './kotService';
 
 /**
  * Service for handling Order and Kitchen Ticket database operations.
@@ -68,6 +69,12 @@ export const orderService = {
    * @param tenantId - Optional tenant identifier.
    * @returns A promise resolving to kitchen ticket documents.
    */
+  /**
+   * Retrieves active kitchen tickets for the given tenant workspace.
+   * 
+   * @param tenantId - Optional tenant identifier.
+   * @returns A promise resolving to kitchen ticket documents.
+   */
   getKitchenTickets: (tenantId?: string) => kitchenTicketsService.getAll(tenantId),
 
   /**
@@ -79,6 +86,31 @@ export const orderService = {
    * @returns A promise resolving when the ticket is updated.
    */
   updateKitchenTicket: (id: string, data: any, tenantId?: string) => kitchenTicketsService.update(id, data, tenantId),
+
+  /**
+   * Generates or returns an existing persistent KOT record for an order.
+   */
+  createKotForOrder: (tenantId: string, order: IOrder, options?: any) =>
+    kotService.createKotForOrder(tenantId, order, options),
+
+  /**
+   * Retrieves all KOTs for a specific canonical order.
+   */
+  getTicketsForOrder: (tenantId: string, orderId: string) =>
+    kotService.getTicketsForOrder(tenantId, orderId),
+
+  /**
+   * Real-time subscription to active KOTs.
+   */
+  subscribeToKitchenTickets: (tenantId: string, callback: (tickets: any[]) => void) =>
+    kotService.subscribeToKitchenTickets(tenantId, callback),
+
+  /**
+   * Updates ticket preparation status.
+   */
+  updateTicketStatus: (tenantId: string, ticketId: string, nextStatus: any, actor?: any) =>
+    kotService.updateTicketStatus(tenantId, ticketId, nextStatus, actor),
 };
 export default orderService;
+
 

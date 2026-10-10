@@ -40,6 +40,7 @@ import KitchenTicket from './KitchenTicket';
 import OrderTimeline from './OrderTimeline';
 import { inventoryService } from '../../../shared/services/inventoryService';
 import { isKitchenStaffRole, filterKitchenStaff } from '../../../shared/services/kitchenService';
+import { kotService } from '../../../shared/services/kotService';
 import LivePreparedInventory from './LivePreparedInventory';
 
 // Enterprise Panels
@@ -493,6 +494,21 @@ export const KitchenQueue: React.FC = () => {
         if (nextStatus === 'PAID') updateFields.paymentAt = timestamp;
 
         await updateDoc(docRef, updateFields);
+
+        // Synchronize canonical KOT records
+        try {
+          const matchingTickets = await kotService.getTicketsForOrder(user.tenantId, orderId);
+          for (const ticket of matchingTickets) {
+            await kotService.updateTicketStatus(
+              user.tenantId,
+              ticket.id,
+              nextStatus as any,
+              { uid: user?.uid, displayName: user?.displayName, role: user?.role }
+            );
+          }
+        } catch (kotSyncErr) {
+          console.warn('[KitchenQueue] KOT sync warning:', kotSyncErr);
+        }
 
         // Portion deduction automated on status PREPARING / COMPLETED
         toast.success(`Order → ${TIMELINE_TITLES[nextStatus] || nextStatus}`, {

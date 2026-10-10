@@ -86,6 +86,79 @@ export const billingService = {
   },
 
   /**
+   * Consolidates billable items across multiple active orders for a running dining session or table.
+   * Guarantees that each submitted item appears exactly once, avoiding duplicate billing.
+   */
+  getConsolidatedSessionOrder: async (tenantId: string, primaryOrder: IOrder): Promise<IOrder> => {
+    if (!tenantId || !primaryOrder) return primaryOrder;
+    
+    try {
+      const ordersCol = collection(db, 'restaurants', tenantId, 'orders');
+      let q = query(
+        ordersCol,
+        where('tableNumber', '==', String(primaryOrder.tableNumber).replace(/^TBL-/i, ''))
+      );
+
+      if ((primaryOrder as any).sessionId && (primaryOrder as any).sessionId !== 'GUEST-SESSION') {
+        q = query(ordersCol, where('sessionId', '==', (primaryOrder as any).sessionId));
+      }
+
+      const snap = await getDocs(q);
+      const activeSessionOrders: IOrder[] = [];
+
+      snap.forEach(d => {
+        const o = { orderId: d.id, ...d.data() } as IOrder;
+        const isNotTerminal = o.status !== 'CANCELLED' && o.status !== 'ARCHIVED' && (o.paymentStatus !== 'paid');
+        if (isNotTerminal) {
+          activeSessionOrders.push(o);
+        }
+      });
+
+      if (activeSessionOrders.length <= 1) {
+        return primaryOrder;
+      }
+
+      activeSessionOrders.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+      const combinedItems: any[] = [];
+      let totalSubtotal = 0;
+      let totalDiscount = 0;
+      let totalTip = 0;
+
+      activeSessionOrders.forEach((so) => {
+        if (Array.isArray(so.items)) {
+          combinedItems.push(...so.items);
+        }
+        totalSubtotal += Number(so.subtotal || 0);
+        totalDiscount += Number(so.discount || 0);
+        totalTip += Number((so as any).tip || 0);
+      });
+
+      const taxRate = (primaryOrder as any).taxPercent ? ((primaryOrder as any).taxPercent / 100) : 0.08;
+      const scRate = (primaryOrder as any).serviceChargePercent ? ((primaryOrder as any).serviceChargePercent / 100) : 0.05;
+
+      const taxableAmount = Math.max(0, totalSubtotal - totalDiscount);
+      const calculatedTax = Math.round(taxableAmount * taxRate);
+      const calculatedServiceCharge = Math.round(taxableAmount * scRate);
+      const calculatedTotal = taxableAmount + calculatedTax + calculatedServiceCharge + totalTip;
+
+      return {
+        ...primaryOrder,
+        items: combinedItems,
+        subtotal: totalSubtotal,
+        discount: totalDiscount,
+        tax: calculatedTax,
+        serviceCharge: calculatedServiceCharge,
+        total: calculatedTotal,
+        roundOff: 0
+      };
+    } catch (err) {
+      console.warn('[billingService] Session consolidation fallback to primary order:', err);
+      return primaryOrder;
+    }
+  },
+
+  /**
    * Get or create a single, canonical, authoritative bill for an order.
    * Completely idempotent: calling multiple times returns the existing bill.
    */
@@ -97,6 +170,14 @@ export const billingService = {
     if (!tenantId || !order?.orderId) {
       throw new Error('Tenant ID and Order ID are required to resolve a canonical bill.');
     }
+
+    // Consolidate billable items across multiple active ordering rounds if applicable
+    let effectiveOrder = order;
+    try {
+      if ((order as any).sessionId || (order as any).isAdditionalOrder || ((order as any).orderSequence && (order as any).orderSequence > 1)) {
+        effectiveOrder = await billingService.getConsolidatedSessionOrder(tenantId, order);
+      }
+    } catch (_) {}
 
     const billId = billingService.getCanonicalBillId(order.orderId);
     const billRef = doc(db, 'restaurants', tenantId, 'bills', billId);
@@ -113,23 +194,23 @@ export const billingService = {
 
       // If pending payment, synchronize with latest order items & totals
       // This guarantees that any newly added order items are never excluded from the bill
-      const currentSubtotal = Number(order.subtotal || 0);
-      const currentDiscount = Number(order.discount || 0);
-      const currentTax = Number(order.tax || 0);
-      const currentServiceCharge = Number(order.serviceCharge || 0);
-      const currentTip = Number((order as any).tip || 0);
-      const currentRoundOff = Number(order.roundOff || 0);
-      const currentTotal = Number(order.total || (currentSubtotal - currentDiscount + currentTax + currentServiceCharge + currentTip + currentRoundOff));
+      const currentSubtotal = Number(effectiveOrder.subtotal || 0);
+      const currentDiscount = Number(effectiveOrder.discount || 0);
+      const currentTax = Number(effectiveOrder.tax || 0);
+      const currentServiceCharge = Number(effectiveOrder.serviceCharge || 0);
+      const currentTip = Number((effectiveOrder as any).tip || 0);
+      const currentRoundOff = Number(effectiveOrder.roundOff || 0);
+      const currentTotal = Number(effectiveOrder.total || (currentSubtotal - currentDiscount + currentTax + currentServiceCharge + currentTip + currentRoundOff));
 
       const hasChanged = 
         existingData.total !== currentTotal || 
         existingData.subtotal !== currentSubtotal ||
-        (existingData.items?.length || 0) !== (order.items?.length || 0) ||
-        (order.status && order.status !== existingData.orderStatus);
+        (existingData.items?.length || 0) !== (effectiveOrder.items?.length || 0) ||
+        (effectiveOrder.status && effectiveOrder.status !== existingData.orderStatus);
 
       if (hasChanged) {
         const syncedBill: Partial<IBill> = {
-          items: order.items || [],
+          items: effectiveOrder.items || [],
           subtotal: currentSubtotal,
           discount: currentDiscount,
           tax: currentTax,
@@ -137,9 +218,9 @@ export const billingService = {
           tip: currentTip,
           roundOff: currentRoundOff,
           total: currentTotal,
-          orderStatus: order.status === 'COMPLETED' ? 'COMPLETED' : 'DINING_COMPLETED',
-          customerName: order.customerName || existingData.customerName,
-          customerPhone: (order as any).customerPhone || order.phone || existingData.customerPhone
+          orderStatus: effectiveOrder.status === 'COMPLETED' ? 'COMPLETED' : 'DINING_COMPLETED',
+          customerName: effectiveOrder.customerName || existingData.customerName,
+          customerPhone: (effectiveOrder as any).customerPhone || effectiveOrder.phone || existingData.customerPhone
         };
         await updateDoc(billRef, syncedBill);
         return { id: existingSnap.id, billId: existingSnap.id, ...existingData, ...syncedBill };
@@ -153,16 +234,16 @@ export const billingService = {
     const seq = Math.floor(1000 + Math.random() * 9000);
     const invoiceNumber = order.invoiceNumber || `INV-${dateStr}-${seq}`;
 
-    // Extract financials from the order (authoritative source of truth)
-    const subtotal = Number(order.subtotal || 0);
-    const discount = Number(order.discount || 0);
-    const tax = Number(order.tax || 0);
-    const serviceCharge = Number(order.serviceCharge || 0);
-    const tip = Number((order as any).tip || 0);
-    const roundOff = Number(order.roundOff || 0);
-    const total = Number(order.total || (subtotal - discount + tax + serviceCharge + tip + roundOff));
+    // Extract financials from the effective order (authoritative source of truth)
+    const subtotal = Number(effectiveOrder.subtotal || 0);
+    const discount = Number(effectiveOrder.discount || 0);
+    const tax = Number(effectiveOrder.tax || 0);
+    const serviceCharge = Number(effectiveOrder.serviceCharge || 0);
+    const tip = Number((effectiveOrder as any).tip || 0);
+    const roundOff = Number(effectiveOrder.roundOff || 0);
+    const total = Number(effectiveOrder.total || (subtotal - discount + tax + serviceCharge + tip + roundOff));
 
-    const initialPaymentMethods: IPaymentBreakdown = order.paymentMethods || {
+    const initialPaymentMethods: IPaymentBreakdown = effectiveOrder.paymentMethods || {
       cash: 0,
       upi: 0,
       card: 0,
@@ -199,7 +280,7 @@ export const billingService = {
       waiterName: order.waiterName || '',
       waiterId: order.waiterId || '',
       invoiceNumber,
-      items: order.items || [],
+      items: effectiveOrder.items || [],
       subtotal,
       discount,
       discountType: order.discountType || 'percentage',
@@ -460,6 +541,31 @@ export const billingService = {
         ...(params.invoiceNumber ? { invoiceNumber: params.invoiceNumber } : {}),
         updatedAt: nowIso
       });
+
+      // Settle all sibling orders in the same dining session
+      const orderData = currentOrderSnap.exists() ? currentOrderSnap.data() : null;
+      const sessionId = (bill as any).sessionId || orderData?.sessionId;
+      if (sessionId && sessionId !== 'GUEST-SESSION') {
+        try {
+          const qSess = query(
+            collection(db, 'restaurants', tenantId, 'orders'),
+            where('sessionId', '==', sessionId)
+          );
+          const sessSnap = await getDocs(qSess);
+          for (const sDoc of sessSnap.docs) {
+            if (sDoc.id !== bill.orderId) {
+              await updateDoc(sDoc.ref, {
+                paymentStatus: 'paid',
+                paidAt: nowIso,
+                status: targetStatus,
+                paymentMethods: paymentBreakdown,
+                transactionRef: generatedTxRef,
+                updatedAt: nowIso
+              });
+            }
+          }
+        } catch (_) {}
+      }
     } catch (orderErr) {
       console.warn('[billingService] Could not update order on payment:', orderErr);
     }
