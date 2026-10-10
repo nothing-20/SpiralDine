@@ -170,8 +170,13 @@ class PrintBridgeForegroundService : Service() {
 
                         when (processResult) {
                             is QueueProcessResult.Success -> {
-                                updateNotification("Printed ${processResult.jobId} (${processResult.bytesWritten} B)")
-                                syncPrintSuccessToFirestore(session.tenantId, processResult.jobId)
+                                updateNotification("Sent to printer: ${processResult.jobId} (${processResult.bytesWritten} B)")
+                                syncPrintSuccessToFirestore(
+                                    tenantId = session.tenantId,
+                                    jobId = processResult.jobId,
+                                    bytesWritten = processResult.bytesWritten,
+                                    transportType = activeTransport.transportType
+                                )
                             }
                             is QueueProcessResult.SkippedStation -> {
                                 updateNotification("Filtered: Ticket routed to another station")
@@ -218,7 +223,12 @@ class PrintBridgeForegroundService : Service() {
         }
     }
 
-    private fun syncPrintSuccessToFirestore(tenantId: String, jobId: String) {
+    private fun syncPrintSuccessToFirestore(
+        tenantId: String,
+        jobId: String,
+        bytesWritten: Int,
+        transportType: String
+    ) {
         serviceScope.launch {
             try {
                 // Canonical ticketId extracted from jobId ("PJ-KOT-XXXX")
@@ -231,10 +241,17 @@ class PrintBridgeForegroundService : Service() {
                     .collection("kitchenTickets")
                     .document(ticketId)
 
+                // Preserves web schema compatibility via canonical printStatus = "printed"
+                // while recording explicit transport delivery attributes to distinguish
+                // transport socket write acceptance from verified physical printing.
                 docRef.update(
                     mapOf(
                         "printStatus" to "printed",
                         "printedAt" to nowIso,
+                        "lastPrintAttemptAt" to nowIso,
+                        "transportDelivered" to true,
+                        "transportDeliveryType" to transportType,
+                        "transportBytesWritten" to bytesWritten,
                         "updatedAt" to nowIso
                     )
                 )

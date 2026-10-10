@@ -110,7 +110,9 @@ class PrintJobRepository(
     }
 
     /**
-     * Records successful transmission/print confirmation.
+     * Records successful transport transmission acceptance.
+     * Note: In ESC/POS thermal printing over simplex Bluetooth SPP or raw TCP,
+     * this confirms transport socket buffer delivery, not verified physical paper extrusion.
      */
     suspend fun recordSuccess(jobId: String): Boolean = withContext(Dispatchers.IO) {
         val rows = dao.updateJobStatus(jobId, "PRINTED", System.currentTimeMillis(), null)
