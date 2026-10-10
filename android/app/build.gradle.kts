@@ -81,4 +81,9 @@ dependencies {
   implementation(libs.androidx.navigation3.ui)
   implementation(libs.androidx.navigation3.runtime)
   implementation(libs.androidx.lifecycle.viewmodel.navigation3)
+
+  // Room Persistence
+  implementation(libs.androidx.room.runtime)
+  implementation(libs.androidx.room.ktx)
+  annotationProcessor(libs.androidx.room.compiler)
 }
