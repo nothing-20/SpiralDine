@@ -66,6 +66,11 @@ import androidx.compose.ui.platform.LocalContext
 import com.spiraldine.printbridge.transport.BluetoothDeviceHelper
 import com.spiraldine.printbridge.transport.BluetoothDeviceInfo
 
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import com.spiraldine.printbridge.auth.AuthResult
+import com.spiraldine.printbridge.service.PrintBridgeForegroundService
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
@@ -74,6 +79,10 @@ fun HomeScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        viewModel.checkExistingSession(context)
+    }
 
     Scaffold(
         topBar = {
@@ -119,11 +128,15 @@ fun HomeScreen(
         HomeScreenContent(
             state = state,
             onSetConnectionType = { viewModel.setConnectionType(it) },
-            onSelectBluetoothDevice = { name, address -> viewModel.setBluetoothDevice(name, address) },
-            onSetNetworkPrinter = { host, port -> viewModel.setNetworkPrinter(host, port) },
+            onSelectBluetoothDevice = { name, address -> viewModel.setBluetoothDevice(name, address, context) },
+            onSetNetworkPrinter = { host, port -> viewModel.setNetworkPrinter(host, port, context) },
             onSetPaperWidth = { viewModel.setPaperWidth(it) },
             onTriggerTestPrint = { viewModel.triggerTestPrint(context) },
             onDismissTestPrintMessage = { viewModel.dismissTestPrintMessage() },
+            onSignIn = { email, pass, cb -> viewModel.signIn(email, pass, context, cb) },
+            onSignOut = { viewModel.signOut(context) },
+            onStartService = { viewModel.startService(context) },
+            onStopService = { viewModel.stopService(context) },
             modifier = Modifier
                 .padding(innerPadding)
                 .fillMaxSize()
@@ -140,6 +153,10 @@ fun HomeScreenContent(
     onSetPaperWidth: (Int) -> Unit = {},
     onTriggerTestPrint: () -> Unit = {},
     onDismissTestPrintMessage: () -> Unit = {},
+    onSignIn: (String, String, (AuthResult) -> Unit) -> Unit = { _, _, _ -> },
+    onSignOut: () -> Unit = {},
+    onStartService: () -> Unit = {},
+    onStopService: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -147,6 +164,100 @@ fun HomeScreenContent(
     var showBtDeviceDialog by remember { mutableStateOf(false) }
     var networkHostInput by remember(state.config.networkHost) { mutableStateOf(state.config.networkHost) }
     var networkPortInput by remember(state.config.networkPort) { mutableStateOf(state.config.networkPort.toString()) }
+
+    var showPairingDialog by remember { mutableStateOf(false) }
+    var emailInput by remember { mutableStateOf("") }
+    var passwordInput by remember { mutableStateOf("") }
+    var authErrorMessage by remember { mutableStateOf<String?>(null) }
+    var isAuthenticating by remember { mutableStateOf(false) }
+
+    if (showPairingDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!isAuthenticating) showPairingDialog = false
+            },
+            title = { Text("Pair Restaurant Workspace") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Sign in using authorized staff credentials (kitchen, chef, manager, or owner) to pair this device with your restaurant workspace.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                    OutlinedTextField(
+                        value = emailInput,
+                        onValueChange = { emailInput = it },
+                        label = { Text("Staff Email") },
+                        placeholder = { Text("kitchen@restaurant.com") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = passwordInput,
+                        onValueChange = { passwordInput = it },
+                        label = { Text("Password") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (authErrorMessage != null) {
+                        Text(
+                            text = authErrorMessage ?: "",
+                            color = StatusRed,
+                            fontSize = 12.sp
+                        )
+                    }
+                    if (isAuthenticating) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Authenticating & Verifying Role...", fontSize = 12.sp)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (emailInput.isNotBlank() && passwordInput.isNotBlank()) {
+                            isAuthenticating = true
+                            authErrorMessage = null
+                            onSignIn(emailInput.trim(), passwordInput) { result ->
+                                isAuthenticating = false
+                                when (result) {
+                                    is AuthResult.Success -> {
+                                        showPairingDialog = false
+                                        emailInput = ""
+                                        passwordInput = ""
+                                    }
+                                    is AuthResult.Error -> {
+                                        authErrorMessage = result.message
+                                    }
+                                }
+                            }
+                        } else {
+                            authErrorMessage = "Please enter both email and password."
+                        }
+                    },
+                    enabled = !isAuthenticating && emailInput.isNotBlank() && passwordInput.isNotBlank()
+                ) {
+                    Text("Pair Device")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showPairingDialog = false },
+                    enabled = !isAuthenticating
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     if (showBtDeviceDialog) {
         val pairedDevices = remember { BluetoothDeviceHelper.getBondedDevices(context) }
@@ -248,28 +359,168 @@ fun HomeScreenContent(
         }
 
         // 2. Cloud Connection Status Section
-        StatusSectionCard(
-            title = "1. Cloud Order Sync",
-            statusTitle = when (state.cloudStatus) {
-                is CloudSyncStatus.Connected -> "Connected: ${(state.cloudStatus as CloudSyncStatus.Connected).restaurantName}"
-                CloudSyncStatus.Connecting -> "Connecting to SpiralDine..."
-                CloudSyncStatus.Disconnected -> "Disconnected (Pairing Required)"
-            },
-            statusSubtitle = when (state.cloudStatus) {
-                is CloudSyncStatus.Connected -> "Tenant: ${(state.cloudStatus as CloudSyncStatus.Connected).tenantId} | Listening for KOTs"
-                CloudSyncStatus.Connecting -> "Authenticating restaurant staff credentials..."
-                CloudSyncStatus.Disconnected -> "Device is not currently associated with an active restaurant workspace."
-            },
-            statusColor = when (state.cloudStatus) {
-                is CloudSyncStatus.Connected -> StatusGreen
-                CloudSyncStatus.Connecting -> StatusAmber
-                CloudSyncStatus.Disconnected -> StatusRed
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "1. Cloud Order Sync",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when (state.cloudStatus) {
+                                    is CloudSyncStatus.Connected -> StatusGreen
+                                    CloudSyncStatus.Connecting -> StatusAmber
+                                    CloudSyncStatus.Disconnected -> StatusRed
+                                }
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = when (state.cloudStatus) {
+                            is CloudSyncStatus.Connected -> "Connected: ${(state.cloudStatus as CloudSyncStatus.Connected).restaurantName}"
+                            CloudSyncStatus.Connecting -> "Connecting to SpiralDine..."
+                            CloudSyncStatus.Disconnected -> "Disconnected (Pairing Required)"
+                        },
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = when (state.cloudStatus) {
+                        is CloudSyncStatus.Connected -> "Tenant: ${(state.cloudStatus as CloudSyncStatus.Connected).tenantId} | Listening on restaurants/${(state.cloudStatus as CloudSyncStatus.Connected).tenantId}/kitchenTickets"
+                        CloudSyncStatus.Connecting -> "Authenticating restaurant staff credentials..."
+                        CloudSyncStatus.Disconnected -> "Device is not paired with a restaurant workspace."
+                    },
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.padding(start = 18.dp)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                if (state.cloudStatus is CloudSyncStatus.Connected) {
+                    OutlinedButton(
+                        onClick = onSignOut,
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Unpair / Sign Out")
+                    }
+                } else {
+                    Button(
+                        onClick = {
+                            authErrorMessage = null
+                            showPairingDialog = true
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SpiralAmberPrimary),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Pair Restaurant Workspace")
+                    }
+                }
             }
-        )
+        }
+
+        // 3. Background Service Control Card
+        val serviceRunning = PrintBridgeForegroundService.isServiceRunning
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "2. Background Print Service",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(if (serviceRunning) StatusGreen else Slate400)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (serviceRunning) "Foreground Service Active" else "Foreground Service Stopped",
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (serviceRunning) {
+                        "Persistent service is running with ongoing notification. KOTs are dispatched continuously."
+                    } else {
+                        "Background execution is paused. Start service to print orders while screen is off."
+                    },
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.padding(start = 18.dp)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (serviceRunning) {
+                        OutlinedButton(
+                            onClick = onStopService,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Stop Service")
+                        }
+                    } else {
+                        Button(
+                            onClick = onStartService,
+                            enabled = state.cloudStatus is CloudSyncStatus.Connected,
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = SpiralAmberPrimary),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Start Service")
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "OEM Notice: Configure Battery Optimization to 'Unrestricted' in Android Settings to ensure continuous 24/7 background operation.",
+                    fontSize = 11.sp,
+                    color = Slate400,
+                    lineHeight = 15.sp
+                )
+            }
+        }
 
         // 3. Thermal Printer Status Section
         StatusSectionCard(
-            title = "2. Thermal Printer Hardware Status",
+            title = "3. Thermal Printer Hardware Status",
             statusTitle = when (state.printerStatus) {
                 is ThermalPrinterStatus.Connected -> "Ready: ${(state.printerStatus as ThermalPrinterStatus.Connected).deviceName}"
                 is ThermalPrinterStatus.Connecting -> "Connecting to ${(state.printerStatus as ThermalPrinterStatus.Connecting).deviceName}..."
@@ -300,7 +551,7 @@ fun HomeScreenContent(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "3. Print Queue Engine",
+                    text = "4. Print Queue Engine",
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
                     color = MaterialTheme.colorScheme.onSurface
@@ -339,7 +590,7 @@ fun HomeScreenContent(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "4. Thermal Printer Setup",
+                    text = "5. Thermal Printer Setup",
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
                     color = MaterialTheme.colorScheme.onSurface
@@ -464,7 +715,7 @@ fun HomeScreenContent(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "5. Hardware Verification",
+                    text = "6. Hardware Verification",
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
                     color = MaterialTheme.colorScheme.onSurface

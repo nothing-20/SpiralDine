@@ -12,6 +12,7 @@ interface PrintBridgeRepository {
     val state: StateFlow<PrintBridgeUiState>
     fun updateConfig(update: (com.spiraldine.printbridge.model.PrinterHardwareConfig) -> com.spiraldine.printbridge.model.PrinterHardwareConfig)
     fun updatePrinterStatus(status: ThermalPrinterStatus)
+    fun updateCloudStatus(status: CloudSyncStatus)
     fun setTestPrintResult(inProgress: Boolean, message: String?)
     fun updateQueueCounts(pending: Int, inFlight: Int, printed: Int, lastTicket: String?)
 }
@@ -38,6 +39,10 @@ class DefaultPrintBridgeRepository : PrintBridgeRepository {
 
     override fun updatePrinterStatus(status: ThermalPrinterStatus) {
         _state.value = _state.value.copy(printerStatus = status)
+    }
+
+    override fun updateCloudStatus(status: CloudSyncStatus) {
+        _state.value = _state.value.copy(cloudStatus = status)
     }
 
     override fun setTestPrintResult(inProgress: Boolean, message: String?) {

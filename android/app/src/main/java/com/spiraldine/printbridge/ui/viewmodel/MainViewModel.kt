@@ -28,13 +28,21 @@ class MainViewModel(
         updateStatusForConfig()
     }
 
-    fun setBluetoothDevice(name: String, address: String) {
+    fun setBluetoothDevice(name: String, address: String, context: android.content.Context? = null) {
         repository.updateConfig {
             it.copy(
                 connectionType = "Bluetooth",
                 bluetoothName = name,
                 bluetoothAddress = address
             )
+        }
+        context?.let { ctx ->
+            ctx.getSharedPreferences("spiraldine_printer_config", android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putString("connection_type", "Bluetooth")
+                .putString("bt_name", name)
+                .putString("bt_address", address)
+                .apply()
         }
         repository.updatePrinterStatus(
             com.spiraldine.printbridge.model.ThermalPrinterStatus.Connected(
@@ -45,13 +53,21 @@ class MainViewModel(
         )
     }
 
-    fun setNetworkPrinter(host: String, port: Int) {
+    fun setNetworkPrinter(host: String, port: Int, context: android.content.Context? = null) {
         repository.updateConfig {
             it.copy(
                 connectionType = "Network",
                 networkHost = host,
                 networkPort = port
             )
+        }
+        context?.let { ctx ->
+            ctx.getSharedPreferences("spiraldine_printer_config", android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putString("connection_type", "Network")
+                .putString("net_host", host)
+                .putInt("net_port", port)
+                .apply()
         }
         val validationErr = com.spiraldine.printbridge.transport.NetworkTransport.validate(host, port)
         if (validationErr != null) {
@@ -144,6 +160,65 @@ class MainViewModel(
         }
     }
 
+
+    fun checkExistingSession(context: android.content.Context) {
+        val authStorage = com.spiraldine.printbridge.auth.AuthStorage(context)
+        val session = authStorage.getSession()
+        if (session != null) {
+            repository.updateCloudStatus(
+                com.spiraldine.printbridge.model.CloudSyncStatus.Connected(
+                    tenantId = session.tenantId,
+                    restaurantName = session.restaurantName
+                )
+            )
+        } else {
+            repository.updateCloudStatus(com.spiraldine.printbridge.model.CloudSyncStatus.Disconnected)
+        }
+    }
+
+    fun signIn(
+        email: String,
+        password: String,
+        context: android.content.Context,
+        onResult: (com.spiraldine.printbridge.auth.AuthResult) -> Unit
+    ) {
+        viewModelScope.launch {
+            repository.updateCloudStatus(com.spiraldine.printbridge.model.CloudSyncStatus.Connecting)
+            val authStorage = com.spiraldine.printbridge.auth.AuthStorage(context)
+            val authManager = com.spiraldine.printbridge.auth.FirebaseAuthManager(authStorage)
+            val result = authManager.signIn(email, password)
+            if (result is com.spiraldine.printbridge.auth.AuthResult.Success) {
+                repository.updateCloudStatus(
+                    com.spiraldine.printbridge.model.CloudSyncStatus.Connected(
+                        tenantId = result.profile.tenantId,
+                        restaurantName = result.profile.restaurantName
+                    )
+                )
+                // Auto-start foreground service if configured
+                com.spiraldine.printbridge.service.PrintBridgeForegroundService.start(context)
+            } else {
+                repository.updateCloudStatus(com.spiraldine.printbridge.model.CloudSyncStatus.Disconnected)
+            }
+            onResult(result)
+        }
+    }
+
+    fun signOut(context: android.content.Context) {
+        val authStorage = com.spiraldine.printbridge.auth.AuthStorage(context)
+        val authManager = com.spiraldine.printbridge.auth.FirebaseAuthManager(authStorage)
+        authManager.signOut()
+        repository.updateCloudStatus(com.spiraldine.printbridge.model.CloudSyncStatus.Disconnected)
+        com.spiraldine.printbridge.service.PrintBridgeForegroundService.stop(context)
+    }
+
+    fun startService(context: android.content.Context) {
+        com.spiraldine.printbridge.service.PrintBridgeForegroundService.start(context)
+    }
+
+    fun stopService(context: android.content.Context) {
+        com.spiraldine.printbridge.service.PrintBridgeForegroundService.stop(context)
+    }
+
     private fun updateStatusForConfig() {
         val config = uiState.value.config
         if (config.connectionType == "Bluetooth") {
@@ -174,4 +249,5 @@ class MainViewModel(
         }
     }
 }
+
 
