@@ -18,8 +18,13 @@ import {
   AlertTriangle,
   Flame,
   Pause,
-  RotateCcw
+  RotateCcw,
+  Printer
 } from 'lucide-react';
+import { useAuth } from '../../../context/AuthContext';
+import toast from 'react-hot-toast';
+import { kotPrintService } from '../../../shared/services/kotPrintService';
+import { IKitchenTicket } from '../../../shared/domain/orders/types';
 
 // ─── Status Configuration (Restrained Semantic System) ─────────────────────────
 
@@ -136,6 +141,70 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
   menuItems = [],
 }) => {
   const [timelineOpen, setTimelineOpen] = useState(false);
+  const { user } = useAuth();
+  const [isPrinting, setIsPrinting] = useState(false);
+
+  const handlePrintKot = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const effectiveTenant = order.tenantId || user?.tenantId;
+    if (!effectiveTenant) {
+      toast.error('Unable to resolve restaurant context for printing.');
+      return;
+    }
+
+    setIsPrinting(true);
+    try {
+      const ticketToPrint: IKitchenTicket = {
+        id: (order as any).kotId || `KOT-${order.orderId}-R${(order as any).orderSequence || 1}`,
+        ticketNumber: (order as any).ticketNumber || (order as any).latestKotNumber || `KOT #${order.orderId.substring(0, 6)}`,
+        tenantId: effectiveTenant,
+        branchId: order.branchId || 'main',
+        orderId: order.orderId,
+        tableId: order.tableId,
+        tableNumber: order.tableNumber || 'Walk-in',
+        tableName: order.tableName,
+        round: (order as any).kotRound || (order as any).orderSequence || 1,
+        isSupplementary: Boolean((order as any).kotIsSupplementary || (order as any).isAdditionalOrder),
+        items: order.items.map((i) => ({
+          itemId: i.itemId,
+          name: i.name,
+          count: i.count,
+          notes: i.notes,
+          station: (i as any).station || (order as any).station || 'Main Kitchen',
+          isVeg: i.isVeg ?? (i as any).veg
+        })),
+        specialInstructions: (order as any).specialInstructions || order.notes || '',
+        station: (order as any).station || 'Main Kitchen',
+        status: order.status as any,
+        source: (order.orderSource as any) || 'customer_app',
+        customerName: order.customerName,
+        waiterName: order.waiterName,
+        createdAt: order.createdAt,
+        printStatus: (order as any).kotPrintStatus || 'unprinted',
+        printCount: (order as any).kotPrintCount || 0
+      };
+
+      const isReprint = Boolean((order as any).kotPrintCount && (order as any).kotPrintCount > 0);
+      const res = await kotPrintService.printTicket(
+        effectiveTenant,
+        ticketToPrint,
+        (order as any).restaurantName || 'SpiralDine Kitchen',
+        { uid: user?.uid, displayName: user?.displayName || 'Chef' },
+        isReprint
+      );
+
+      if (res.success) {
+        toast.success(isReprint ? 'KOT Reprint sent to printer!' : 'KOT sent to printer!');
+      } else if (res.error) {
+        toast.error(res.error);
+      }
+    } catch (err: any) {
+      console.error('Print trigger failed:', err);
+      toast.error('Failed to trigger KOT print.');
+    } finally {
+      setIsPrinting(false);
+    }
+  };
 
   const statusConf = STATUS_CONFIG[order.status] || STATUS_CONFIG['NEW'];
   const nextConf = NEXT_STATUS[order.status];
@@ -210,9 +279,21 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
                 )}
               </div>
 
-              {/* Order ID */}
-              <div className="text-[11px] font-mono text-[#6F746F] mt-1 truncate">
-                # {order.orderId}
+              {/* Order ID & KOT Number */}
+              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                {(order as any).ticketNumber ? (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-[#13241F] text-white text-[10px] font-black tracking-wide">
+                    {(order as any).ticketNumber}
+                  </span>
+                ) : null}
+                <span className="text-[11px] font-mono text-[#6F746F] truncate">
+                  # {order.orderId}
+                </span>
+                {(order as any).station && (
+                  <span className="text-[10px] font-semibold text-[#8C7A6B] bg-[#F7F4EE] px-1.5 py-0.5 rounded border border-[#E3DED5]">
+                    {(order as any).station}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -486,6 +567,22 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
             <span>Completed</span>
           </button>
         )}
+
+        {/* Dedicated KOT Physical Print / Reprint Action */}
+        <button
+          type="button"
+          onClick={handlePrintKot}
+          disabled={isPrinting}
+          className="w-full mt-2 py-2 rounded-lg text-[11px] font-bold text-[#18201D] bg-white hover:bg-[#F7F4EE] border border-[#E3DED5] shadow-2xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-50 active:scale-[0.99]"
+          title="Print physical thermal Kitchen Order Ticket (KOT)"
+        >
+          <Printer className="w-3.5 h-3.5 text-[#C84A38]" />
+          <span>
+            {(order as any).kotPrintCount && (order as any).kotPrintCount > 0
+              ? `Reprint KOT (#${(order as any).kotPrintCount} printed)`
+              : 'Print KOT'}
+          </span>
+        </button>
       </div>
     </div>
   );

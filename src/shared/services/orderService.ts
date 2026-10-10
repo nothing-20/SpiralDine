@@ -1,5 +1,6 @@
 import { ordersService, kitchenTicketsService } from '../firebase/firestore';
 import { IOrder } from '../domain/orders/types';
+import { kotService } from './kotService';
 
 /**
  * Service for handling Order and Kitchen Ticket database operations.
@@ -30,8 +31,17 @@ export const orderService = {
    * @param tenantId - Optional tenant identifier.
    * @returns A promise resolving to the created order's ID or write result.
    */
-  createOrder: (data: Omit<IOrder, 'id'> & { tenantId?: string }, tenantId?: string) =>
-    ordersService.create(data, { tenantId: tenantId || data.tenantId }),
+  createOrder: (data: Omit<IOrder, 'id'> & { tenantId?: string }, tenantId?: string) => {
+    // Hard validation rule: Zero-item food orders must never be created
+    if (!data.items || !Array.isArray(data.items) || data.items.length === 0) {
+      throw new Error('Order creation rejected: An order must contain at least one valid menu item.');
+    }
+    const orderTotal = Number(data.total ?? (data as any).totalAmount ?? 0);
+    if (orderTotal <= 0 && data.items.length === 0) {
+      throw new Error('Order creation rejected: Order total cannot be zero with no items.');
+    }
+    return ordersService.create(data, { tenantId: tenantId || data.tenantId });
+  },
 
   /**
    * Updates an existing order's fields in Firestore.
@@ -59,6 +69,12 @@ export const orderService = {
    * @param tenantId - Optional tenant identifier.
    * @returns A promise resolving to kitchen ticket documents.
    */
+  /**
+   * Retrieves active kitchen tickets for the given tenant workspace.
+   * 
+   * @param tenantId - Optional tenant identifier.
+   * @returns A promise resolving to kitchen ticket documents.
+   */
   getKitchenTickets: (tenantId?: string) => kitchenTicketsService.getAll(tenantId),
 
   /**
@@ -70,6 +86,31 @@ export const orderService = {
    * @returns A promise resolving when the ticket is updated.
    */
   updateKitchenTicket: (id: string, data: any, tenantId?: string) => kitchenTicketsService.update(id, data, tenantId),
+
+  /**
+   * Generates or returns an existing persistent KOT record for an order.
+   */
+  createKotForOrder: (tenantId: string, order: IOrder, options?: any) =>
+    kotService.createKotForOrder(tenantId, order, options),
+
+  /**
+   * Retrieves all KOTs for a specific canonical order.
+   */
+  getTicketsForOrder: (tenantId: string, orderId: string) =>
+    kotService.getTicketsForOrder(tenantId, orderId),
+
+  /**
+   * Real-time subscription to active KOTs.
+   */
+  subscribeToKitchenTickets: (tenantId: string, callback: (tickets: any[]) => void) =>
+    kotService.subscribeToKitchenTickets(tenantId, callback),
+
+  /**
+   * Updates ticket preparation status.
+   */
+  updateTicketStatus: (tenantId: string, ticketId: string, nextStatus: any, actor?: any) =>
+    kotService.updateTicketStatus(tenantId, ticketId, nextStatus, actor),
 };
 export default orderService;
+
 

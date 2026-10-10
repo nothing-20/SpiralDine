@@ -52,6 +52,7 @@ export interface IBusinessHealthInput {
   managerReviews?: any[];
   tables?: any[];
   tenantId?: string;
+  isPriorPeriod?: boolean;
 }
 
 /**
@@ -466,11 +467,12 @@ export function calculateBusinessHealth(input: IBusinessHealthInput): IBusinessH
   let trendText = 'No prior trend';
   let trendExplanation = 'Historical comparison unavailable (insufficient prior 7-day operational baseline).';
 
-  if (priorOrders.length >= 3 && priorTransactions.length >= 3 && overallScore !== null) {
+  if (!input.isPriorPeriod && priorOrders.length >= 3 && priorTransactions.length >= 3 && overallScore !== null) {
     const priorReport = calculateBusinessHealth({
       ...input,
       orders: priorOrders,
-      paidTransactions: priorTransactions
+      paidTransactions: priorTransactions,
+      isPriorPeriod: true
     });
 
     if (priorReport.overallScore !== null) {

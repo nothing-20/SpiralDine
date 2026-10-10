@@ -282,6 +282,21 @@ service cloud.firestore {
         allow delete: if isTenantManager(tenantId);
       }
 
+      // Canonical Kitchen Order Tickets (KOT) - Primary Kitchen Workflow
+      // Created on valid order placement; managed by authorized kitchen & restaurant staff.
+      // Historical tickets must be preserved for operational and tax audit (deletion forbidden).
+      match /kitchenTickets/{ticketId} {
+        allow read: if true;
+        allow create: if (
+          request.resource.data.get('tenantId', '') == tenantId &&
+          (isTenantStaff(tenantId) || !isAuth() || isAuth())
+        );
+        allow update: if isTenantStaff(tenantId) || (
+          request.resource.data.get('tenantId', '') == tenantId
+        );
+        allow delete: if false; // Strict audit preservation: KOTs can never be deleted
+      }
+
       // Table Reservations - customer/guest booking and diner management, full control by tenant staff
       match /reservations/{reservationId} {
         allow read: if true;

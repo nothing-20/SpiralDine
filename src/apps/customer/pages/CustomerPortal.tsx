@@ -338,14 +338,19 @@ export const CustomerPortal: React.FC = () => {
   // Place Order transaction writing restaurants/{tenantId}/orders
   const handlePlaceOrder = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isPlacingOrder) return;
     console.log('[STEP 1] Confirm button clicked');
 
     if (!tenantId) {
       toast.error('Restaurant session is invalid.');
       return;
     }
-    if (cartItems.length === 0) {
+    if (!cartItems || cartItems.length === 0) {
       toast.error('Your cart is empty.');
+      return;
+    }
+    if (cartSubtotal <= 0 || cartTotalVal <= 0) {
+      toast.error('Order total must be greater than ₹0.00 to place an order.');
       return;
     }
 

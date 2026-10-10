@@ -237,17 +237,13 @@ export const WaiterAssignedTablesPage: React.FC = () => {
       
       const nowIso = new Date().toISOString();
       const targetTable = tables.find(t => t.id === checkInTableId);
-      const orderId = generateUniqueOrderId();
-
-      // 1. Update reservation doc status to Seated with table & order linkage
+      // 1. Update reservation doc status to Seated with table linkage (Table session != Order)
       const resRef = doc(db, 'restaurants', user.tenantId, 'reservations', activeCheckInRes.id);
       const resUpdatePayload = { 
         status: 'Seated', 
         seatedAt: nowIso,
         assignedTableId: targetTable?.id || checkInTableId,
         assignedTableNumber: targetTable?.tableNumber || targetTable?.number || '',
-        activeOrderId: orderId,
-        orderId: orderId,
         updatedAt: nowIso
       };
       batch.update(resRef, resUpdatePayload);
@@ -258,34 +254,23 @@ export const WaiterAssignedTablesPage: React.FC = () => {
         batch.update(custResRef, resUpdatePayload);
       }
 
-      // 2. Update physical Table doc status to Occupied/Dining
+      // 2. Update physical Table doc status to Occupied/Browsing — no food order exists yet
       if (targetTable) {
         const tableRef = doc(db, 'restaurants', user.tenantId, 'tables', targetTable.id);
-        const orderRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
-        
-        // Create blank order to start dining session linked to reservation
-        batch.set(orderRef, {
-          id: orderId,
-          orderId,
-          reservationId: activeCheckInRes.id,
-          customerId: activeCheckInRes.customerId,
-          customerName: activeCheckInRes.customerName,
-          tableNumber: targetTable.tableNumber || targetTable.number,
-          tableId: targetTable.id,
-          tenantId: user.tenantId,
-          items: [],
-          status: 'ACCEPTED',
-          subtotal: 0,
-          total: 0,
-          createdAt: nowIso,
-          updatedAt: nowIso
-        });
-
         batch.update(tableRef, {
           status: 'Occupied',
-          activeOrderId: orderId,
+          tableStatus: 'Occupied',
+          subStatus: 'browsing',
+          diningStatus: 'browsing',
+          customerPresent: true,
+          activeOrderId: null,
+          currentOrderId: null,
           reservationId: activeCheckInRes.id,
           seatingTime: nowIso,
+          seatedAt: nowIso,
+          customerName: activeCheckInRes.customerName || 'Guest Diner',
+          customerPhone: activeCheckInRes.customerPhone || '',
+          customerId: activeCheckInRes.customerId || '',
           guestsCount: activeCheckInRes.guests || 2,
           assignedWaiterId: user.uid,
           assignedWaiterName: user.displayName || user.email

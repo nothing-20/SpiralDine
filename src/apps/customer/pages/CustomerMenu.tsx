@@ -413,7 +413,11 @@ export const CustomerMenu: React.FC = () => {
       const list: any[] = [];
       snap.forEach((docSnap) => {
         const data = docSnap.data();
-        if (isOrderActive(data)) {
+        if (
+          isOrderActive(data) &&
+          Array.isArray(data.items) &&
+          data.items.length > 0
+        ) {
           if (
             !session?.sessionId ||
             data.sessionId === session.sessionId ||
@@ -691,11 +695,12 @@ export const CustomerMenu: React.FC = () => {
   // 8. Order Placement Flow (QR / Table Session)
   // -------------------------------------------------------------
   const handlePlaceOrder = async () => {
+    if (isPlacingOrder) return;
     if (!tenantId) {
       toast.error('Invalid restaurant session. Please scan table QR code again.');
       return;
     }
-    if (cartItems.length === 0) {
+    if (!cartItems || cartItems.length === 0) {
       toast.error('Your basket is empty. Please add dishes to order.');
       return;
     }
@@ -852,6 +857,19 @@ export const CustomerMenu: React.FC = () => {
       const verifiedTax = Math.round(verifiedSubtotal * 0.05);
       const verifiedServiceCharge = Math.round(verifiedSubtotal * 0.05);
       const verifiedTotal = verifiedSubtotal + verifiedTax + verifiedServiceCharge;
+
+      // Hard validation: An order cannot be placed if there are zero verified items or total <= 0
+      if (!verifiedItems || verifiedItems.length === 0) {
+        toast.error('No valid menu items in your order. Please add available dishes.');
+        setIsPlacingOrder(false);
+        return;
+      }
+
+      if (verifiedSubtotal <= 0 || verifiedTotal <= 0) {
+        toast.error('Order total must be greater than ₹0.00 to place an order.');
+        setIsPlacingOrder(false);
+        return;
+      }
 
       // Ensure active dining session exists and has a valid sessionId
       let currentSession = session || getActiveDiningSession(tenantId);
