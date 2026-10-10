@@ -53,6 +53,21 @@ data class PrinterHardwareConfig(
 )
 
 /**
+ * Comprehensive runtime diagnostics for physical and network printers.
+ * Never interprets a socket opening as proof of physical paper output.
+ */
+data class PrinterDiagnostics(
+    val selectedPrinterName: String = "None",
+    val connectionType: String = "None",
+    val connectionState: String = "Not Configured",
+    val lastSuccessfulEventTimestamp: Long? = null,
+    val lastSuccessfulEventDescription: String? = null,
+    val latestError: String? = null,
+    val latestErrorTimestamp: Long? = null,
+    val isTestPrintAvailable: Boolean = false
+)
+
+/**
  * Consolidated UI State for the Print Bridge Dashboard.
  */
 data class PrintBridgeUiState(
@@ -60,7 +75,12 @@ data class PrintBridgeUiState(
     val printerStatus: ThermalPrinterStatus = ThermalPrinterStatus.NotConfigured,
     val queueStatus: PrintQueueStatus = PrintQueueStatus(),
     val config: PrinterHardwareConfig = PrinterHardwareConfig(),
+    val diagnostics: PrinterDiagnostics = PrinterDiagnostics(),
     val testPrintMessage: String? = null,
-    val isTestPrintInProgress: Boolean = false
+    val isTestPrintInProgress: Boolean = false,
+    val queueJobs: List<com.spiraldine.printbridge.data.local.PrintJobEntity> = emptyList(),
+    val activeQueueTab: String = "ALL",
+    val selectedJobForDetails: com.spiraldine.printbridge.data.local.PrintJobEntity? = null,
+    val jobPendingAmbiguousConfirmation: com.spiraldine.printbridge.data.local.PrintJobEntity? = null
 )
 

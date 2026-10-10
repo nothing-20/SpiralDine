@@ -157,15 +157,24 @@ class PrintBridgeForegroundService : Service() {
 
                     val pendingCount = printJobRepository.getPendingCount()
                     if (pendingCount > 0) {
+                        val prefs = getSharedPreferences("spiraldine_printer_config", Context.MODE_PRIVATE)
+                        val stationFilter = prefs.getString("station_filter", "ALL") ?: "ALL"
+                        val paperWidthMm = prefs.getInt("paper_width", 80)
+                        val paperWidth = if (paperWidthMm == 58) ThermalPaperWidth.WIDTH_58MM else ThermalPaperWidth.WIDTH_80MM
+
                         val processResult = queueProcessor.processNextJob(
                             transport = activeTransport,
-                            paperWidth = ThermalPaperWidth.WIDTH_80MM
+                            paperWidth = paperWidth,
+                            stationFilter = stationFilter
                         )
 
                         when (processResult) {
                             is QueueProcessResult.Success -> {
                                 updateNotification("Printed ${processResult.jobId} (${processResult.bytesWritten} B)")
                                 syncPrintSuccessToFirestore(session.tenantId, processResult.jobId)
+                            }
+                            is QueueProcessResult.SkippedStation -> {
+                                updateNotification("Filtered: Ticket routed to another station")
                             }
                             is QueueProcessResult.Failed -> {
                                 updateNotification("Print Failure: ${processResult.reason.take(30)}")

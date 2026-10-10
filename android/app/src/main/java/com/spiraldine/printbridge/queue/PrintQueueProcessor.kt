@@ -19,6 +19,7 @@ sealed interface QueueProcessResult {
     data class Retrying(val jobId: String, val attemptNumber: Int, val reason: String) : QueueProcessResult
     data class Failed(val jobId: String, val reason: String) : QueueProcessResult
     data class Interrupted(val jobId: String, val reason: String) : QueueProcessResult
+    data class SkippedStation(val jobId: String, val reason: String) : QueueProcessResult
 }
 
 /**
@@ -28,6 +29,7 @@ sealed interface QueueProcessResult {
  * - Mutex-based concurrency protection preventing duplicate dispatch of the same ticket
  * - Safe atomic job claiming (PENDING -> SENDING)
  * - Dynamic ESC/POS formatting according to target paper width
+ * - Station routing filter preserving all items without silent loss
  * - Bounded retries (default max 3) with failure recording
  * - Conservative interrupted transmission handling (no automatic retries on partial writes)
  * - Safe preservation of all job history (no automatic job deletion)
@@ -51,7 +53,8 @@ class PrintQueueProcessor(
      */
     suspend fun processNextJob(
         transport: PrinterTransport,
-        paperWidth: ThermalPaperWidth = ThermalPaperWidth.WIDTH_80MM
+        paperWidth: ThermalPaperWidth = ThermalPaperWidth.WIDTH_80MM,
+        stationFilter: String = "ALL"
     ): QueueProcessResult = transportMutex.withLock {
         // 1. Fetch pending jobs in deterministic FIFO order
         val pending = repository.getPendingJobs()
@@ -67,7 +70,7 @@ class PrintQueueProcessor(
             return QueueProcessResult.ClaimFailed(targetJob.jobId)
         }
 
-        // 3. Reconstruct ticket and format ESC/POS byte array
+        // 3. Reconstruct ticket
         val ticket = try {
             KotTicketJson.fromJson(targetJob.payloadJson)
         } catch (e: Exception) {
@@ -76,18 +79,32 @@ class PrintQueueProcessor(
             return QueueProcessResult.Failed(targetJob.jobId, errorMsg)
         }
 
+        // 4. Kitchen-Station Routing Check
+        val routing = com.spiraldine.printbridge.routing.KotStationRouter.routeTicket(ticket, stationFilter)
+        val ticketToPrint = when (routing) {
+            is com.spiraldine.printbridge.routing.StationRoutingResult.Full -> routing.ticket
+            is com.spiraldine.printbridge.routing.StationRoutingResult.Partial -> routing.ticket
+            is com.spiraldine.printbridge.routing.StationRoutingResult.Excluded -> {
+                // Zero matching items for this station. Job belongs to other physical prep stations.
+                // Mark in database as ROUTED_OTHER_STATION to avoid dropping or re-trying.
+                repository.recordSkippedStation(targetJob.jobId, routing.reason)
+                return QueueProcessResult.SkippedStation(targetJob.jobId, routing.reason)
+            }
+        }
+
+        // 5. Format ESC/POS byte array
         val escPosBytes = try {
-            formatter.formatKot(ticket, paperWidth)
+            formatter.formatKot(ticketToPrint, paperWidth)
         } catch (e: Exception) {
             val errorMsg = "ESC/POS formatting error: ${e.message}"
             repository.recordFailure(targetJob.jobId, errorMsg)
             return QueueProcessResult.Failed(targetJob.jobId, errorMsg)
         }
 
-        // 4. Send to physical or network transport
+        // 6. Send to physical or network transport
         val transportResult = transport.send(escPosBytes)
 
-        // 5. Handle transport result
+        // 7. Handle transport result
         return when (transportResult) {
             is TransportResult.Success -> {
                 // Record success (transport accepted bytes)
@@ -98,7 +115,7 @@ class PrintQueueProcessor(
                 if (transportResult.isInterrupted) {
                     // Critical rule: Interrupted writes must NOT automatically retry to prevent physical duplicate tickets
                     val errorMsg = "INTERRUPTED: Partial socket write. Manual inspection required before retry. Detail: ${transportResult.errorMessage}"
-                    repository.recordFailure(targetJob.jobId, errorMsg)
+                    repository.recordInterrupted(targetJob.jobId, errorMsg)
                     QueueProcessResult.Interrupted(targetJob.jobId, errorMsg)
                 } else if (transportResult.isRetryable && targetJob.retryCount < maxRetries) {
                     val retryReason = "Transport failure: ${transportResult.errorMessage}"

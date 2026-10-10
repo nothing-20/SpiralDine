@@ -265,6 +265,10 @@ class FakePrintJobDao : PrintJobDao {
         return storage.values.sortedByDescending { it.createdAt }.take(limit)
     }
 
+    override fun getJobsByStatus(status: String, limit: Int): List<PrintJobEntity> {
+        return storage.values.filter { it.status == status }.sortedByDescending { it.createdAt }.take(limit)
+    }
+
     override fun countPendingJobs(): Int {
         return storage.values.count { it.status == "PENDING" }
     }
