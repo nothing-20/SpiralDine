@@ -333,7 +333,7 @@ fun HomeScreenContent(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Sign in using authorized staff credentials (kitchen, chef, manager, or owner) to pair this device with your restaurant workspace.",
+                        text = "Sign in using authorized staff credentials (waiter, kitchen, chef, manager, or owner) to pair this device with your restaurant workspace.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.secondary
                     )

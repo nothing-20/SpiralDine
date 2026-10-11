@@ -32,7 +32,11 @@ sealed interface AuthResult {
  * Security Guarantees:
  * - Does NOT embed private service accounts or admin master keys.
  * - Does NOT allow connecting to arbitrary restaurant IDs without authentic Firebase credentials.
- * - Verifies that the authenticated user possesses an assigned tenantId and authorized kitchen/staff role.
+ * - Verifies that the authenticated user possesses an assigned tenantId and authorized staff role.
+ * - Rejects inactive or suspended staff accounts (matching Web StaffLogin).
+ * - Rejects diner/customer accounts.
+ * - Adapts to verified schema supporting both tenantId and legacy restaurantId fields.
+ * - Enforces explicit printing permissions if configured on the employee profile.
  */
 class FirebaseAuthManager(
     private val authStorage: AuthStorage,
@@ -51,6 +55,11 @@ class FirebaseAuthManager(
             "waiter", "cashier", "reception", "super_admin", "super-admin"
         )
 
+        val ALLOWED_PRINT_PERMISSIONS = setOf(
+            "full-access", "operational-access", "kitchen-only", "waiter-only",
+            "print-access", "printing", "kitchen", "waiter", "all"
+        )
+
         /**
          * Initializes FirebaseApp programmatically if not already initialized.
          */
@@ -65,6 +74,136 @@ class FirebaseAuthManager(
                 FirebaseApp.initializeApp(context.applicationContext, options)
             }
         }
+    }
+
+    /**
+     * Authoritatively validates staff profile and permissions.
+     */
+    fun validateStaffAuthorization(
+        uid: String,
+        email: String,
+        rawRole: String?,
+        rawTenantId: String?,
+        status: String = "active",
+        canPrintExplicit: Boolean? = null,
+        permissionsList: List<String>? = null,
+        restaurantName: String = "SpiralDine Restaurant"
+    ): AuthResult {
+        // 1. Profile existence check
+        if (rawRole.isNullOrBlank() && rawTenantId.isNullOrBlank()) {
+            return AuthResult.Error(
+                "Account verified, but no staff profile is associated with this account. Please contact restaurant management."
+            )
+        }
+
+        // 2. Active status check (matches Web StaffLogin.tsx line 98)
+        val normalizedStatus = status.trim().lowercase()
+        if (normalizedStatus == "inactive" || normalizedStatus == "suspended" || normalizedStatus == "archived") {
+            return AuthResult.Error(
+                "Your staff account is currently inactive or suspended. Contact your administrator."
+            )
+        }
+
+        // 3. Role validation & diner isolation (matches Web StaffLogin.tsx line 107)
+        val normalizedRole = (rawRole ?: "").trim().lowercase().replace("-", "_")
+        if (normalizedRole == "customer") {
+            return AuthResult.Error(
+                "This account is registered as a diner account. Staff credentials required to operate Print Bridge."
+            )
+        }
+
+        val isRoleAllowed = AUTHORIZED_ROLES.contains(normalizedRole) || 
+                            AUTHORIZED_ROLES.contains((rawRole ?: "").trim().lowercase())
+        if (!isRoleAllowed) {
+            return AuthResult.Error(
+                "Role '${rawRole ?: "unknown"}' is not authorized to operate the Kitchen Print Bridge. Kitchen, waiter, or management role required."
+            )
+        }
+
+        // 4. Restaurant tenant association check (matches Web roleResolver.ts lines 114-116)
+        val tenantId = rawTenantId?.trim()
+        if (tenantId.isNullOrBlank()) {
+            return AuthResult.Error(
+                "Account is not assigned to an active restaurant workspace. Access denied."
+            )
+        }
+
+        // 5. Explicit printing permission checks (Phase 2 Rule 7 & 8)
+        if (canPrintExplicit == false) {
+            return AuthResult.Error(
+                "This employee account does not have permission to operate the Print Bridge. Contact your administrator."
+            )
+        }
+
+        if (permissionsList != null && permissionsList.isNotEmpty()) {
+            val hasValidPerm = permissionsList.any { perm ->
+                ALLOWED_PRINT_PERMISSIONS.contains(perm.trim().lowercase())
+            }
+            if (!hasValidPerm) {
+                return AuthResult.Error(
+                    "Account permissions do not permit operating the Print Bridge. Contact your administrator."
+                )
+            }
+        }
+
+        val profile = StaffProfile(
+            uid = uid,
+            email = email,
+            tenantId = tenantId,
+            role = rawRole ?: "waiter",
+            restaurantName = restaurantName
+        )
+
+        return AuthResult.Success(profile)
+    }
+
+    /**
+     * Resolves staff authorization from Firestore document data (with fallback to employees collection).
+     */
+    fun resolveProfileFromUserData(
+        uid: String,
+        email: String,
+        userData: Map<String, Any?>?,
+        employeeData: Map<String, Any?>? = null,
+        restaurantName: String = "SpiralDine Restaurant"
+    ): AuthResult {
+        val sourceData = if (userData != null && (userData["role"] != null || userData["tenantId"] != null || userData["restaurantId"] != null)) {
+            userData
+        } else {
+            employeeData
+        }
+
+        if (sourceData == null) {
+            return AuthResult.Error(
+                "Account verified, but no staff profile is associated with this account. Please contact restaurant management."
+            )
+        }
+
+        val rawRole = sourceData["role"] as? String
+        val rawTenantId = (sourceData["tenantId"] as? String)?.takeIf { it.isNotBlank() }
+            ?: (sourceData["restaurantId"] as? String)?.takeIf { it.isNotBlank() }
+        val status = sourceData["status"] as? String ?: "active"
+        val canPrintExplicit = (sourceData["canPrint"] as? Boolean)
+            ?: (sourceData["printingEnabled"] as? Boolean)
+            ?: (sourceData["printAccess"] as? Boolean)
+        val permissionsList = (sourceData["permissions"] as? List<*>)?.filterIsInstance<String>()
+
+        val result = validateStaffAuthorization(
+            uid = uid,
+            email = email,
+            rawRole = rawRole,
+            rawTenantId = rawTenantId,
+            status = status,
+            canPrintExplicit = canPrintExplicit,
+            permissionsList = permissionsList,
+            restaurantName = restaurantName
+        )
+
+        if (result is AuthResult.Success) {
+            authStorage.saveSession(result.profile)
+        }
+
+        return result
     }
 
     suspend fun signIn(email: String, password: String): AuthResult = withContext(Dispatchers.IO) {
@@ -84,58 +223,67 @@ class FirebaseAuthManager(
             val user = authResult.user
                 ?: return@withContext AuthResult.Error("Authentication succeeded but no user was returned.")
 
-            // 2. Fetch User Profile Document to resolve tenantId and role
-            val userDoc = firestore.collection("users").document(user.uid).get().await()
-            if (!userDoc.exists()) {
-                auth.signOut()
-                return@withContext AuthResult.Error(
-                    "Account verified, but no restaurant profile exists in users/${user.uid}. Please contact restaurant management."
-                )
-            }
-
-            val tenantId = userDoc.getString("tenantId")
-            if (tenantId.isNullOrBlank()) {
-                auth.signOut()
-                return@withContext AuthResult.Error(
-                    "Account is not assigned to an active restaurant workspace. Access denied."
-                )
-            }
-
-            val rawRole = userDoc.getString("role") ?: "kitchen"
-            val normalizedRole = rawRole.lowercase().replace("-", "_")
-
-            if (!AUTHORIZED_ROLES.contains(normalizedRole) && !AUTHORIZED_ROLES.contains(rawRole.lowercase())) {
-                auth.signOut()
-                return@withContext AuthResult.Error(
-                    "Role '$rawRole' is not authorized to operate the Kitchen Print Bridge. Kitchen or management role required."
-                )
-            }
-
-            // 3. Resolve Restaurant Display Name
-            var restaurantName = "SpiralDine Restaurant"
+            // 2. Fetch User Profile Document from users/{uid}
+            var userData: Map<String, Any?>? = null
             try {
-                val restDoc = firestore.collection("restaurants").document(tenantId).get().await()
-                if (restDoc.exists()) {
-                    restaurantName = restDoc.getString("name") 
-                        ?: restDoc.getString("restaurantName") 
-                        ?: restaurantName
+                val userDoc = firestore.collection("users").document(user.uid).get().await()
+                if (userDoc.exists()) {
+                    userData = userDoc.data
                 }
             } catch (_: Exception) {
-                // Non-fatal; fallback to default restaurant name
+                // Non-fatal; continue to fallback check
             }
 
-            val profile = StaffProfile(
+            // 3. Fallback: check employees collection by firebaseUid (matches Web roleResolver.ts lines 235-248)
+            var employeeData: Map<String, Any?>? = null
+            if (userData == null || (userData["role"] == null && userData["tenantId"] == null && userData["restaurantId"] == null)) {
+                try {
+                    val empQuery = firestore.collection("employees")
+                        .whereEqualTo("firebaseUid", user.uid)
+                        .get()
+                        .await()
+                    if (!empQuery.isEmpty) {
+                        employeeData = empQuery.documents.first().data
+                    }
+                } catch (_: Exception) {
+                    // Non-fatal
+                }
+            }
+
+            // 4. Resolve Restaurant Display Name
+            val rawTenantId = (userData?.get("tenantId") as? String)?.takeIf { it.isNotBlank() }
+                ?: (userData?.get("restaurantId") as? String)?.takeIf { it.isNotBlank() }
+                ?: (employeeData?.get("tenantId") as? String)?.takeIf { it.isNotBlank() }
+                ?: (employeeData?.get("restaurantId") as? String)?.takeIf { it.isNotBlank() }
+
+            var restaurantName = "SpiralDine Restaurant"
+            if (!rawTenantId.isNullOrBlank()) {
+                try {
+                    val restDoc = firestore.collection("restaurants").document(rawTenantId).get().await()
+                    if (restDoc.exists()) {
+                        restaurantName = restDoc.getString("name") 
+                            ?: restDoc.getString("restaurantName") 
+                            ?: restaurantName
+                    }
+                } catch (_: Exception) {
+                    // Non-fatal; fallback to default
+                }
+            }
+
+            // 5. Evaluate authorization authoritatively
+            val result = resolveProfileFromUserData(
                 uid = user.uid,
                 email = user.email ?: trimmedEmail,
-                tenantId = tenantId,
-                role = rawRole,
+                userData = userData,
+                employeeData = employeeData,
                 restaurantName = restaurantName
             )
 
-            // 4. Save validated pairing session
-            authStorage.saveSession(profile)
+            if (result is AuthResult.Error) {
+                auth.signOut()
+            }
 
-            AuthResult.Success(profile)
+            result
         } catch (e: Exception) {
             val msg = e.localizedMessage ?: "Authentication failed: ${e.message}"
             AuthResult.Error(msg)
