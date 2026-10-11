@@ -331,6 +331,10 @@ class MainViewModel(
                     restaurantName = session.restaurantName
                 )
             )
+            // Auto-start foreground service if enabled and not currently running
+            if (authStorage.isAutoStartEnabled() && !com.spiraldine.printbridge.service.PrintBridgeForegroundService.isServiceRunning) {
+                com.spiraldine.printbridge.service.PrintBridgeForegroundService.start(context)
+            }
         } else {
             repository.updateCloudStatus(com.spiraldine.printbridge.model.CloudSyncStatus.Disconnected)
         }

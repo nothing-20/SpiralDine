@@ -639,7 +639,7 @@ fun HomeScreenContent(
                                     .clip(CircleShape)
                                     .background(
                                         when (state.cloudStatus) {
-                                            is CloudSyncStatus.Connected -> StatusGreen
+                                            is CloudSyncStatus.Connected -> if (state.serviceStatus is ServiceStatus.Running) StatusGreen else StatusAmber
                                             CloudSyncStatus.Connecting -> StatusAmber
                                             CloudSyncStatus.Disconnected -> StatusRed
                                         }
@@ -648,7 +648,14 @@ fun HomeScreenContent(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = when (state.cloudStatus) {
-                                    is CloudSyncStatus.Connected -> "Connected: ${(state.cloudStatus as CloudSyncStatus.Connected).restaurantName}"
+                                    is CloudSyncStatus.Connected -> {
+                                        val restName = (state.cloudStatus as CloudSyncStatus.Connected).restaurantName
+                                        if (state.serviceStatus is ServiceStatus.Running) {
+                                            "Connected: $restName"
+                                        } else {
+                                            "Paired: $restName (Listener Paused)"
+                                        }
+                                    }
                                     CloudSyncStatus.Connecting -> "Connecting to SpiralDine..."
                                     CloudSyncStatus.Disconnected -> "Disconnected (Pairing Required)"
                                 },
@@ -660,7 +667,14 @@ fun HomeScreenContent(
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = when (state.cloudStatus) {
-                                is CloudSyncStatus.Connected -> "Tenant: ${(state.cloudStatus as CloudSyncStatus.Connected).tenantId} | Listening on restaurants/${(state.cloudStatus as CloudSyncStatus.Connected).tenantId}/kitchenTickets"
+                                is CloudSyncStatus.Connected -> {
+                                    val tenant = (state.cloudStatus as CloudSyncStatus.Connected).tenantId
+                                    if (state.serviceStatus is ServiceStatus.Running) {
+                                        "Tenant: $tenant | Actively listening on restaurants/$tenant/kitchenTickets"
+                                    } else {
+                                        "Tenant: $tenant | Background service paused (Tap 'Start Service' below to listen)"
+                                    }
+                                }
                                 CloudSyncStatus.Connecting -> "Authenticating restaurant staff credentials..."
                                 CloudSyncStatus.Disconnected -> "Device is not paired with a restaurant workspace."
                             },

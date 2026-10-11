@@ -115,7 +115,7 @@ class PrintBridgeForegroundService : Service() {
         }
     }
 
-    private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
+    private var serviceScope: CoroutineScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private var queueJob: Job? = null
 
     private lateinit var authStorage: AuthStorage
@@ -177,6 +177,12 @@ class PrintBridgeForegroundService : Service() {
             return
         }
 
+        // Re-create active CoroutineScope if previous one was cancelled
+        if (!serviceScope.isActive) {
+            Log.d(TAG, "Recreating active serviceScope for new bridge run")
+            serviceScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+        }
+
         // 1. Start Firestore Real-Time KOT Listener
         firestoreListener?.stop()
         firestoreListener = KotFirestoreListener(
@@ -189,7 +195,9 @@ class PrintBridgeForegroundService : Service() {
                         updateNotification("Connected: ${session.restaurantName} (Listening)")
                     }
                     is KotFirestoreListener.SyncState.Error -> {
+                        Log.e(TAG, "SyncState error reported: ${state.message}")
                         updateNotification("Connection Issue: ${state.message.take(40)}")
+                        _serviceStatus.value = ServiceStatus.Error("Cloud Sync: ${state.message}")
                     }
                     KotFirestoreListener.SyncState.Stopped -> {}
                 }
