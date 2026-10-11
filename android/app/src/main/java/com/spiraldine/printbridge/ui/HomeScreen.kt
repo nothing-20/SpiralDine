@@ -57,6 +57,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.spiraldine.printbridge.auth.AuthResult
@@ -66,6 +72,7 @@ import com.spiraldine.printbridge.model.CloudSyncStatus
 import com.spiraldine.printbridge.model.KotTicketJson
 import com.spiraldine.printbridge.model.PrintBridgeUiState
 import com.spiraldine.printbridge.model.PrinterDiagnostics
+import com.spiraldine.printbridge.model.ServiceStatus
 import com.spiraldine.printbridge.model.ThermalPrinterStatus
 import com.spiraldine.printbridge.routing.KotStationRouter
 import com.spiraldine.printbridge.service.PrintBridgeForegroundService
@@ -91,8 +98,49 @@ fun HomeScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        viewModel.startService(context)
+    }
+
+    val requestPermissionsAndStartService = {
+        val permissionsToRequest = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            state.config.connectionType == "Bluetooth"
+        ) {
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.BLUETOOTH_CONNECT
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                permissionsToRequest.add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            permissionLauncher.launch(permissionsToRequest.toTypedArray())
+        } else {
+            viewModel.startService(context)
+        }
+    }
+
     LaunchedEffect(Unit) {
         viewModel.checkExistingSession(context)
+        viewModel.loadQueueJobs(context)
+        while (true) {
+            kotlinx.coroutines.delay(3000)
+            viewModel.loadQueueJobs(context)
+        }
     }
 
     Scaffold(
@@ -147,7 +195,7 @@ fun HomeScreen(
             onDismissTestPrintMessage = { viewModel.dismissTestPrintMessage() },
             onSignIn = { email, pass, cb -> viewModel.signIn(email, pass, context, cb) },
             onSignOut = { viewModel.signOut(context) },
-            onStartService = { viewModel.startService(context) },
+            onStartService = requestPermissionsAndStartService,
             onStopService = { viewModel.stopService(context) },
             onRefreshQueue = { viewModel.loadQueueJobs(context) },
             onSelectQueueTab = { viewModel.setActiveQueueTab(it, context) },
@@ -278,6 +326,13 @@ fun HomeScreenContent(
     // Job Details Modal Dialog
     if (state.selectedJobForDetails != null) {
         val job = state.selectedJobForDetails!!
+        val ticket = remember(job.payloadJson) {
+            try {
+                KotTicketJson.fromJson(job.payloadJson)
+            } catch (_: Exception) {
+                null
+            }
+        }
         AlertDialog(
             onDismissRequest = { onSelectJobForDetails(null) },
             title = {
@@ -289,8 +344,17 @@ fun HomeScreenContent(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     DetailRow(label = "Job ID", value = job.jobId)
+                    DetailRow(label = "Source KOT ID", value = job.ticketId)
                     DetailRow(label = "Canonical Order ID", value = job.orderId)
-                    DetailRow(label = "Status", value = job.status)
+                    DetailRow(label = "Ticket Number", value = job.ticketNumber)
+                    DetailRow(label = "Table", value = job.tableNumber ?: "N/A")
+                    DetailRow(label = "Station", value = ticket?.primaryStation ?: state.config.targetStation)
+                    DetailRow(label = "Queue State", value = job.status)
+                    val activeTenant = (state.cloudStatus as? CloudSyncStatus.Connected)?.tenantId
+                    if (activeTenant != null) {
+                        DetailRow(label = "Restaurant Tenant", value = activeTenant)
+                    }
+                    DetailRow(label = "Round", value = "#${job.round}${if (job.isSupplementary) " (Supplementary)" else ""}")
                     DetailRow(label = "Retry Count", value = "${job.retryCount}")
                     DetailRow(label = "Created At", value = formatEpochTime(job.createdAt))
                     if (job.lastAttemptAt != null) {
@@ -298,7 +362,7 @@ fun HomeScreenContent(
                     }
                     val detailErr = job.lastError
                     if (detailErr != null) {
-                        DetailRow(label = "Last Diagnostic Error", value = detailErr)
+                        DetailRow(label = "Failure Details", value = detailErr, valueColor = StatusRed)
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text("Raw Stored Payload:", fontWeight = FontWeight.Bold, fontSize = 12.sp)
@@ -575,7 +639,7 @@ fun HomeScreenContent(
                                     .clip(CircleShape)
                                     .background(
                                         when (state.cloudStatus) {
-                                            is CloudSyncStatus.Connected -> StatusGreen
+                                            is CloudSyncStatus.Connected -> if (state.serviceStatus is ServiceStatus.Running) StatusGreen else StatusAmber
                                             CloudSyncStatus.Connecting -> StatusAmber
                                             CloudSyncStatus.Disconnected -> StatusRed
                                         }
@@ -584,7 +648,14 @@ fun HomeScreenContent(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = when (state.cloudStatus) {
-                                    is CloudSyncStatus.Connected -> "Connected: ${(state.cloudStatus as CloudSyncStatus.Connected).restaurantName}"
+                                    is CloudSyncStatus.Connected -> {
+                                        val restName = (state.cloudStatus as CloudSyncStatus.Connected).restaurantName
+                                        if (state.serviceStatus is ServiceStatus.Running) {
+                                            "Connected: $restName"
+                                        } else {
+                                            "Paired: $restName (Listener Paused)"
+                                        }
+                                    }
                                     CloudSyncStatus.Connecting -> "Connecting to SpiralDine..."
                                     CloudSyncStatus.Disconnected -> "Disconnected (Pairing Required)"
                                 },
@@ -596,7 +667,14 @@ fun HomeScreenContent(
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = when (state.cloudStatus) {
-                                is CloudSyncStatus.Connected -> "Tenant: ${(state.cloudStatus as CloudSyncStatus.Connected).tenantId} | Listening on restaurants/${(state.cloudStatus as CloudSyncStatus.Connected).tenantId}/kitchenTickets"
+                                is CloudSyncStatus.Connected -> {
+                                    val tenant = (state.cloudStatus as CloudSyncStatus.Connected).tenantId
+                                    if (state.serviceStatus is ServiceStatus.Running) {
+                                        "Tenant: $tenant | Actively listening on restaurants/$tenant/kitchenTickets"
+                                    } else {
+                                        "Tenant: $tenant | Background service paused (Tap 'Start Service' below to listen)"
+                                    }
+                                }
                                 CloudSyncStatus.Connecting -> "Authenticating restaurant staff credentials..."
                                 CloudSyncStatus.Disconnected -> "Device is not paired with a restaurant workspace."
                             },
@@ -632,7 +710,9 @@ fun HomeScreenContent(
                 }
 
                 // 3. Background Service Card
-                val serviceRunning = PrintBridgeForegroundService.isServiceRunning
+                val serviceStatus = state.serviceStatus
+                val serviceRunning = serviceStatus is ServiceStatus.Running
+                val isStarting = serviceStatus is ServiceStatus.Starting
                 Card(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -651,11 +731,23 @@ fun HomeScreenContent(
                                 modifier = Modifier
                                     .size(10.dp)
                                     .clip(CircleShape)
-                                    .background(if (serviceRunning) StatusGreen else Slate400)
+                                    .background(
+                                        when (serviceStatus) {
+                                            is ServiceStatus.Running -> StatusGreen
+                                            is ServiceStatus.Starting -> StatusAmber
+                                            is ServiceStatus.Error -> StatusRed
+                                            ServiceStatus.Stopped -> Slate400
+                                        }
+                                    )
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (serviceRunning) "Foreground Service Active" else "Foreground Service Stopped",
+                                text = when (serviceStatus) {
+                                    is ServiceStatus.Running -> "Foreground Service Active"
+                                    is ServiceStatus.Starting -> "Foreground Service Starting..."
+                                    is ServiceStatus.Error -> "Foreground Service Error"
+                                    ServiceStatus.Stopped -> "Foreground Service Stopped"
+                                },
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -663,14 +755,15 @@ fun HomeScreenContent(
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = if (serviceRunning) {
-                                "Persistent service is running with ongoing notification. KOTs are dispatched continuously."
-                            } else {
-                                "Background execution is paused. Start service to print orders while screen is off."
+                            text = when (serviceStatus) {
+                                is ServiceStatus.Running -> "Persistent service is running with ongoing notification. KOTs are dispatched continuously."
+                                is ServiceStatus.Starting -> "Initializing background workers and connecting order sync..."
+                                is ServiceStatus.Error -> "Error: ${serviceStatus.message}"
+                                ServiceStatus.Stopped -> "Background execution is paused. Start service to print orders while screen is off."
                             },
                             fontSize = 12.sp,
                             lineHeight = 16.sp,
-                            color = MaterialTheme.colorScheme.secondary,
+                            color = if (serviceStatus is ServiceStatus.Error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.padding(start = 18.dp)
                         )
 
@@ -690,12 +783,22 @@ fun HomeScreenContent(
                             } else {
                                 Button(
                                     onClick = onStartService,
-                                    enabled = state.cloudStatus is CloudSyncStatus.Connected,
+                                    enabled = state.cloudStatus is CloudSyncStatus.Connected && !isStarting,
                                     shape = RoundedCornerShape(8.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = SpiralAmberPrimary),
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("Start Service")
+                                    if (isStarting) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color = Color.White
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Starting...")
+                                    } else {
+                                        Text("Start Service")
+                                    }
                                 }
                             }
                         }

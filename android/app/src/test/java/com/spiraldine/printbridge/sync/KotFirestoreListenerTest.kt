@@ -234,4 +234,60 @@ class KotFirestoreListenerTest {
         assertTrue("Supplementary round has unique ticketId and must enqueue independently", res2 is EnqueueResult.Enqueued)
         assertEquals(2, printJobRepository.getPendingCount())
     }
+
+    @Test
+    fun parseKitchenTicketData_realCustomerOrderCnh6hu_parsesAndEnqueuesCleanly() = runTest {
+        val realMap = mapOf(
+            "id" to "KOT-ORD-20261011-CNH6HU-R1",
+            "orderId" to "ORD-20261011-CNH6HU",
+            "ticketNumber" to "KOT #107",
+            "numericTicketNumber" to 107,
+            "tenantId" to "yummy-yummy-3p65",
+            "round" to 1,
+            "isSupplementary" to true,
+            "tableNumber" to "1",
+            "tableName" to "Table 1",
+            "source" to "customer_app",
+            "station" to "Main Kitchen",
+            "status" to "NEW",
+            "printStatus" to "unprinted",
+            "createdAt" to "2026-10-11T07:21:19.099Z",
+            "items" to listOf(
+                mapOf(
+                    "itemId" to "MENU-001",
+                    "name" to "Veg Spring Rolls",
+                    "count" to 1,
+                    "notes" to "",
+                    "pricePerUnit" to 650,
+                    "station" to "Main Kitchen",
+                    "isVeg" to true,
+                    "specialInstructions" to ""
+                )
+            )
+        )
+
+        val ticket = KotFirestoreListener.parseKitchenTicketData(realMap, "KOT-ORD-20261011-CNH6HU-R1")
+        assertNotNull(ticket)
+        assertEquals("KOT-ORD-20261011-CNH6HU-R1", ticket!!.ticketId)
+        assertEquals("ORD-20261011-CNH6HU", ticket.orderId)
+        assertEquals(1, ticket.items.size)
+        assertEquals("Veg Spring Rolls", ticket.items[0].name)
+        assertEquals("CUSTOMER APP", ticket.orderType)
+
+        // Verify shouldEnqueueTicket allows recovery of unprinted ticket
+        val shouldEnqueue = KotFirestoreListener.shouldEnqueueTicket(
+            createdAtIso = ticket.createdAt,
+            printStatus = "unprinted",
+            listenerStartTimeMs = System.currentTimeMillis()
+        )
+        assertTrue(shouldEnqueue)
+
+        val enqueueResult = printJobRepository.enqueueKot(ticket)
+        assertTrue(enqueueResult is EnqueueResult.Enqueued)
+        val job = (enqueueResult as EnqueueResult.Enqueued).job
+        assertEquals("PJ-KOT-ORD-20261011-CNH6HU-R1", job.jobId)
+        assertEquals("PENDING", job.status)
+        assertEquals(1, printJobRepository.getPendingCount())
+    }
 }
+

@@ -394,4 +394,128 @@ class EndToEndKotWorkflowTest {
         assertEquals(1, transport.totalSubmissions)
         assertEquals("OFFLINE_PAYLOAD", transport.lastTextContent)
     }
+
+    @Test
+    fun customerPortal_orderSubmission_fullPipelineVerified() = runTest {
+        // 1. Customer submits Order #1 via Customer Portal QR code
+        val customerOrderDoc = mapOf(
+            "id" to "KOT-ORD-CUST-101-R1",
+            "orderId" to "ORD-CUST-101",
+            "ticketNumber" to "KOT #120",
+            "tableNumber" to "4",
+            "tableName" to "Table 4",
+            "source" to "customer_qr",
+            "customerName" to "Rahul Sharma",
+            "round" to 1,
+            "isSupplementary" to false,
+            "station" to "Main Kitchen",
+            "createdAt" to "2026-10-11T12:00:00.000Z",
+            "printStatus" to "unprinted",
+            "items" to listOf(
+                mapOf(
+                    "itemId" to "item-paneer-butter",
+                    "name" to "Paneer Butter Masala",
+                    "count" to 1,
+                    "notes" to "Medium spicy",
+                    "station" to "Main Kitchen"
+                ),
+                mapOf(
+                    "itemId" to "item-garlic-naan",
+                    "name" to "Garlic Naan",
+                    "count" to 2,
+                    "notes" to "Crispy",
+                    "station" to "Tandoor"
+                )
+            )
+        )
+
+        // 2. Android KotFirestoreListener parses canonical document
+        val ticketR1 = KotFirestoreListener.parseKitchenTicketData(customerOrderDoc, "KOT-ORD-CUST-101-R1")
+        assertNotNull("Customer portal KOT must parse cleanly into KotTicket domain model", ticketR1)
+        assertEquals("ORD-CUST-101", ticketR1!!.orderId)
+        assertEquals("CUSTOMER QR", ticketR1.orderType)
+        assertEquals("Rahul Sharma", ticketR1.customerName)
+        assertEquals(1, ticketR1.round)
+        assertFalse(ticketR1.isSupplementary)
+        assertEquals(2, ticketR1.items.size)
+
+        // 3. PrintJobRepository enqueues exactly one job in local Room queue
+        val enqueueResult1 = repository.enqueueKot(ticketR1)
+        assertTrue(enqueueResult1 is EnqueueResult.Enqueued)
+        val job1 = (enqueueResult1 as EnqueueResult.Enqueued).job
+        assertEquals("PJ-KOT-ORD-CUST-101-R1", job1.jobId)
+        assertEquals("PENDING", job1.status)
+        assertEquals(1, repository.getPendingCount())
+
+        // 4. Duplicate Firestore delivery for Round 1 does NOT create duplicate jobs
+        val dupResult = repository.enqueueKot(ticketR1)
+        assertTrue(dupResult is EnqueueResult.AlreadyQueued)
+        assertEquals(1, repository.getPendingCount())
+
+        // 5. Customer orders supplementary items (Round 2)
+        val customerOrderDocR2 = mapOf(
+            "id" to "KOT-ORD-CUST-101-R2",
+            "orderId" to "ORD-CUST-101",
+            "ticketNumber" to "KOT #121",
+            "tableNumber" to "4",
+            "tableName" to "Table 4",
+            "source" to "customer_qr",
+            "customerName" to "Rahul Sharma",
+            "round" to 2,
+            "isSupplementary" to true,
+            "station" to "Dessert",
+            "createdAt" to "2026-10-11T12:20:00.000Z",
+            "printStatus" to "unprinted",
+            "items" to listOf(
+                mapOf(
+                    "itemId" to "item-gulab-jamun",
+                    "name" to "Gulab Jamun (2 pcs)",
+                    "count" to 1,
+                    "notes" to "Warm",
+                    "station" to "Dessert"
+                )
+            )
+        )
+
+        val ticketR2 = KotFirestoreListener.parseKitchenTicketData(customerOrderDocR2, "KOT-ORD-CUST-101-R2")
+        assertNotNull(ticketR2)
+        assertEquals(2, ticketR2!!.round)
+        assertTrue(ticketR2.isSupplementary)
+
+        val enqueueResult2 = repository.enqueueKot(ticketR2)
+        assertTrue(enqueueResult2 is EnqueueResult.Enqueued)
+        assertEquals(2, repository.getPendingCount())
+
+        // 6. Queue persistence across application/service restart
+        val restartedRepo = PrintJobRepository(fakeDao)
+        val pendingJobsAfterRestart = restartedRepo.getPendingJobs()
+        assertEquals(2, pendingJobsAfterRestart.size)
+        assertEquals("PJ-KOT-ORD-CUST-101-R1", pendingJobsAfterRestart[0].jobId)
+        assertEquals("PJ-KOT-ORD-CUST-101-R2", pendingJobsAfterRestart[1].jobId)
+
+        // 7. Simulated printer transport processes the queue without physical hardware
+        val restartedProcessor = PrintQueueProcessor(restartedRepo, formatter, maxRetries = 3)
+
+        // Process Round 1 job
+        val processR1 = restartedProcessor.processNextJob(simulatedTransport, ThermalPaperWidth.WIDTH_80MM)
+        assertTrue(processR1 is QueueProcessResult.Success)
+        val textR1 = simulatedTransport.lastTextContent!!
+        assertTrue(textR1.contains("Rahul Sharma"))
+        assertTrue(textR1.contains("Paneer Butter Masala"))
+        assertTrue(textR1.contains("Garlic Naan"))
+
+        // Process Round 2 job
+        val processR2 = restartedProcessor.processNextJob(simulatedTransport, ThermalPaperWidth.WIDTH_80MM)
+        assertTrue(processR2 is QueueProcessResult.Success)
+        val textR2 = simulatedTransport.lastTextContent!!
+        assertTrue(textR2.contains("[SUPPLEMENTARY KOT (ROUND #2)]"))
+        assertTrue(textR2.contains("Gulab Jamun"))
+
+        // Final state verification
+        assertEquals(0, restartedRepo.getPendingCount())
+        assertEquals(2, restartedRepo.getPrintedCount())
+        assertEquals(2, simulatedTransport.totalSubmissions)
+        assertEquals(2, simulatedTransport.successfulSubmissions)
+    }
 }
+

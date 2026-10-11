@@ -37,6 +37,12 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import android.util.Log
+import com.spiraldine.printbridge.model.ServiceStatus
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
 /**
  * Android Foreground Service managing 24/7 autonomous KOT printing.
  *
@@ -51,32 +57,65 @@ import java.util.Locale
 class PrintBridgeForegroundService : Service() {
 
     companion object {
+        private const val TAG = "PrintBridgeFGS"
         const val CHANNEL_ID = "spiraldine_print_bridge_channel"
         const val NOTIFICATION_ID = 1001
 
         const val ACTION_START = "com.spiraldine.printbridge.action.START"
         const val ACTION_STOP = "com.spiraldine.printbridge.action.STOP"
 
+        private val _serviceStatus = MutableStateFlow<ServiceStatus>(ServiceStatus.Stopped)
+        val serviceStatus: StateFlow<ServiceStatus> = _serviceStatus.asStateFlow()
+
         @Volatile
         var isServiceRunning: Boolean = false
             private set
 
         fun start(context: Context) {
-            val intent = Intent(context, PrintBridgeForegroundService::class.java).apply {
-                action = ACTION_START
+            val current = _serviceStatus.value
+            if (current is ServiceStatus.Running || current is ServiceStatus.Starting) {
+                Log.d(TAG, "start() ignored; service is already in state: $current")
+                return
             }
-            ContextCompat.startForegroundService(context, intent)
+            Log.i(TAG, "PrintBridgeForegroundService.start() requested")
+            _serviceStatus.value = ServiceStatus.Starting
+            try {
+                val intent = Intent(context, PrintBridgeForegroundService::class.java).apply {
+                    action = ACTION_START
+                }
+                ContextCompat.startForegroundService(context, intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start foreground service: ${e::class.java.simpleName}: ${e.message}", e)
+                _serviceStatus.value = ServiceStatus.Error(
+                    e.localizedMessage ?: "Failed to start foreground print service"
+                )
+            }
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, PrintBridgeForegroundService::class.java).apply {
-                action = ACTION_STOP
+            Log.i(TAG, "PrintBridgeForegroundService.stop() requested")
+            try {
+                val intent = Intent(context, PrintBridgeForegroundService::class.java).apply {
+                    action = ACTION_STOP
+                }
+                context.startService(intent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to send stop intent: ${e::class.java.simpleName}: ${e.message}", e)
             }
-            context.startService(intent)
+            _serviceStatus.value = ServiceStatus.Stopped
+            isServiceRunning = false
+        }
+
+        /**
+         * Test and diagnostic helper to reset service state in unit tests.
+         */
+        fun resetStatusForTesting(status: ServiceStatus = ServiceStatus.Stopped) {
+            _serviceStatus.value = status
+            isServiceRunning = status is ServiceStatus.Running
         }
     }
 
-    private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
+    private var serviceScope: CoroutineScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private var queueJob: Job? = null
 
     private lateinit var authStorage: AuthStorage
@@ -86,6 +125,7 @@ class PrintBridgeForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        Log.i(TAG, "PrintBridgeForegroundService.onCreate() called")
         FirebaseAuthManager.initializeFirebase(this)
         authStorage = AuthStorage(this)
         val database = PrintBridgeDatabase.getInstance(this)
@@ -95,23 +135,36 @@ class PrintBridgeForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.i(TAG, "PrintBridgeForegroundService.onStartCommand() action=${intent?.action}")
         if (intent?.action == ACTION_STOP) {
             stopBridge()
+            stopSelf()
+            _serviceStatus.value = ServiceStatus.Stopped
+            isServiceRunning = false
+            return START_NOT_STICKY
+        }
+
+        val session = authStorage.getSession()
+        if (session == null) {
+            Log.w(TAG, "Service started but device is not paired to a restaurant workspace")
+            val errorMsg = "Device not paired to a restaurant workspace"
+            _serviceStatus.value = ServiceStatus.Error(errorMsg)
+            isServiceRunning = false
             stopSelf()
             return START_NOT_STICKY
         }
 
-        // Start foreground immediately to satisfy Android background start requirements
-        val session = authStorage.getSession()
-        val initialText = if (session != null) {
-            "Active: ${session.restaurantName} (Listening for KOTs)"
-        } else {
-            "Device not paired to a restaurant workspace"
+        val initialText = "Active: ${session.restaurantName} (Listening for KOTs)"
+        val foregroundSuccess = startForegroundServiceWithNotification(initialText)
+        if (!foregroundSuccess) {
+            isServiceRunning = false
+            stopSelf()
+            return START_NOT_STICKY
         }
-        startForegroundServiceWithNotification(initialText)
 
         if (!isServiceRunning) {
             isServiceRunning = true
+            _serviceStatus.value = ServiceStatus.Running()
             startBridge()
         }
 
@@ -122,6 +175,12 @@ class PrintBridgeForegroundService : Service() {
         val session = authStorage.getSession() ?: run {
             updateNotification("Device not paired. Open app to sign in.")
             return
+        }
+
+        // Re-create active CoroutineScope if previous one was cancelled
+        if (!serviceScope.isActive) {
+            Log.d(TAG, "Recreating active serviceScope for new bridge run")
+            serviceScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
         }
 
         // 1. Start Firestore Real-Time KOT Listener
@@ -136,7 +195,9 @@ class PrintBridgeForegroundService : Service() {
                         updateNotification("Connected: ${session.restaurantName} (Listening)")
                     }
                     is KotFirestoreListener.SyncState.Error -> {
+                        Log.e(TAG, "SyncState error reported: ${state.message}")
                         updateNotification("Connection Issue: ${state.message.take(40)}")
+                        _serviceStatus.value = ServiceStatus.Error("Cloud Sync: ${state.message}")
                     }
                     KotFirestoreListener.SyncState.Stopped -> {}
                 }
@@ -262,7 +323,9 @@ class PrintBridgeForegroundService : Service() {
     }
 
     private fun stopBridge() {
+        Log.i(TAG, "Stopping Print Bridge service workers and listener")
         isServiceRunning = false
+        _serviceStatus.value = ServiceStatus.Stopped
         firestoreListener?.stop()
         firestoreListener = null
         queueJob?.cancel()
@@ -270,22 +333,33 @@ class PrintBridgeForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        Log.i(TAG, "PrintBridgeForegroundService.onDestroy() called")
         stopBridge()
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun startForegroundServiceWithNotification(statusText: String) {
-        val notification = buildNotification(statusText)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+    private fun startForegroundServiceWithNotification(statusText: String): Boolean {
+        return try {
+            val notification = buildNotification(statusText)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            Log.i(TAG, "startForeground entered successfully with notification")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "startForeground failed: ${e::class.java.simpleName}: ${e.message}", e)
+            _serviceStatus.value = ServiceStatus.Error(
+                "Foreground notification failure: ${e.localizedMessage ?: e::class.java.simpleName}"
             )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+            false
         }
     }
 

@@ -18,6 +18,7 @@ import { useCart } from '../../../context/CartContext';
 import { formatPrice } from '../../../utils/format';
 import { useAuth } from '../../../context/AuthContext';
 import { customerService } from '../../../shared/services/customerService';
+import { kotService } from '../../../shared/services/kotService';
 import { generateUniqueOrderId } from '../../../shared/utils/orderUtils';
 import { 
   generateSessionId, 
@@ -417,6 +418,20 @@ export const CustomerPortal: React.FC = () => {
       await setDoc(docRef, orderPayload);
 
       console.log('[STEP 5] Firestore write successful');
+
+      // Primary Kitchen Workflow: Create persistent canonical KOT record
+      try {
+        await kotService.createKotForOrder(tenantId, orderPayload as any, {
+          source: 'customer_qr',
+          customerName,
+          round: 1,
+          isSupplementary: Boolean(lastPlacedOrderId)
+        });
+      } catch (kotErr: any) {
+        console.error('[CustomerPortal] Critical: KOT generation failed for order:', orderId, kotErr);
+        toast.error('Order recorded, but kitchen ticket dispatch failed. Please notify restaurant staff.');
+        throw new Error(`Kitchen ticket creation failed: ${kotErr?.message || 'Unknown error'}`);
+      }
 
       // Persist order reference to customer profile if authenticated
       if (user?.uid) {

@@ -4,17 +4,45 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.spiraldine.printbridge.data.PrintBridgeRepository
 import com.spiraldine.printbridge.model.PrintBridgeUiState
+import com.spiraldine.printbridge.model.ServiceStatus
+import com.spiraldine.printbridge.service.PrintBridgeForegroundService
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-
 
 class MainViewModel(
     private val repository: PrintBridgeRepository,
     private val printJobRepository: com.spiraldine.printbridge.data.PrintJobRepository? = null,
     private val formatter: com.spiraldine.printbridge.formatter.EscPosKOTFormatter = com.spiraldine.printbridge.formatter.EscPosKOTFormatter()
 ) : ViewModel() {
+
+    init {
+        viewModelScope.launch {
+            PrintBridgeForegroundService.serviceStatus.collect { status ->
+                repository.updateServiceStatus(status)
+                when (status) {
+                    is ServiceStatus.Error -> {
+                        repository.updateDiagnostics { diag ->
+                            diag.copy(
+                                latestError = "Foreground Service Error: ${status.message}",
+                                latestErrorTimestamp = System.currentTimeMillis()
+                            )
+                        }
+                    }
+                    is ServiceStatus.Running -> {
+                        repository.updateDiagnostics { diag ->
+                            diag.copy(
+                                lastSuccessfulEventDescription = "Foreground service running and monitoring orders",
+                                lastSuccessfulEventTimestamp = System.currentTimeMillis()
+                            )
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
 
     val uiState: StateFlow<PrintBridgeUiState> = repository.state
         .stateIn(
@@ -303,6 +331,10 @@ class MainViewModel(
                     restaurantName = session.restaurantName
                 )
             )
+            // Auto-start foreground service if enabled and not currently running
+            if (authStorage.isAutoStartEnabled() && !com.spiraldine.printbridge.service.PrintBridgeForegroundService.isServiceRunning) {
+                com.spiraldine.printbridge.service.PrintBridgeForegroundService.start(context)
+            }
         } else {
             repository.updateCloudStatus(com.spiraldine.printbridge.model.CloudSyncStatus.Disconnected)
         }
@@ -364,15 +396,46 @@ class MainViewModel(
         val authManager = com.spiraldine.printbridge.auth.FirebaseAuthManager(authStorage, context)
         authManager.signOut()
         repository.updateCloudStatus(com.spiraldine.printbridge.model.CloudSyncStatus.Disconnected)
-        com.spiraldine.printbridge.service.PrintBridgeForegroundService.stop(context)
+        repository.updateServiceStatus(ServiceStatus.Stopped)
+        PrintBridgeForegroundService.stop(context)
     }
 
     fun startService(context: android.content.Context) {
-        com.spiraldine.printbridge.service.PrintBridgeForegroundService.start(context)
+        val currentStatus = uiState.value.serviceStatus
+        if (currentStatus is ServiceStatus.Running || currentStatus is ServiceStatus.Starting) {
+            android.util.Log.d("MainViewModel", "Service already running or starting, skipping start request")
+            return
+        }
+
+        // Diagnostic log regarding notification permission on Android 13+
+        val notifGranted = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+        android.util.Log.i(
+            "MainViewModel",
+            "Service start requested. Notification permission granted: $notifGranted"
+        )
+
+        repository.updateServiceStatus(ServiceStatus.Starting)
+        try {
+            PrintBridgeForegroundService.start(context)
+        } catch (e: Exception) {
+            android.util.Log.e("MainViewModel", "Failed to start service: ${e::class.java.simpleName}: ${e.message}", e)
+            repository.updateServiceStatus(
+                ServiceStatus.Error(e.localizedMessage ?: "Failed to start print service")
+            )
+        }
     }
 
     fun stopService(context: android.content.Context) {
-        com.spiraldine.printbridge.service.PrintBridgeForegroundService.stop(context)
+        android.util.Log.i("MainViewModel", "Service stop requested")
+        PrintBridgeForegroundService.stop(context)
+        repository.updateServiceStatus(ServiceStatus.Stopped)
     }
 
     private fun updateStatusForConfig() {

@@ -24,6 +24,7 @@ import { useCart } from '../../../shared/services/CartContext';
 import { useAuth } from '../../../context/AuthContext';
 import { formatPrice, setGlobalCurrencyConfig } from '../../../shared/utils/format';
 import { customerService } from '../../../shared/services/customerService';
+import { kotService } from '../../../shared/services/kotService';
 import { generateUniqueOrderId, isOrderActive } from '../../../shared/utils/orderUtils';
 import { 
   getActiveDiningSession, 
@@ -930,6 +931,19 @@ export const CustomerMenu: React.FC = () => {
 
       await setDoc(orderRef, orderPayload);
 
+      // Primary Kitchen Workflow: Create persistent canonical KOT record
+      try {
+        await kotService.createKotForOrder(tenantId, orderPayload as any, {
+          source: currentSession?.orderSource === 'qr' ? 'customer_qr' : 'customer_app',
+          customerName: customerName.trim() || user?.displayName || 'Guest Diner',
+          round: 1,
+          isSupplementary: isAdditional
+        });
+      } catch (kotErr: any) {
+        console.error('[CustomerMenu] Critical: KOT generation failed for order:', orderId, kotErr);
+        toast.error('Order recorded, but kitchen ticket dispatch failed. Please notify restaurant staff.');
+        throw new Error(`Kitchen ticket creation failed: ${kotErr?.message || 'Unknown error'}`);
+      }
 
       // Persist order reference to customer profile if authenticated
       if (user?.uid) {

@@ -15,6 +15,9 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 
+import android.util.Log
+import kotlinx.coroutines.SupervisorJob
+
 /**
  * Real-time listener for canonical SpiralDine Kitchen Order Tickets.
  *
@@ -30,7 +33,7 @@ class KotFirestoreListener(
     private val tenantId: String,
     private val printJobRepository: PrintJobRepository,
     private val firestoreProvider: () -> FirebaseFirestore = { FirebaseFirestore.getInstance() },
-    private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO),
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
     private val onSyncStateChanged: (SyncState) -> Unit = {}
 ) {
 
@@ -45,10 +48,16 @@ class KotFirestoreListener(
     private val listenerStartTimeMs: Long = System.currentTimeMillis()
 
     fun start() {
-        if (registration != null) return
+        if (registration != null) {
+            Log.d(TAG, "Listener already active for tenant: $tenantId")
+            return
+        }
 
         try {
             val firestore = firestoreProvider()
+            val collectionPath = "restaurants/$tenantId/kitchenTickets"
+            Log.i(TAG, "Starting KotFirestoreListener on $collectionPath")
+
             val collectionRef = firestore
                 .collection("restaurants")
                 .document(tenantId)
@@ -58,46 +67,88 @@ class KotFirestoreListener(
 
             registration = collectionRef.addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    onSyncStateChanged(SyncState.Error(error.localizedMessage ?: "Firestore listener error"))
+                    val errMsg = error.localizedMessage ?: "Firestore listener error"
+                    Log.e(TAG, "Firestore snapshot listener ERROR for $collectionPath: $errMsg", error)
+                    onSyncStateChanged(SyncState.Error(errMsg))
                     return@addSnapshotListener
                 }
 
-                if (snapshot == null || snapshot.isEmpty) {
+                if (snapshot == null) {
+                    Log.w(TAG, "Firestore snapshot was null for $collectionPath")
                     return@addSnapshotListener
                 }
 
-                // Process document changes
+                val docCount = snapshot.size()
+                val changeCount = snapshot.documentChanges.size
+                Log.i(TAG, "Firestore snapshot received on $collectionPath: $docCount total docs, $changeCount changes")
+
+                if (snapshot.isEmpty) {
+                    Log.d(TAG, "Collection $collectionPath is currently empty")
+                    return@addSnapshotListener
+                }
+
+                // Process document changes safely
                 scope.launch {
-                    for (change in snapshot.documentChanges) {
-                        if (change.type == DocumentChange.Type.ADDED || change.type == DocumentChange.Type.MODIFIED) {
-                            processDocumentChange(change.document)
+                    try {
+                        for (change in snapshot.documentChanges) {
+                            if (change.type == DocumentChange.Type.ADDED || change.type == DocumentChange.Type.MODIFIED) {
+                                Log.d(TAG, "Processing change type=${change.type} for docId=${change.document.id}")
+                                processDocumentChange(change.document)
+                            }
                         }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Unexpected error processing snapshot changes on $collectionPath: ${e.message}", e)
                     }
                 }
             }
         } catch (e: Exception) {
-            onSyncStateChanged(SyncState.Error(e.localizedMessage ?: "Failed to start listener"))
+            val errMsg = e.localizedMessage ?: "Failed to start listener"
+            Log.e(TAG, "Failed to register listener on restaurants/$tenantId/kitchenTickets: $errMsg", e)
+            onSyncStateChanged(SyncState.Error(errMsg))
         }
     }
 
     suspend fun processDocumentChange(doc: DocumentSnapshot) {
-        val ticket = parseKitchenTicket(doc) ?: return
-        val printStatus = doc.getString("printStatus") ?: "unprinted"
+        try {
+            val docId = doc.id
+            val ticket = parseKitchenTicket(doc)
+            if (ticket == null) {
+                Log.w(
+                    TAG,
+                    "REJECTED ticket doc $docId: parseKitchenTicket returned null (orderId=${doc.getString("orderId")}, items count=${(doc.get("items") as? List<*>)?.size})"
+                )
+                return
+            }
 
-        if (!shouldEnqueueTicket(ticket.createdAt, printStatus, listenerStartTimeMs)) {
-            return
-        }
+            val printStatus = doc.getString("printStatus") ?: "unprinted"
+            if (!shouldEnqueueTicket(ticket.createdAt, printStatus, listenerStartTimeMs)) {
+                Log.i(TAG, "SKIPPED historical printed ticket: ${ticket.ticketId} (createdAt=${ticket.createdAt}, printStatus=$printStatus)")
+                return
+            }
 
-        // Idempotent Queue Enqueue
-        val result = printJobRepository.enqueueKot(ticket)
-        when (result) {
-            is EnqueueResult.Enqueued -> {}
-            is EnqueueResult.AlreadyQueued -> {}
-            is EnqueueResult.ReprintEnqueued -> {}
+            // Idempotent Queue Enqueue
+            val result = printJobRepository.enqueueKot(ticket)
+            when (result) {
+                is EnqueueResult.Enqueued -> {
+                    Log.i(
+                        TAG,
+                        "SUCCESS ENQUEUED: Job ${result.job.jobId} (Ticket: ${result.job.ticketNumber}, Order: ${result.job.orderId}) inserted into persistent Room queue with status PENDING"
+                    )
+                }
+                is EnqueueResult.AlreadyQueued -> {
+                    Log.d(TAG, "ALREADY QUEUED: Job ${result.existingJob.jobId} already exists in Room queue (status=${result.existingJob.status})")
+                }
+                is EnqueueResult.ReprintEnqueued -> {
+                    Log.i(TAG, "REPRINT ENQUEUED: Reprint job ${result.job.jobId} inserted into Room queue")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error processing document change for doc ${doc.id}: ${e.message}", e)
         }
     }
 
     fun stop() {
+        Log.i(TAG, "Stopping KotFirestoreListener on restaurants/$tenantId/kitchenTickets")
         registration?.remove()
         registration = null
         onSyncStateChanged(SyncState.Stopped)
@@ -112,6 +163,7 @@ class KotFirestoreListener(
     }
 
     companion object {
+        private const val TAG = "KotFirestoreListener"
         // Lookback tolerance window for cold recovery (5 minutes)
         const val MAX_COLD_RECOVERY_WINDOW_MS = 5 * 60 * 1000L
 
