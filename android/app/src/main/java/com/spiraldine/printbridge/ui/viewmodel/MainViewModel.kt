@@ -341,7 +341,7 @@ class MainViewModel(
         viewModelScope.launch {
             repository.updateCloudStatus(com.spiraldine.printbridge.model.CloudSyncStatus.Connecting)
             val authStorage = com.spiraldine.printbridge.auth.AuthStorage(context)
-            val authManager = com.spiraldine.printbridge.auth.FirebaseAuthManager(authStorage)
+            val authManager = com.spiraldine.printbridge.auth.FirebaseAuthManager(authStorage, context)
             val result = authManager.signIn(email, password)
             if (result is com.spiraldine.printbridge.auth.AuthResult.Success) {
                 repository.updateCloudStatus(
@@ -361,7 +361,7 @@ class MainViewModel(
 
     fun signOut(context: android.content.Context) {
         val authStorage = com.spiraldine.printbridge.auth.AuthStorage(context)
-        val authManager = com.spiraldine.printbridge.auth.FirebaseAuthManager(authStorage)
+        val authManager = com.spiraldine.printbridge.auth.FirebaseAuthManager(authStorage, context)
         authManager.signOut()
         repository.updateCloudStatus(com.spiraldine.printbridge.model.CloudSyncStatus.Disconnected)
         com.spiraldine.printbridge.service.PrintBridgeForegroundService.stop(context)

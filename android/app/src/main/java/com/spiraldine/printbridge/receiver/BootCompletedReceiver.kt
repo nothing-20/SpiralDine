@@ -18,6 +18,7 @@ class BootCompletedReceiver : BroadcastReceiver() {
             return
         }
 
+        com.spiraldine.printbridge.auth.FirebaseAuthManager.initializeFirebase(context)
         val authStorage = AuthStorage(context)
 
         // Only start if user has authenticated and auto-start is enabled

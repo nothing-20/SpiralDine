@@ -360,4 +360,31 @@ class FirebaseAuthManagerTest {
         assertNull("Session must be cleared after signOut", authManager.getActiveSession())
         assertFalse("Auto start must be disabled when session is empty", authStorage.isAutoStartEnabled())
     }
+
+    @Test
+    fun firebaseConfig_targetsCorrectSaaSProject() {
+        assertEquals("spiral-restaurant-saas-v1", FirebaseAuthManager.PROJECT_ID)
+        assertEquals("com.spiraldine.printbridge", FirebaseAuthManager.APPLICATION_ID)
+        assertEquals("spiral-restaurant-saas-v1.firebasestorage.app", FirebaseAuthManager.STORAGE_BUCKET)
+        assertTrue("API Key must be present", FirebaseAuthManager.API_KEY.isNotBlank())
+    }
+
+    @Test
+    fun printBridgeApplication_isConfiguredAsApplicationSubclass() {
+        val appClass = com.spiraldine.printbridge.PrintBridgeApplication::class.java
+        assertTrue(
+            "PrintBridgeApplication must extend android.app.Application",
+            android.app.Application::class.java.isAssignableFrom(appClass)
+        )
+    }
+
+    @Test
+    fun firebaseAuthManager_constructionDoesNotAccessFirebaseBeforeInitialization() {
+        // Constructing FirebaseAuthManager without an initialized FirebaseApp must NOT throw
+        // an IllegalStateException during constructor execution because providers are lazily evaluated lambdas
+        val storage = AuthStorage()
+        val manager = FirebaseAuthManager(storage)
+        assertNotNull(manager)
+        assertNull("Session should be empty on clean storage", manager.getActiveSession())
+    }
 }

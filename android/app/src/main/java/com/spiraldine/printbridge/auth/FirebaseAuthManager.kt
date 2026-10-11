@@ -40,8 +40,15 @@ sealed interface AuthResult {
  */
 class FirebaseAuthManager(
     private val authStorage: AuthStorage,
-    private val authProvider: () -> FirebaseAuth = { FirebaseAuth.getInstance() },
-    private val firestoreProvider: () -> FirebaseFirestore = { FirebaseFirestore.getInstance() }
+    private val context: Context? = null,
+    private val authProvider: () -> FirebaseAuth = {
+        context?.let { initializeFirebase(it) }
+        FirebaseAuth.getInstance()
+    },
+    private val firestoreProvider: () -> FirebaseFirestore = {
+        context?.let { initializeFirebase(it) }
+        FirebaseFirestore.getInstance()
+    }
 ) {
 
     companion object {
@@ -62,17 +69,21 @@ class FirebaseAuthManager(
 
         /**
          * Initializes FirebaseApp programmatically if not already initialized.
+         * Thread-safe and idempotent.
          */
-        fun initializeFirebase(context: Context) {
-            if (FirebaseApp.getApps(context).isEmpty()) {
-                val options = FirebaseOptions.Builder()
-                    .setApiKey(API_KEY)
-                    .setProjectId(PROJECT_ID)
-                    .setApplicationId(APPLICATION_ID)
-                    .setStorageBucket(STORAGE_BUCKET)
-                    .build()
-                FirebaseApp.initializeApp(context.applicationContext, options)
+        @Synchronized
+        fun initializeFirebase(context: Context): FirebaseApp {
+            val existing = FirebaseApp.getApps(context).firstOrNull()
+            if (existing != null) {
+                return existing
             }
+            val options = FirebaseOptions.Builder()
+                .setApiKey(API_KEY)
+                .setProjectId(PROJECT_ID)
+                .setApplicationId(APPLICATION_ID)
+                .setStorageBucket(STORAGE_BUCKET)
+                .build()
+            return FirebaseApp.initializeApp(context.applicationContext, options)
         }
     }
 
