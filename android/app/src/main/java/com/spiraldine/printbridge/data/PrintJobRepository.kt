@@ -110,7 +110,9 @@ class PrintJobRepository(
     }
 
     /**
-     * Records successful transmission/print confirmation.
+     * Records successful transport transmission acceptance.
+     * Note: In ESC/POS thermal printing over simplex Bluetooth SPP or raw TCP,
+     * this confirms transport socket buffer delivery, not verified physical paper extrusion.
      */
     suspend fun recordSuccess(jobId: String): Boolean = withContext(Dispatchers.IO) {
         val rows = dao.updateJobStatus(jobId, "PRINTED", System.currentTimeMillis(), null)
@@ -126,6 +128,23 @@ class PrintJobRepository(
     }
 
     /**
+     * Records an ambiguous physical outcome (socket write interrupted).
+     * Marked INTERRUPTED so staff knows receipt may already have partially or fully printed.
+     */
+    suspend fun recordInterrupted(jobId: String, errorMessage: String): Boolean = withContext(Dispatchers.IO) {
+        val rows = dao.updateJobStatus(jobId, "INTERRUPTED", System.currentTimeMillis(), errorMessage)
+        rows > 0
+    }
+
+    /**
+     * Records a job that was routed to other prep stations (not intended for this printer).
+     */
+    suspend fun recordSkippedStation(jobId: String, reason: String): Boolean = withContext(Dispatchers.IO) {
+        val rows = dao.updateJobStatus(jobId, "ROUTED_OTHER_STATION", System.currentTimeMillis(), reason)
+        rows > 0
+    }
+
+    /**
      * Re-enqueues a failed job for retry.
      */
     suspend fun retryJob(jobId: String, reason: String? = null): Boolean = withContext(Dispatchers.IO) {
@@ -133,8 +152,24 @@ class PrintJobRepository(
         rows > 0
     }
 
-    suspend fun getHistory(limit: Int = 50): List<PrintJobEntity> = withContext(Dispatchers.IO) {
+    /**
+     * Manually authorizes retry of an ambiguous / interrupted job after explicit staff confirmation.
+     */
+    suspend fun forceRetryAmbiguousJob(jobId: String, confirmationReason: String = "Staff confirmed physical printer tray"): Boolean = withContext(Dispatchers.IO) {
+        val rows = dao.incrementRetry(jobId, System.currentTimeMillis(), "Manual Retry Confirmed: $confirmationReason")
+        rows > 0
+    }
+
+    suspend fun getJobById(jobId: String): PrintJobEntity? = withContext(Dispatchers.IO) {
+        dao.getJobById(jobId)
+    }
+
+    suspend fun getHistory(limit: Int = 100): List<PrintJobEntity> = withContext(Dispatchers.IO) {
         dao.getRecentHistory(limit)
+    }
+
+    suspend fun getJobsByStatus(status: String, limit: Int = 50): List<PrintJobEntity> = withContext(Dispatchers.IO) {
+        dao.getJobsByStatus(status, limit)
     }
 
     suspend fun getPendingCount(): Int = withContext(Dispatchers.IO) {

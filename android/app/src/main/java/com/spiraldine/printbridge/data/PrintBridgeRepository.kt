@@ -13,8 +13,13 @@ interface PrintBridgeRepository {
     fun updateConfig(update: (com.spiraldine.printbridge.model.PrinterHardwareConfig) -> com.spiraldine.printbridge.model.PrinterHardwareConfig)
     fun updatePrinterStatus(status: ThermalPrinterStatus)
     fun updateCloudStatus(status: CloudSyncStatus)
+    fun updateDiagnostics(update: (com.spiraldine.printbridge.model.PrinterDiagnostics) -> com.spiraldine.printbridge.model.PrinterDiagnostics)
     fun setTestPrintResult(inProgress: Boolean, message: String?)
     fun updateQueueCounts(pending: Int, inFlight: Int, printed: Int, lastTicket: String?)
+    fun setQueueJobs(jobs: List<com.spiraldine.printbridge.data.local.PrintJobEntity>)
+    fun setActiveQueueTab(tab: String)
+    fun setSelectedJobForDetails(job: com.spiraldine.printbridge.data.local.PrintJobEntity?)
+    fun setJobPendingAmbiguousConfirmation(job: com.spiraldine.printbridge.data.local.PrintJobEntity?)
 }
 
 class DefaultPrintBridgeRepository : PrintBridgeRepository {
@@ -45,6 +50,10 @@ class DefaultPrintBridgeRepository : PrintBridgeRepository {
         _state.value = _state.value.copy(cloudStatus = status)
     }
 
+    override fun updateDiagnostics(update: (com.spiraldine.printbridge.model.PrinterDiagnostics) -> com.spiraldine.printbridge.model.PrinterDiagnostics) {
+        _state.value = _state.value.copy(diagnostics = update(_state.value.diagnostics))
+    }
+
     override fun setTestPrintResult(inProgress: Boolean, message: String?) {
         _state.value = _state.value.copy(
             isTestPrintInProgress = inProgress,
@@ -61,6 +70,22 @@ class DefaultPrintBridgeRepository : PrintBridgeRepository {
                 lastPrintedTicketNumber = lastTicket ?: _state.value.queueStatus.lastPrintedTicketNumber
             )
         )
+    }
+
+    override fun setQueueJobs(jobs: List<com.spiraldine.printbridge.data.local.PrintJobEntity>) {
+        _state.value = _state.value.copy(queueJobs = jobs)
+    }
+
+    override fun setActiveQueueTab(tab: String) {
+        _state.value = _state.value.copy(activeQueueTab = tab)
+    }
+
+    override fun setSelectedJobForDetails(job: com.spiraldine.printbridge.data.local.PrintJobEntity?) {
+        _state.value = _state.value.copy(selectedJobForDetails = job)
+    }
+
+    override fun setJobPendingAmbiguousConfirmation(job: com.spiraldine.printbridge.data.local.PrintJobEntity?) {
+        _state.value = _state.value.copy(jobPendingAmbiguousConfirmation = job)
     }
 }
 

@@ -170,8 +170,8 @@ class PrintQueueProcessorTest {
 
         val job = fakeDao.getJobById("PJ-KOT-101")
         assertNotNull(job)
-        // Must be marked FAILED rather than re-enqueued, so no duplicate ticket is printed
-        assertEquals("FAILED", job!!.status)
+        // Must be marked INTERRUPTED rather than re-enqueued, so no duplicate ticket is printed
+        assertEquals("INTERRUPTED", job!!.status)
         assertTrue(job.lastError!!.contains("INTERRUPTED"))
         assertEquals(0, repository.getPendingCount())
     }

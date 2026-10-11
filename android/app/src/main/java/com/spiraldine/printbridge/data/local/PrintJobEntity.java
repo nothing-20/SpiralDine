@@ -53,7 +53,7 @@ public class PrintJobEntity {
     public String payloadJson;
 
     @NonNull
-    public String status; // PENDING, SENDING, PRINTED, FAILED
+    public String status; // PENDING, SENDING, PRINTED (Transport Accepted), FAILED, INTERRUPTED, ROUTED_OTHER_STATION
 
     public int retryCount;
 

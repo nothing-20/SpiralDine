@@ -85,8 +85,24 @@ class MainViewModel(
         }
     }
 
-    fun setPaperWidth(widthMm: Int) {
+    fun setPaperWidth(widthMm: Int, context: android.content.Context? = null) {
         repository.updateConfig { it.copy(paperWidthMm = widthMm) }
+        context?.let { ctx ->
+            ctx.getSharedPreferences("spiraldine_printer_config", android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putInt("paper_width", widthMm)
+                .apply()
+        }
+    }
+
+    fun setTargetStation(station: String, context: android.content.Context? = null) {
+        repository.updateConfig { it.copy(targetStation = station) }
+        context?.let { ctx ->
+            ctx.getSharedPreferences("spiraldine_printer_config", android.content.Context.MODE_PRIVATE)
+                .edit()
+                .putString("station_filter", station)
+                .apply()
+        }
     }
 
     fun dismissTestPrintMessage() {
@@ -139,7 +155,7 @@ class MainViewModel(
             val result = transport.send(testPayload)
             when (result) {
                 is com.spiraldine.printbridge.transport.TransportResult.Success -> {
-                    val msg = "SUCCESS: Test slip accepted by printer transport (${result.bytesWritten} bytes written). Verify physical slip."
+                    val msg = "SUCCESS: Test slip accepted by printer transport (${result.bytesWritten} bytes written). Note: transport acceptance confirms socket delivery to printer buffer, not physical receipt extrusion."
                     repository.setTestPrintResult(false, msg)
                     repository.updatePrinterStatus(
                         com.spiraldine.printbridge.model.ThermalPrinterStatus.Connected(
@@ -148,6 +164,13 @@ class MainViewModel(
                             paperWidthMm = config.paperWidthMm
                         )
                     )
+                    repository.updateDiagnostics { diag ->
+                        diag.copy(
+                            lastSuccessfulEventTimestamp = System.currentTimeMillis(),
+                            lastSuccessfulEventDescription = "Test slip accepted (${result.bytesWritten} bytes)",
+                            latestError = null
+                        )
+                    }
                 }
                 is com.spiraldine.printbridge.transport.TransportResult.Failure -> {
                     val msg = "FAILURE: ${result.errorMessage}"
@@ -155,11 +178,120 @@ class MainViewModel(
                     repository.updatePrinterStatus(
                         com.spiraldine.printbridge.model.ThermalPrinterStatus.Error(result.errorMessage)
                     )
+                    repository.updateDiagnostics { diag ->
+                        diag.copy(
+                            latestError = result.errorMessage,
+                            latestErrorTimestamp = System.currentTimeMillis()
+                        )
+                    }
                 }
             }
         }
     }
 
+    fun loadQueueJobs(context: android.content.Context) {
+        viewModelScope.launch {
+            val db = com.spiraldine.printbridge.data.local.PrintBridgeDatabase.getInstance(context)
+            val jobRepo = printJobRepository ?: com.spiraldine.printbridge.data.PrintJobRepository(db.printJobDao())
+
+            val activeTab = uiState.value.activeQueueTab
+            val jobs = if (activeTab == "ALL") {
+                jobRepo.getHistory(100)
+            } else {
+                jobRepo.getJobsByStatus(activeTab, 100)
+            }
+            repository.setQueueJobs(jobs)
+
+            val pending = jobRepo.getPendingCount()
+            val inFlight = jobs.count { it.status == "SENDING" }
+            val printed = jobRepo.getPrintedCount()
+            val lastTicket = jobs.firstOrNull { it.status == "PRINTED" }?.ticketNumber
+            repository.updateQueueCounts(pending, inFlight, printed, lastTicket)
+
+            // Update diagnostics
+            val config = uiState.value.config
+            val isConfigured = (config.connectionType == "Bluetooth" && config.bluetoothAddress.isNotBlank()) ||
+                               (config.connectionType == "Network" && config.networkHost.isNotBlank())
+            val selectedPrinter = if (config.connectionType == "Bluetooth") {
+                if (config.bluetoothAddress.isNotBlank()) "${config.bluetoothName} (${config.bluetoothAddress})" else "None selected"
+            } else {
+                if (config.networkHost.isNotBlank()) "${config.networkHost}:${config.networkPort}" else "None selected"
+            }
+
+            val lastPrintedJob = jobs.firstOrNull { it.status == "PRINTED" }
+            val lastFailedJob = jobs.firstOrNull { it.status == "FAILED" || it.status == "INTERRUPTED" }
+
+            repository.updateDiagnostics { diag ->
+                diag.copy(
+                    selectedPrinterName = selectedPrinter,
+                    connectionType = if (config.connectionType == "Bluetooth") "Bluetooth SPP" else "TCP/IP Raw (Port ${config.networkPort})",
+                    connectionState = when (uiState.value.printerStatus) {
+                        is com.spiraldine.printbridge.model.ThermalPrinterStatus.Connected -> "Connected / Ready"
+                        is com.spiraldine.printbridge.model.ThermalPrinterStatus.Connecting -> "Connecting"
+                        is com.spiraldine.printbridge.model.ThermalPrinterStatus.Error -> "Error: ${(uiState.value.printerStatus as com.spiraldine.printbridge.model.ThermalPrinterStatus.Error).reason}"
+                        com.spiraldine.printbridge.model.ThermalPrinterStatus.NotConfigured -> "Not Configured"
+                    },
+                    lastSuccessfulEventTimestamp = lastPrintedJob?.lastAttemptAt ?: diag.lastSuccessfulEventTimestamp,
+                    lastSuccessfulEventDescription = if (lastPrintedJob != null) {
+                        "Socket write accepted for ticket ${lastPrintedJob.ticketNumber}"
+                    } else diag.lastSuccessfulEventDescription,
+                    latestError = lastFailedJob?.lastError ?: diag.latestError,
+                    latestErrorTimestamp = lastFailedJob?.lastAttemptAt ?: diag.latestErrorTimestamp,
+                    isTestPrintAvailable = isConfigured
+                )
+            }
+        }
+    }
+
+    fun setActiveQueueTab(tab: String, context: android.content.Context) {
+        repository.setActiveQueueTab(tab)
+        loadQueueJobs(context)
+    }
+
+    fun retryJob(jobId: String, context: android.content.Context) {
+        viewModelScope.launch {
+            val db = com.spiraldine.printbridge.data.local.PrintBridgeDatabase.getInstance(context)
+            val jobRepo = printJobRepository ?: com.spiraldine.printbridge.data.PrintJobRepository(db.printJobDao())
+            jobRepo.retryJob(jobId, "Manual retry initiated by staff")
+            loadQueueJobs(context)
+        }
+    }
+
+    fun prepareAmbiguousRetry(job: com.spiraldine.printbridge.data.local.PrintJobEntity) {
+        repository.setJobPendingAmbiguousConfirmation(job)
+    }
+
+    fun dismissAmbiguousRetry() {
+        repository.setJobPendingAmbiguousConfirmation(null)
+    }
+
+    fun confirmAmbiguousRetry(jobId: String, context: android.content.Context) {
+        viewModelScope.launch {
+            val db = com.spiraldine.printbridge.data.local.PrintBridgeDatabase.getInstance(context)
+            val jobRepo = printJobRepository ?: com.spiraldine.printbridge.data.PrintJobRepository(db.printJobDao())
+            jobRepo.forceRetryAmbiguousJob(jobId, "Staff confirmed physical printer tray checked")
+            repository.setJobPendingAmbiguousConfirmation(null)
+            loadQueueJobs(context)
+        }
+    }
+
+    fun requestReprint(job: com.spiraldine.printbridge.data.local.PrintJobEntity, context: android.content.Context) {
+        viewModelScope.launch {
+            val db = com.spiraldine.printbridge.data.local.PrintBridgeDatabase.getInstance(context)
+            val jobRepo = printJobRepository ?: com.spiraldine.printbridge.data.PrintJobRepository(db.printJobDao())
+            val ticket = try {
+                com.spiraldine.printbridge.model.KotTicketJson.fromJson(job.payloadJson)
+            } catch (_: Exception) {
+                return@launch
+            }
+            jobRepo.enqueueReprint(ticket, "Staff requested duplicate reprint")
+            loadQueueJobs(context)
+        }
+    }
+
+    fun selectJobForDetails(job: com.spiraldine.printbridge.data.local.PrintJobEntity?) {
+        repository.setSelectedJobForDetails(job)
+    }
 
     fun checkExistingSession(context: android.content.Context) {
         val authStorage = com.spiraldine.printbridge.auth.AuthStorage(context)
@@ -174,6 +306,30 @@ class MainViewModel(
         } else {
             repository.updateCloudStatus(com.spiraldine.printbridge.model.CloudSyncStatus.Disconnected)
         }
+
+        // Restore persisted printer configuration if available
+        val prefs = context.getSharedPreferences("spiraldine_printer_config", android.content.Context.MODE_PRIVATE)
+        val connType = prefs.getString("connection_type", "Bluetooth") ?: "Bluetooth"
+        val btName = prefs.getString("bt_name", "") ?: ""
+        val btAddress = prefs.getString("bt_address", "") ?: ""
+        val netHost = prefs.getString("net_host", "192.168.1.100") ?: "192.168.1.100"
+        val netPort = prefs.getInt("net_port", 9100)
+        val station = prefs.getString("station_filter", "ALL") ?: "ALL"
+        val paperWidth = prefs.getInt("paper_width", 80)
+
+        repository.updateConfig {
+            it.copy(
+                connectionType = connType,
+                bluetoothName = btName,
+                bluetoothAddress = btAddress,
+                networkHost = netHost,
+                networkPort = netPort,
+                targetStation = station,
+                paperWidthMm = paperWidth
+            )
+        }
+        updateStatusForConfig()
+        loadQueueJobs(context)
     }
 
     fun signIn(
@@ -185,7 +341,7 @@ class MainViewModel(
         viewModelScope.launch {
             repository.updateCloudStatus(com.spiraldine.printbridge.model.CloudSyncStatus.Connecting)
             val authStorage = com.spiraldine.printbridge.auth.AuthStorage(context)
-            val authManager = com.spiraldine.printbridge.auth.FirebaseAuthManager(authStorage)
+            val authManager = com.spiraldine.printbridge.auth.FirebaseAuthManager(authStorage, context)
             val result = authManager.signIn(email, password)
             if (result is com.spiraldine.printbridge.auth.AuthResult.Success) {
                 repository.updateCloudStatus(
@@ -205,7 +361,7 @@ class MainViewModel(
 
     fun signOut(context: android.content.Context) {
         val authStorage = com.spiraldine.printbridge.auth.AuthStorage(context)
-        val authManager = com.spiraldine.printbridge.auth.FirebaseAuthManager(authStorage)
+        val authManager = com.spiraldine.printbridge.auth.FirebaseAuthManager(authStorage, context)
         authManager.signOut()
         repository.updateCloudStatus(com.spiraldine.printbridge.model.CloudSyncStatus.Disconnected)
         com.spiraldine.printbridge.service.PrintBridgeForegroundService.stop(context)

@@ -33,6 +33,9 @@ public interface PrintJobDao {
     @Query("SELECT * FROM print_jobs ORDER BY createdAt DESC LIMIT :limit")
     List<PrintJobEntity> getRecentHistory(int limit);
 
+    @Query("SELECT * FROM print_jobs WHERE status = :status ORDER BY createdAt DESC LIMIT :limit")
+    List<PrintJobEntity> getJobsByStatus(String status, int limit);
+
     @Query("SELECT COUNT(*) FROM print_jobs WHERE status = 'PENDING'")
     int countPendingJobs();
 

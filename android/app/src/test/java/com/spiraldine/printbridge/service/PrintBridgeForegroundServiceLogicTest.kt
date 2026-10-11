@@ -53,7 +53,7 @@ class PrintBridgeForegroundServiceLogicTest {
 
         val successfulTransport = object : PrinterTransport {
             override val transportType: String = "MockBluetooth"
-            override suspend fun send(bytes: ByteArray): TransportResult = TransportResult.Success(bytes.size)
+            override suspend fun send(payload: ByteArray): TransportResult = TransportResult.Success(payload.size)
         }
 
         // Process first pending job
@@ -93,7 +93,7 @@ class PrintBridgeForegroundServiceLogicTest {
 
         val failingTransport = object : PrinterTransport {
             override val transportType: String = "MockFailingNetwork"
-            override suspend fun send(bytes: ByteArray): TransportResult = TransportResult.Failure("Connection refused: 192.168.1.100:9100")
+            override suspend fun send(payload: ByteArray): TransportResult = TransportResult.Failure("Connection refused: 192.168.1.100:9100")
         }
 
         val result = queueProcessor.processNextJob(failingTransport, ThermalPaperWidth.WIDTH_80MM)
@@ -113,5 +113,37 @@ class PrintBridgeForegroundServiceLogicTest {
         assertFalse(shouldStartOnBoot(hasSession = true, isAutoStartEnabled = false))
         assertFalse(shouldStartOnBoot(hasSession = false, isAutoStartEnabled = false))
         assertTrue(shouldStartOnBoot(hasSession = true, isAutoStartEnabled = true))
+    }
+
+    @Test
+    fun transportSuccess_distinguishesTransportWriteFromPhysicalPrintVerification() = runTest {
+        repository.enqueueKot(createTicket("KOT-SEMANTICS"))
+
+        var sendInvoked = false
+        val socketAcceptedTransport = object : PrinterTransport {
+            override val transportType: String = "RawTCPPort9100"
+            override suspend fun send(payload: ByteArray): TransportResult {
+                sendInvoked = true
+                // Simulates successful socket write into printer buffer (simplex transport)
+                return TransportResult.Success(
+                    bytesWritten = payload.size,
+                    description = "Transport socket write accepted"
+                )
+            }
+        }
+
+        val result = queueProcessor.processNextJob(socketAcceptedTransport, ThermalPaperWidth.WIDTH_80MM)
+
+        assertTrue(sendInvoked)
+        assertTrue("Transport success must report QueueProcessResult.Success", result is QueueProcessResult.Success)
+        val success = result as QueueProcessResult.Success
+        assertEquals("PJ-KOT-SEMANTICS", success.jobId)
+        assertTrue("Bytes written must be greater than 0", success.bytesWritten > 0)
+
+        // Local repository status is updated to PRINTED (representing transport delivery)
+        val jobInDb = fakeDao.getJobById("PJ-KOT-SEMANTICS")
+        assertEquals("PRINTED", jobInDb?.status)
+        // No error recorded for clean socket write
+        assertEquals(null, jobInDb?.lastError)
     }
 }

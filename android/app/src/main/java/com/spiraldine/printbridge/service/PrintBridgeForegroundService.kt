@@ -157,15 +157,29 @@ class PrintBridgeForegroundService : Service() {
 
                     val pendingCount = printJobRepository.getPendingCount()
                     if (pendingCount > 0) {
+                        val prefs = getSharedPreferences("spiraldine_printer_config", Context.MODE_PRIVATE)
+                        val stationFilter = prefs.getString("station_filter", "ALL") ?: "ALL"
+                        val paperWidthMm = prefs.getInt("paper_width", 80)
+                        val paperWidth = if (paperWidthMm == 58) ThermalPaperWidth.WIDTH_58MM else ThermalPaperWidth.WIDTH_80MM
+
                         val processResult = queueProcessor.processNextJob(
                             transport = activeTransport,
-                            paperWidth = ThermalPaperWidth.WIDTH_80MM
+                            paperWidth = paperWidth,
+                            stationFilter = stationFilter
                         )
 
                         when (processResult) {
                             is QueueProcessResult.Success -> {
-                                updateNotification("Printed ${processResult.jobId} (${processResult.bytesWritten} B)")
-                                syncPrintSuccessToFirestore(session.tenantId, processResult.jobId)
+                                updateNotification("Sent to printer: ${processResult.jobId} (${processResult.bytesWritten} B)")
+                                syncPrintSuccessToFirestore(
+                                    tenantId = session.tenantId,
+                                    jobId = processResult.jobId,
+                                    bytesWritten = processResult.bytesWritten,
+                                    transportType = activeTransport.transportType
+                                )
+                            }
+                            is QueueProcessResult.SkippedStation -> {
+                                updateNotification("Filtered: Ticket routed to another station")
                             }
                             is QueueProcessResult.Failed -> {
                                 updateNotification("Print Failure: ${processResult.reason.take(30)}")
@@ -209,7 +223,12 @@ class PrintBridgeForegroundService : Service() {
         }
     }
 
-    private fun syncPrintSuccessToFirestore(tenantId: String, jobId: String) {
+    private fun syncPrintSuccessToFirestore(
+        tenantId: String,
+        jobId: String,
+        bytesWritten: Int,
+        transportType: String
+    ) {
         serviceScope.launch {
             try {
                 // Canonical ticketId extracted from jobId ("PJ-KOT-XXXX")
@@ -222,10 +241,17 @@ class PrintBridgeForegroundService : Service() {
                     .collection("kitchenTickets")
                     .document(ticketId)
 
+                // Preserves web schema compatibility via canonical printStatus = "printed"
+                // while recording explicit transport delivery attributes to distinguish
+                // transport socket write acceptance from verified physical printing.
                 docRef.update(
                     mapOf(
                         "printStatus" to "printed",
                         "printedAt" to nowIso,
+                        "lastPrintAttemptAt" to nowIso,
+                        "transportDelivered" to true,
+                        "transportDeliveryType" to transportType,
+                        "transportBytesWritten" to bytesWritten,
                         "updatedAt" to nowIso
                     )
                 )
