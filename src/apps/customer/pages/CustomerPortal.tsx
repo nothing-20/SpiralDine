@@ -424,11 +424,13 @@ export const CustomerPortal: React.FC = () => {
         await kotService.createKotForOrder(tenantId, orderPayload as any, {
           source: 'customer_qr',
           customerName,
-          round: lastPlacedOrderId ? 2 : 1,
+          round: 1,
           isSupplementary: Boolean(lastPlacedOrderId)
         });
-      } catch (kotErr) {
-        console.warn('[CustomerPortal] KOT generation warning:', kotErr);
+      } catch (kotErr: any) {
+        console.error('[CustomerPortal] Critical: KOT generation failed for order:', orderId, kotErr);
+        toast.error('Order recorded, but kitchen ticket dispatch failed. Please notify restaurant staff.');
+        throw new Error(`Kitchen ticket creation failed: ${kotErr?.message || 'Unknown error'}`);
       }
 
       // Persist order reference to customer profile if authenticated

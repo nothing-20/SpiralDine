@@ -936,11 +936,13 @@ export const CustomerMenu: React.FC = () => {
         await kotService.createKotForOrder(tenantId, orderPayload as any, {
           source: currentSession?.orderSource === 'qr' ? 'customer_qr' : 'customer_app',
           customerName: customerName.trim() || user?.displayName || 'Guest Diner',
-          round: orderSequence,
+          round: 1,
           isSupplementary: isAdditional
         });
-      } catch (kotErr) {
-        console.warn('[CustomerMenu] KOT generation warning:', kotErr);
+      } catch (kotErr: any) {
+        console.error('[CustomerMenu] Critical: KOT generation failed for order:', orderId, kotErr);
+        toast.error('Order recorded, but kitchen ticket dispatch failed. Please notify restaurant staff.');
+        throw new Error(`Kitchen ticket creation failed: ${kotErr?.message || 'Unknown error'}`);
       }
 
       // Persist order reference to customer profile if authenticated
