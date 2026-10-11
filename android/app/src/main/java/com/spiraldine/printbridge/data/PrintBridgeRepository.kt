@@ -3,6 +3,7 @@ package com.spiraldine.printbridge.data
 import com.spiraldine.printbridge.model.CloudSyncStatus
 import com.spiraldine.printbridge.model.PrintBridgeUiState
 import com.spiraldine.printbridge.model.PrintQueueStatus
+import com.spiraldine.printbridge.model.ServiceStatus
 import com.spiraldine.printbridge.model.ThermalPrinterStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -13,6 +14,7 @@ interface PrintBridgeRepository {
     fun updateConfig(update: (com.spiraldine.printbridge.model.PrinterHardwareConfig) -> com.spiraldine.printbridge.model.PrinterHardwareConfig)
     fun updatePrinterStatus(status: ThermalPrinterStatus)
     fun updateCloudStatus(status: CloudSyncStatus)
+    fun updateServiceStatus(status: ServiceStatus)
     fun updateDiagnostics(update: (com.spiraldine.printbridge.model.PrinterDiagnostics) -> com.spiraldine.printbridge.model.PrinterDiagnostics)
     fun setTestPrintResult(inProgress: Boolean, message: String?)
     fun updateQueueCounts(pending: Int, inFlight: Int, printed: Int, lastTicket: String?)
@@ -27,6 +29,7 @@ class DefaultPrintBridgeRepository : PrintBridgeRepository {
         PrintBridgeUiState(
             cloudStatus = CloudSyncStatus.Disconnected,
             printerStatus = ThermalPrinterStatus.NotConfigured,
+            serviceStatus = ServiceStatus.Stopped,
             queueStatus = PrintQueueStatus(
                 pendingCount = 0,
                 inFlightCount = 0,
@@ -48,6 +51,10 @@ class DefaultPrintBridgeRepository : PrintBridgeRepository {
 
     override fun updateCloudStatus(status: CloudSyncStatus) {
         _state.value = _state.value.copy(cloudStatus = status)
+    }
+
+    override fun updateServiceStatus(status: ServiceStatus) {
+        _state.value = _state.value.copy(serviceStatus = status)
     }
 
     override fun updateDiagnostics(update: (com.spiraldine.printbridge.model.PrinterDiagnostics) -> com.spiraldine.printbridge.model.PrinterDiagnostics) {

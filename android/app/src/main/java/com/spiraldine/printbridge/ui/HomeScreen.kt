@@ -57,6 +57,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.spiraldine.printbridge.auth.AuthResult
@@ -66,6 +72,7 @@ import com.spiraldine.printbridge.model.CloudSyncStatus
 import com.spiraldine.printbridge.model.KotTicketJson
 import com.spiraldine.printbridge.model.PrintBridgeUiState
 import com.spiraldine.printbridge.model.PrinterDiagnostics
+import com.spiraldine.printbridge.model.ServiceStatus
 import com.spiraldine.printbridge.model.ThermalPrinterStatus
 import com.spiraldine.printbridge.routing.KotStationRouter
 import com.spiraldine.printbridge.service.PrintBridgeForegroundService
@@ -90,6 +97,42 @@ fun HomeScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        viewModel.startService(context)
+    }
+
+    val requestPermissionsAndStartService = {
+        val permissionsToRequest = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            state.config.connectionType == "Bluetooth"
+        ) {
+            if (ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.BLUETOOTH_CONNECT
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                permissionsToRequest.add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            permissionLauncher.launch(permissionsToRequest.toTypedArray())
+        } else {
+            viewModel.startService(context)
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.checkExistingSession(context)
@@ -147,7 +190,7 @@ fun HomeScreen(
             onDismissTestPrintMessage = { viewModel.dismissTestPrintMessage() },
             onSignIn = { email, pass, cb -> viewModel.signIn(email, pass, context, cb) },
             onSignOut = { viewModel.signOut(context) },
-            onStartService = { viewModel.startService(context) },
+            onStartService = requestPermissionsAndStartService,
             onStopService = { viewModel.stopService(context) },
             onRefreshQueue = { viewModel.loadQueueJobs(context) },
             onSelectQueueTab = { viewModel.setActiveQueueTab(it, context) },
@@ -632,7 +675,9 @@ fun HomeScreenContent(
                 }
 
                 // 3. Background Service Card
-                val serviceRunning = PrintBridgeForegroundService.isServiceRunning
+                val serviceStatus = state.serviceStatus
+                val serviceRunning = serviceStatus is ServiceStatus.Running
+                val isStarting = serviceStatus is ServiceStatus.Starting
                 Card(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -651,11 +696,23 @@ fun HomeScreenContent(
                                 modifier = Modifier
                                     .size(10.dp)
                                     .clip(CircleShape)
-                                    .background(if (serviceRunning) StatusGreen else Slate400)
+                                    .background(
+                                        when (serviceStatus) {
+                                            is ServiceStatus.Running -> StatusGreen
+                                            is ServiceStatus.Starting -> StatusAmber
+                                            is ServiceStatus.Error -> StatusRed
+                                            ServiceStatus.Stopped -> Slate400
+                                        }
+                                    )
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (serviceRunning) "Foreground Service Active" else "Foreground Service Stopped",
+                                text = when (serviceStatus) {
+                                    is ServiceStatus.Running -> "Foreground Service Active"
+                                    is ServiceStatus.Starting -> "Foreground Service Starting..."
+                                    is ServiceStatus.Error -> "Foreground Service Error"
+                                    ServiceStatus.Stopped -> "Foreground Service Stopped"
+                                },
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -663,14 +720,15 @@ fun HomeScreenContent(
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = if (serviceRunning) {
-                                "Persistent service is running with ongoing notification. KOTs are dispatched continuously."
-                            } else {
-                                "Background execution is paused. Start service to print orders while screen is off."
+                            text = when (serviceStatus) {
+                                is ServiceStatus.Running -> "Persistent service is running with ongoing notification. KOTs are dispatched continuously."
+                                is ServiceStatus.Starting -> "Initializing background workers and connecting order sync..."
+                                is ServiceStatus.Error -> "Error: ${serviceStatus.message}"
+                                ServiceStatus.Stopped -> "Background execution is paused. Start service to print orders while screen is off."
                             },
                             fontSize = 12.sp,
                             lineHeight = 16.sp,
-                            color = MaterialTheme.colorScheme.secondary,
+                            color = if (serviceStatus is ServiceStatus.Error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.padding(start = 18.dp)
                         )
 
@@ -690,12 +748,22 @@ fun HomeScreenContent(
                             } else {
                                 Button(
                                     onClick = onStartService,
-                                    enabled = state.cloudStatus is CloudSyncStatus.Connected,
+                                    enabled = state.cloudStatus is CloudSyncStatus.Connected && !isStarting,
                                     shape = RoundedCornerShape(8.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = SpiralAmberPrimary),
                                     modifier = Modifier.weight(1f)
                                 ) {
-                                    Text("Start Service")
+                                    if (isStarting) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            strokeWidth = 2.dp,
+                                            color = Color.White
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text("Starting...")
+                                    } else {
+                                        Text("Start Service")
+                                    }
                                 }
                             }
                         }

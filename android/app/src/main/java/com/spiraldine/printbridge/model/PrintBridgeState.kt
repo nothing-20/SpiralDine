@@ -68,11 +68,22 @@ data class PrinterDiagnostics(
 )
 
 /**
+ * Represents the lifecycle and execution status of the background foreground print service.
+ */
+sealed interface ServiceStatus {
+    data object Stopped : ServiceStatus
+    data object Starting : ServiceStatus
+    data class Running(val startedAt: Long = System.currentTimeMillis()) : ServiceStatus
+    data class Error(val message: String) : ServiceStatus
+}
+
+/**
  * Consolidated UI State for the Print Bridge Dashboard.
  */
 data class PrintBridgeUiState(
     val cloudStatus: CloudSyncStatus = CloudSyncStatus.Disconnected,
     val printerStatus: ThermalPrinterStatus = ThermalPrinterStatus.NotConfigured,
+    val serviceStatus: ServiceStatus = ServiceStatus.Stopped,
     val queueStatus: PrintQueueStatus = PrintQueueStatus(),
     val config: PrinterHardwareConfig = PrinterHardwareConfig(),
     val diagnostics: PrinterDiagnostics = PrinterDiagnostics(),
