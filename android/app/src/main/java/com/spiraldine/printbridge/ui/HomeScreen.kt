@@ -136,6 +136,11 @@ fun HomeScreen(
 
     LaunchedEffect(Unit) {
         viewModel.checkExistingSession(context)
+        viewModel.loadQueueJobs(context)
+        while (true) {
+            kotlinx.coroutines.delay(3000)
+            viewModel.loadQueueJobs(context)
+        }
     }
 
     Scaffold(
@@ -321,6 +326,13 @@ fun HomeScreenContent(
     // Job Details Modal Dialog
     if (state.selectedJobForDetails != null) {
         val job = state.selectedJobForDetails!!
+        val ticket = remember(job.payloadJson) {
+            try {
+                KotTicketJson.fromJson(job.payloadJson)
+            } catch (_: Exception) {
+                null
+            }
+        }
         AlertDialog(
             onDismissRequest = { onSelectJobForDetails(null) },
             title = {
@@ -332,8 +344,17 @@ fun HomeScreenContent(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     DetailRow(label = "Job ID", value = job.jobId)
+                    DetailRow(label = "Source KOT ID", value = job.ticketId)
                     DetailRow(label = "Canonical Order ID", value = job.orderId)
-                    DetailRow(label = "Status", value = job.status)
+                    DetailRow(label = "Ticket Number", value = job.ticketNumber)
+                    DetailRow(label = "Table", value = job.tableNumber ?: "N/A")
+                    DetailRow(label = "Station", value = ticket?.primaryStation ?: state.config.targetStation)
+                    DetailRow(label = "Queue State", value = job.status)
+                    val activeTenant = (state.cloudStatus as? CloudSyncStatus.Connected)?.tenantId
+                    if (activeTenant != null) {
+                        DetailRow(label = "Restaurant Tenant", value = activeTenant)
+                    }
+                    DetailRow(label = "Round", value = "#${job.round}${if (job.isSupplementary) " (Supplementary)" else ""}")
                     DetailRow(label = "Retry Count", value = "${job.retryCount}")
                     DetailRow(label = "Created At", value = formatEpochTime(job.createdAt))
                     if (job.lastAttemptAt != null) {
@@ -341,7 +362,7 @@ fun HomeScreenContent(
                     }
                     val detailErr = job.lastError
                     if (detailErr != null) {
-                        DetailRow(label = "Last Diagnostic Error", value = detailErr)
+                        DetailRow(label = "Failure Details", value = detailErr, valueColor = StatusRed)
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text("Raw Stored Payload:", fontWeight = FontWeight.Bold, fontSize = 12.sp)

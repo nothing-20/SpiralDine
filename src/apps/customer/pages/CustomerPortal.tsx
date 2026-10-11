@@ -18,6 +18,7 @@ import { useCart } from '../../../context/CartContext';
 import { formatPrice } from '../../../utils/format';
 import { useAuth } from '../../../context/AuthContext';
 import { customerService } from '../../../shared/services/customerService';
+import { kotService } from '../../../shared/services/kotService';
 import { generateUniqueOrderId } from '../../../shared/utils/orderUtils';
 import { 
   generateSessionId, 
@@ -417,6 +418,18 @@ export const CustomerPortal: React.FC = () => {
       await setDoc(docRef, orderPayload);
 
       console.log('[STEP 5] Firestore write successful');
+
+      // Primary Kitchen Workflow: Create persistent canonical KOT record
+      try {
+        await kotService.createKotForOrder(tenantId, orderPayload as any, {
+          source: 'customer_qr',
+          customerName,
+          round: lastPlacedOrderId ? 2 : 1,
+          isSupplementary: Boolean(lastPlacedOrderId)
+        });
+      } catch (kotErr) {
+        console.warn('[CustomerPortal] KOT generation warning:', kotErr);
+      }
 
       // Persist order reference to customer profile if authenticated
       if (user?.uid) {
