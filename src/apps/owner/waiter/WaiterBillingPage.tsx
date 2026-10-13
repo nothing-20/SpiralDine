@@ -86,7 +86,9 @@ export const WaiterBillingPage: React.FC = () => {
 
     orders.forEach(order => {
       if (order.status === 'ARCHIVED' || order.status === 'CANCELLED') return;
-      
+      // Skip supplementary orders since they are consolidated under their session primaryOrderId
+      if ((order as any).primaryOrderId && (order as any).primaryOrderId !== order.orderId) return;
+
       const bill = billMap.get(order.orderId);
       const isPaid = (bill?.paymentStatus || order.paymentStatus || '').toLowerCase() === 'paid';
       if (isPaid) return;

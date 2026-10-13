@@ -98,6 +98,7 @@ const CustomerRegister = React.lazy(() => import('../apps/customer/pages/Custome
 const RestaurantDetails = React.lazy(() => import('../apps/customer/pages/RestaurantDetails'));
 const CustomerMenu = React.lazy(() => import('../apps/customer/pages/CustomerMenu'));
 const OrderTracking = React.lazy(() => import('../apps/customer/pages/OrderTracking'));
+const CustomerFeedback = React.lazy(() => import('../apps/customer/pages/Feedback'));
 const CustomerPortal = React.lazy(() => import('../apps/customer/pages/CustomerPortal'));
 const CustomerWelcome = React.lazy(() => import('../apps/customer/pages/CustomerWelcome'));
 const TableBooking = React.lazy(() => import('../apps/customer/pages/TableBooking'));
@@ -248,6 +249,8 @@ export const AppRoutes: React.FC = () => {
         <Route path="/customer/dashboard" element={<Navigate to="/customer/home" replace />} />
         <Route path="/customer/restaurant/:tenantId/menu" element={<CustomerMenu />} />
         <Route path="/customer/restaurant/:tenantId/order/:orderId" element={<OrderTracking />} />
+        <Route path="/customer/restaurant/:tenantId/order/:orderId/review" element={<CustomerFeedback />} />
+        <Route path="/customer/restaurant/:tenantId/feedback" element={<CustomerFeedback />} />
         <Route path="/customer/restaurant/:tenantId/active-order" element={<ActiveDiningSessionPage />} />
         <Route path="/customer/restaurant/:tenantId/session" element={<ActiveDiningSessionPage />} />
         <Route path="/customer/active-order" element={<ActiveDiningSessionPage />} />

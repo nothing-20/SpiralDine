@@ -359,30 +359,39 @@ export const CartPage: React.FC = () => {
         syncDiningSessionToFirestore(currentSession).catch(() => {});
       }
 
-      // Check existing active orders count for this table to assign orderSequence
+      // Check existing active orders in the current dining session
       let existingCount = 0;
+      let primaryOrderId = currentSession?.primaryOrderId || '';
       try {
-        const cleanTNum = tableNumber.replace(/^TBL-/i, '');
-        const qExisting = query(
-          collection(db, 'restaurants', tenantId, 'orders'),
-          where('tableNumber', '==', cleanTNum)
-        );
-        const existingSnap = await getDocs(qExisting);
-        existingSnap.forEach(d => {
-          const od = d.data();
-          if (isOrderActive(od)) {
-            existingCount++;
-          }
-        });
+        if (currentSession?.sessionId) {
+          const qSessionOrders = query(
+            collection(db, 'restaurants', tenantId, 'orders'),
+            where('sessionId', '==', currentSession.sessionId)
+          );
+          const sessionSnap = await getDocs(qSessionOrders);
+          sessionSnap.forEach(d => {
+            const od = d.data();
+            if (isOrderActive(od)) {
+              existingCount++;
+              if (!primaryOrderId) {
+                primaryOrderId = (od as any).primaryOrderId || od.orderId || d.id;
+              }
+            }
+          });
+        }
       } catch (_) {}
 
       const orderSequence = existingCount + 1;
       const isAdditional = existingCount > 0;
       const orderId = generateUniqueOrderId();
+      if (!primaryOrderId) {
+        primaryOrderId = orderId;
+      }
 
       const orderPayload = {
         id: orderId,
         orderId,
+        primaryOrderId,
         customerId: user?.uid || 'guest-uid',
         customerName: user?.displayName || 'Guest Diner',
         phone: user?.phoneNumber || '+91 98765 43210',
@@ -435,12 +444,19 @@ export const CartPage: React.FC = () => {
         console.warn('[CartPage] KOT generation warning:', kotErr);
       }
 
+      // Update dining session metadata with primaryOrderId and activeOrderIds
+      currentSession.primaryOrderId = primaryOrderId;
+      currentSession.activeOrderIds = Array.from(new Set([...(currentSession.activeOrderIds || []), orderId]));
+      saveActiveDiningSession(currentSession);
+      syncDiningSessionToFirestore(currentSession).catch(() => {});
+
       // Persist order reference to customer profile if authenticated
       if (user?.uid) {
         try {
           await setDoc(doc(db, 'customers', user.uid, 'orders', orderId), {
             id: orderId,
             orderId,
+            primaryOrderId,
             tenantId,
             restaurantName: restaurantName || restaurantData?.name || tenantId,
             tableNumber: tableNumber || 'Walk-in',
@@ -461,7 +477,8 @@ export const CartPage: React.FC = () => {
         const existingRecent = JSON.parse(existingRecentStr);
         const updatedRecent = [
           {
-            orderId,
+            orderId: primaryOrderId,
+            supplementaryOrderId: orderId !== primaryOrderId ? orderId : undefined,
             tenantId,
             restaurantName: restaurantName || restaurantData?.name || tenantId,
             tableNumber: tableNumber || 'Walk-in',
@@ -470,9 +487,10 @@ export const CartPage: React.FC = () => {
             itemsCount: cartItems.length,
             createdAt: orderPayload.createdAt
           },
-          ...existingRecent.filter((o: any) => o.orderId !== orderId)
+          ...existingRecent.filter((o: any) => o.orderId !== primaryOrderId && o.orderId !== orderId)
         ].slice(0, 20);
         localStorage.setItem('restaurantos_customer_orders', JSON.stringify(updatedRecent));
+        window.dispatchEvent(new Event('storage'));
       } catch (storageErr) {
         console.warn('[CartPage] Failed to update local recent orders index:', storageErr);
       }
@@ -483,7 +501,7 @@ export const CartPage: React.FC = () => {
           await tableService.setTableOccupiedWithOrder(
             tenantId,
             session?.tableId || tableNumber,
-            orderId,
+            primaryOrderId,
             {
               total: grandTotal,
               itemsCount: cartItems.length,
@@ -499,7 +517,7 @@ export const CartPage: React.FC = () => {
       clearCart();
 
       // Navigate to order tracking page
-      navigate(`/customer/restaurant/${tenantId}/order/${orderId}`);
+      navigate(`/customer/restaurant/${tenantId}/order/${primaryOrderId}`);
     } catch (e) {
       console.error('Failed to submit checkout order:', e);
       toast.error('Checkout failed. Please try again.');

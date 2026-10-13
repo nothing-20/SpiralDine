@@ -23,6 +23,13 @@ import {
 } from '../../../shared/utils/diningSession';
 import { tableService } from '../../../shared/services/tableService';
 import { useAuth } from '../../../context/AuthContext';
+import { 
+  reviewService, 
+  ISatisfactionRatingRecord, 
+  IRestaurantRatingSummary 
+} from '../../../shared/services/reviewService';
+import RestaurantRatingSummaryCard from '../components/reviews/RestaurantRatingSummaryCard';
+import RestaurantReviewsList from '../components/reviews/RestaurantReviewsList';
 
 interface IRestaurantInfo {
   id: string;
@@ -85,7 +92,10 @@ export const RestaurantDetails: React.FC = () => {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Filter & Search states
-  const [activeTab, setActiveTab] = useState<'menu' | 'info'>('menu');
+  const [activeTab, setActiveTab] = useState<'menu' | 'reviews' | 'info'>('menu');
+  const [reviews, setReviews] = useState<ISatisfactionRatingRecord[]>([]);
+  const [ratingSummary, setRatingSummary] = useState<IRestaurantRatingSummary>(() => reviewService.calculateRatingSummary([]));
+  const [isLoadingReviews, setIsLoadingReviews] = useState<boolean>(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [vegOnly, setVegOnly] = useState(false);
@@ -269,10 +279,26 @@ export const RestaurantDetails: React.FC = () => {
           });
         });
 
+        // 4. Fetch published reviews from restaurants/{tenantId}/satisfactionRatings
+        let reviewsList: ISatisfactionRatingRecord[] = [];
+        try {
+          reviewsList = await reviewService.getRestaurantReviews(tenantId, { limitCount: 40 });
+        } catch (revErr) {
+          console.warn('[RestaurantDetails] Reviews fetch warning:', revErr);
+        }
+        const summaryCalc = reviewService.calculateRatingSummary(reviewsList);
+
+        if (summaryCalc.hasReviews) {
+          restInfo.rating = summaryCalc.averageRating;
+          restInfo.reviewsCount = summaryCalc.totalReviews;
+        }
+
         if (isMounted) {
           setRestaurant(restInfo);
           setCategories(catList.filter(c => c.isActive));
           setMenuItems(itemList);
+          setReviews(reviewsList);
+          setRatingSummary(summaryCalc);
           setIsLoading(false);
         }
       } catch (err: any) {
@@ -423,10 +449,15 @@ export const RestaurantDetails: React.FC = () => {
               {restaurant.rating !== null && (
                 <>
                   <span>•</span>
-                  <span className="text-[#242424] flex items-center gap-0.5 font-bold">
+                  <button 
+                    type="button"
+                    onClick={() => setActiveTab('reviews')}
+                    className="text-[#242424] hover:text-[#E85D3F] flex items-center gap-0.5 font-bold cursor-pointer transition-colors"
+                    title="View reviews and ratings"
+                  >
                     <Star className="w-3.5 h-3.5 text-[#F4B942] fill-current" /> {restaurant.rating}
                     {restaurant.reviewsCount !== null && ` (${restaurant.reviewsCount})`}
-                  </span>
+                  </button>
                 </>
               )}
             </div>
@@ -470,6 +501,7 @@ export const RestaurantDetails: React.FC = () => {
       <div className="flex space-x-2 border-b border-[#EEE7E1] px-4">
         {[
           { key: 'menu', label: `Menu (${menuItems.length})`, icon: Utensils },
+          { key: 'reviews', label: `Reviews & Ratings (${reviews.length})`, icon: Star },
           { key: 'info', label: 'Info & Facilities', icon: Compass }
         ].map(tab => (
           <button
@@ -756,6 +788,24 @@ export const RestaurantDetails: React.FC = () => {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {/* TAB 3: REVIEWS & RATINGS */}
+        {activeTab === 'reviews' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start py-4">
+            <div className="lg:col-span-5">
+              <RestaurantRatingSummaryCard
+                summary={ratingSummary}
+                restaurantName={restaurant.name}
+              />
+            </div>
+            <div className="lg:col-span-7">
+              <RestaurantReviewsList
+                reviews={reviews}
+                isLoading={isLoadingReviews}
+              />
+            </div>
           </div>
         )}
 

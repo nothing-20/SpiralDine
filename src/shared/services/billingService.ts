@@ -88,38 +88,85 @@ export const billingService = {
   /**
    * Consolidates billable items across multiple active orders for a running dining session or table.
    * Guarantees that each submitted item appears exactly once, avoiding duplicate billing.
+   * Strictly scopes by valid active sessionId or primaryOrderId and prevents cross-table merging.
    */
   getConsolidatedSessionOrder: async (tenantId: string, primaryOrder: IOrder): Promise<IOrder> => {
     if (!tenantId || !primaryOrder) return primaryOrder;
     
     try {
       const ordersCol = collection(db, 'restaurants', tenantId, 'orders');
-      let q = query(
-        ordersCol,
-        where('tableNumber', '==', String(primaryOrder.tableNumber).replace(/^TBL-/i, ''))
-      );
+      const sessionId = (primaryOrder as any).sessionId;
+      const primaryOrderId = (primaryOrder as any).primaryOrderId || primaryOrder.orderId;
+      const cleanTableNum = String(
+        primaryOrder.tableNumber || 
+        (primaryOrder.tableId ? String(primaryOrder.tableId).replace(/^TBL-/i, '') : '')
+      ).trim();
 
-      if ((primaryOrder as any).sessionId && (primaryOrder as any).sessionId !== 'GUEST-SESSION') {
-        q = query(ordersCol, where('sessionId', '==', (primaryOrder as any).sessionId));
+      // Only consolidate if an unambiguous session or primaryOrderId identity exists
+      const isValidSession = Boolean(sessionId && sessionId !== 'GUEST-SESSION' && String(sessionId).startsWith('SES-'));
+      const hasPrimaryLink = Boolean((primaryOrder as any).primaryOrderId || (primaryOrder as any).isAdditionalOrder);
+
+      if (!isValidSession && !hasPrimaryLink) {
+        // Safe fallback: do NOT blindly combine based solely on tableNumber
+        return primaryOrder;
       }
 
-      const snap = await getDocs(q);
-      const activeSessionOrders: IOrder[] = [];
+      let activeSessionOrders: IOrder[] = [];
 
-      snap.forEach(d => {
-        const o = { orderId: d.id, ...d.data() } as IOrder;
-        const isNotTerminal = o.status !== 'CANCELLED' && o.status !== 'ARCHIVED' && (o.paymentStatus !== 'paid');
-        if (isNotTerminal) {
-          activeSessionOrders.push(o);
+      if (isValidSession) {
+        // Query strictly by sessionId
+        const qSession = query(ordersCol, where('sessionId', '==', sessionId));
+        const snapSession = await getDocs(qSession);
+        
+        snapSession.forEach(d => {
+          const o = { orderId: d.id, ...d.data() } as IOrder;
+          const isNotTerminal = o.status !== 'CANCELLED' && o.status !== 'ARCHIVED' && (o.paymentStatus !== 'paid');
+          // Double verify table matches to guarantee strict table isolation
+          const oTable = String(o.tableNumber || (o.tableId ? String(o.tableId).replace(/^TBL-/i, '') : '')).trim();
+          if (isNotTerminal && (!cleanTableNum || !oTable || oTable.toLowerCase() === cleanTableNum.toLowerCase())) {
+            activeSessionOrders.push(o);
+          }
+        });
+      }
+
+      // If no session orders found or not valid session, try primaryOrderId linkage
+      if (activeSessionOrders.length <= 1 && primaryOrderId) {
+        const qPrimary = query(ordersCol, where('primaryOrderId', '==', primaryOrderId));
+        const snapPrimary = await getDocs(qPrimary);
+        
+        const linkedMap: Record<string, IOrder> = {};
+        activeSessionOrders.forEach(o => { linkedMap[o.orderId] = o; });
+
+        snapPrimary.forEach(d => {
+          const o = { orderId: d.id, ...d.data() } as IOrder;
+          const isNotTerminal = o.status !== 'CANCELLED' && o.status !== 'ARCHIVED' && (o.paymentStatus !== 'paid');
+          if (isNotTerminal) {
+            linkedMap[o.orderId] = o;
+          }
+        });
+
+        // Also fetch the root primary order if not in map
+        if (!linkedMap[primaryOrderId]) {
+          const primaryDocSnap = await getDoc(doc(db, 'restaurants', tenantId, 'orders', primaryOrderId));
+          if (primaryDocSnap.exists()) {
+            const po = { orderId: primaryDocSnap.id, ...primaryDocSnap.data() } as IOrder;
+            if (po.status !== 'CANCELLED' && po.status !== 'ARCHIVED' && po.paymentStatus !== 'paid') {
+              linkedMap[primaryOrderId] = po;
+            }
+          }
         }
-      });
+
+        activeSessionOrders = Object.values(linkedMap);
+      }
 
       if (activeSessionOrders.length <= 1) {
         return primaryOrder;
       }
 
+      // Sort chronologically
       activeSessionOrders.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
+      // Track items across submissions, ensuring items from each supplementary order are added exactly once
       const combinedItems: any[] = [];
       let totalSubtotal = 0;
       let totalDiscount = 0;
@@ -134,8 +181,14 @@ export const billingService = {
         totalTip += Number((so as any).tip || 0);
       });
 
-      const taxRate = (primaryOrder as any).taxPercent ? ((primaryOrder as any).taxPercent / 100) : 0.08;
-      const scRate = (primaryOrder as any).serviceChargePercent ? ((primaryOrder as any).serviceChargePercent / 100) : 0.05;
+      // Calculate tax and service charge percentages
+      const rootOrder = activeSessionOrders[0] || primaryOrder;
+      const taxRate = (rootOrder as any).taxPercent 
+        ? ((rootOrder as any).taxPercent / 100) 
+        : (rootOrder.subtotal && rootOrder.tax ? (Number(rootOrder.tax) / Number(rootOrder.subtotal)) : 0.08);
+      const scRate = (rootOrder as any).serviceChargePercent 
+        ? ((rootOrder as any).serviceChargePercent / 100) 
+        : (rootOrder.subtotal && rootOrder.serviceCharge ? (Number(rootOrder.serviceCharge) / Number(rootOrder.subtotal)) : 0.05);
 
       const taxableAmount = Math.max(0, totalSubtotal - totalDiscount);
       const calculatedTax = Math.round(taxableAmount * taxRate);
@@ -143,7 +196,8 @@ export const billingService = {
       const calculatedTotal = taxableAmount + calculatedTax + calculatedServiceCharge + totalTip;
 
       return {
-        ...primaryOrder,
+        ...rootOrder,
+        orderId: (rootOrder as any).primaryOrderId || rootOrder.orderId,
         items: combinedItems,
         subtotal: totalSubtotal,
         discount: totalDiscount,
@@ -171,15 +225,18 @@ export const billingService = {
       throw new Error('Tenant ID and Order ID are required to resolve a canonical bill.');
     }
 
+    // Determine the authoritative order ID: supplementary orders point to the primary order's canonical bill
+    const authoritativeOrderId = (order as any).primaryOrderId || order.orderId;
+
     // Consolidate billable items across multiple active ordering rounds if applicable
     let effectiveOrder = order;
     try {
-      if ((order as any).sessionId || (order as any).isAdditionalOrder || ((order as any).orderSequence && (order as any).orderSequence > 1)) {
+      if ((order as any).sessionId || (order as any).primaryOrderId || (order as any).isAdditionalOrder || ((order as any).orderSequence && (order as any).orderSequence > 1)) {
         effectiveOrder = await billingService.getConsolidatedSessionOrder(tenantId, order);
       }
     } catch (_) {}
 
-    const billId = billingService.getCanonicalBillId(order.orderId);
+    const billId = billingService.getCanonicalBillId(authoritativeOrderId);
     const billRef = doc(db, 'restaurants', tenantId, 'bills', billId);
 
     // 1. Check if canonical bill already exists (idempotency check)
@@ -268,7 +325,7 @@ export const billingService = {
     const canonicalBill: IBill = {
       id: billId,
       billId,
-      orderId: order.orderId,
+      orderId: authoritativeOrderId,
       tenantId,
       branchId: order.branchId || 'main',
       tableId: order.tableId || (cleanTableNumber !== 'Walk-in' ? `TBL-${cleanTableNumber}` : ''),
@@ -308,10 +365,11 @@ export const billingService = {
 
     // Sync order reference
     try {
-      const orderRef = doc(db, 'restaurants', tenantId, 'orders', order.orderId);
+      const orderRef = doc(db, 'restaurants', tenantId, 'orders', authoritativeOrderId);
       const updatePayload: Record<string, any> = {
         billId,
         invoiceNumber,
+        canonicalBillId: billId,
         billGeneratedAt: canonicalBill.createdAt,
         updatedAt: new Date().toISOString()
       };
@@ -323,6 +381,14 @@ export const billingService = {
       }
 
       await updateDoc(orderRef, updatePayload);
+
+      // If invoked from a supplementary order, also link the supplementary order record
+      if (order.orderId !== authoritativeOrderId) {
+        try {
+          const suppOrderRef = doc(db, 'restaurants', tenantId, 'orders', order.orderId);
+          await updateDoc(suppOrderRef, updatePayload);
+        } catch (_) {}
+      }
     } catch (orderUpdateErr) {
       console.warn('[billingService] Non-blocking order link warning:', orderUpdateErr);
     }
@@ -333,7 +399,7 @@ export const billingService = {
       eventCategory: 'Billing',
       performedBy: actor?.displayName || actor?.email || 'System',
       performedByRole: (actor?.role as any) || 'system',
-      orderId: order.orderId,
+      orderId: authoritativeOrderId,
       tableNumber: cleanTableNumber,
       title: 'Canonical Bill Generated',
       description: `Authoritative Bill ${billId} generated for Table ${cleanTableNumber}. Total: ${total / 100}`

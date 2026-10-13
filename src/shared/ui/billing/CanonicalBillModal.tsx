@@ -119,6 +119,16 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
           const orderSnap = await getDoc(doc(db, 'restaurants', tenantId, 'orders', orderId));
           if (orderSnap.exists()) {
             const oData = orderSnap.data() as IOrder;
+            const targetOrderId = (oData as any).primaryOrderId || orderId;
+            try {
+              const resolved = await billingService.getOrCreateCanonicalBill(tenantId, { ...oData, orderId: targetOrderId });
+              if (resolved) {
+                setBill(resolved);
+                setIsLoading(false);
+                return;
+              }
+            } catch (_) {}
+
             const subtotal = Number(oData.subtotal || 0);
             const discount = Number(oData.discount || 0);
             const tax = Number(oData.tax || 0);

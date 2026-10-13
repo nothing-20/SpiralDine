@@ -332,7 +332,6 @@ export const CustomerPortal: React.FC = () => {
   const handleAddToCart = () => {
     if (!selectedItem) return;
     addItem(selectedItem, addItemCount, itemNotes);
-    toast.success(`${selectedItem.name} added to cart!`);
     setSelectedItem(null);
   };
 
