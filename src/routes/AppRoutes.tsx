@@ -49,6 +49,7 @@ const OwnerRestaurants = React.lazy(() => import('../apps/owner/pages/OwnerResta
 const OwnerReservations = React.lazy(() => import('../apps/owner/pages/OwnerReservations'));
 const OwnerCustomers = React.lazy(() => import('../apps/owner/pages/OwnerCustomers'));
 const OwnerFeedback = React.lazy(() => import('../apps/owner/pages/OwnerFeedback'));
+const OwnerReviews = React.lazy(() => import('../apps/owner/pages/OwnerReviews'));
 const OwnerMarketing = React.lazy(() => import('../apps/owner/pages/OwnerMarketing'));
 const OwnerAlerts = React.lazy(() => import('../apps/owner/pages/OwnerAlerts'));
 const OwnerReports = React.lazy(() => import('../apps/owner/pages/OwnerReports'));
@@ -98,6 +99,7 @@ const CustomerRegister = React.lazy(() => import('../apps/customer/pages/Custome
 const RestaurantDetails = React.lazy(() => import('../apps/customer/pages/RestaurantDetails'));
 const CustomerMenu = React.lazy(() => import('../apps/customer/pages/CustomerMenu'));
 const OrderTracking = React.lazy(() => import('../apps/customer/pages/OrderTracking'));
+const CustomerFeedback = React.lazy(() => import('../apps/customer/pages/Feedback'));
 const CustomerPortal = React.lazy(() => import('../apps/customer/pages/CustomerPortal'));
 const CustomerWelcome = React.lazy(() => import('../apps/customer/pages/CustomerWelcome'));
 const TableBooking = React.lazy(() => import('../apps/customer/pages/TableBooking'));
@@ -248,6 +250,8 @@ export const AppRoutes: React.FC = () => {
         <Route path="/customer/dashboard" element={<Navigate to="/customer/home" replace />} />
         <Route path="/customer/restaurant/:tenantId/menu" element={<CustomerMenu />} />
         <Route path="/customer/restaurant/:tenantId/order/:orderId" element={<OrderTracking />} />
+        <Route path="/customer/restaurant/:tenantId/order/:orderId/review" element={<CustomerFeedback />} />
+        <Route path="/customer/restaurant/:tenantId/feedback" element={<CustomerFeedback />} />
         <Route path="/customer/restaurant/:tenantId/active-order" element={<ActiveDiningSessionPage />} />
         <Route path="/customer/restaurant/:tenantId/session" element={<ActiveDiningSessionPage />} />
         <Route path="/customer/active-order" element={<ActiveDiningSessionPage />} />
@@ -328,6 +332,7 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/owner/reservations" element={<OwnerReservations />} />
                 <Route path="/owner/customers" element={<OwnerCustomers />} />
                 <Route path="/owner/feedback" element={<OwnerFeedback />} />
+                <Route path="/owner/reviews" element={<OwnerReviews />} />
                 <Route path="/owner/marketing" element={<OwnerMarketing />} />
                 <Route path="/owner/alerts" element={<OwnerAlerts />} />
                 <Route path="/owner/reports" element={<OwnerReports />} />
@@ -350,6 +355,7 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/dashboard/owner/reservations" element={<OwnerReservations />} />
                 <Route path="/dashboard/owner/customers" element={<OwnerCustomers />} />
                 <Route path="/dashboard/owner/feedback" element={<OwnerFeedback />} />
+                <Route path="/dashboard/owner/reviews" element={<OwnerReviews />} />
                 <Route path="/dashboard/owner/marketing" element={<OwnerMarketing />} />
                 <Route path="/dashboard/owner/alerts" element={<OwnerAlerts />} />
                 <Route path="/dashboard/owner/reports" element={<OwnerReports />} />

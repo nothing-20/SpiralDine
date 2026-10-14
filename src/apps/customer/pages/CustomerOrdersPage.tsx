@@ -27,11 +27,14 @@ interface OrderItem {
 interface CustomerOrder {
   id: string;
   orderId?: string;
+  primaryOrderId?: string;
+  sessionId?: string;
   tenantId?: string;
   restaurantId?: string;
   restaurantName?: string;
   tableNumber?: string;
   tableId?: string;
+  orderType?: string;
   items?: OrderItem[];
   subtotal?: number;
   tax?: number;
@@ -45,6 +48,8 @@ interface CustomerOrder {
   specialInstructions?: string;
   createdAt?: string;
   updatedAt?: string;
+  submissionsCount?: number;
+  submissionOrderIds?: string[];
 }
 
 export const CustomerOrdersPage: React.FC = () => {
@@ -302,9 +307,88 @@ export const CustomerOrdersPage: React.FC = () => {
     });
   }, [ordersMap]);
 
-  // Active Orders: Orders currently in progress (not terminal and not paid)
+  // Active Orders: Consolidated by dining session for dine-in visits to avoid duplicate fragmented cards
   const activeOrders = useMemo(() => {
-    return allOrdersList.filter(o => isOrderActive(o));
+    const raw = allOrdersList.filter(o => isOrderActive(o));
+
+    // Group active dine-in orders by session key: `${tenantId}_${sessionId}_${table}`
+    const consolidatedMap: Record<string, CustomerOrder> = {};
+    const standaloneActiveOrders: CustomerOrder[] = [];
+
+    raw.forEach(order => {
+      const isDineIn = order.orderType === 'dine_in' || Boolean(order.tableNumber || order.tableId);
+      const sid = order.sessionId || (order as any).sessionId;
+      const tId = order.tenantId || order.restaurantId || '';
+      const tableNorm = String(order.tableNumber || order.tableId || '').replace(/^TBL-/i, '').trim().toLowerCase();
+
+      // Only consolidate if it's active dine-in with an unambiguous valid session ID (starts with 'SES-')
+      if (isDineIn && sid && sid !== 'GUEST-SESSION' && String(sid).startsWith('SES-') && tId) {
+        const sessionKey = `${tId}_${sid}_${tableNorm}`;
+        if (!consolidatedMap[sessionKey]) {
+          // Initialize consolidated visit card with primary order
+          consolidatedMap[sessionKey] = {
+            ...order,
+            id: (order as any).primaryOrderId || order.orderId || order.id,
+            orderId: (order as any).primaryOrderId || order.orderId || order.id,
+            items: order.items ? [...order.items] : [],
+            submissionsCount: 1,
+            submissionOrderIds: [order.orderId || order.id]
+          };
+        } else {
+          // Merge supplementary submission items and totals into single active table visit card
+          const parent = consolidatedMap[sessionKey];
+          if (Array.isArray(order.items)) {
+            const merged = [...(parent.items || [])];
+            order.items.forEach(newItem => {
+              const existingIdx = merged.findIndex(
+                m => (m.itemId && newItem.itemId && m.itemId === newItem.itemId) ||
+                     (m.name === newItem.name && !m.notes && !newItem.notes)
+              );
+              if (existingIdx >= 0) {
+                const ex = merged[existingIdx];
+                const count = (ex.count || ex.quantity || 1) + (newItem.count || newItem.quantity || 1);
+                merged[existingIdx] = {
+                  ...ex,
+                  count,
+                  quantity: count
+                };
+              } else {
+                merged.push({ ...newItem });
+              }
+            });
+            parent.items = merged;
+          }
+          parent.subtotal = (parent.subtotal || 0) + (order.subtotal || 0);
+          parent.tax = (parent.tax || 0) + (order.tax || 0);
+          parent.serviceCharge = (parent.serviceCharge || 0) + (order.serviceCharge || 0);
+          parent.discount = (parent.discount || 0) + (order.discount || 0);
+          parent.tip = (parent.tip || 0) + (order.tip || 0);
+          parent.total = (parent.total || parent.totalAmount || 0) + (order.total || order.totalAmount || 0);
+          parent.totalAmount = parent.total;
+          parent.submissionsCount = (parent.submissionsCount || 1) + 1;
+          parent.submissionOrderIds = [...(parent.submissionOrderIds || []), order.orderId || order.id];
+          // Keep active status alive
+          if (order.status && order.status !== 'NEW') {
+            parent.status = order.status;
+          }
+          // Preserve primary order ID
+          if ((order as any).primaryOrderId) {
+            parent.id = (order as any).primaryOrderId;
+            parent.orderId = (order as any).primaryOrderId;
+          }
+        }
+      } else {
+        // Takeaway, delivery, or orders without active dining session remain individual
+        standaloneActiveOrders.push(order);
+      }
+    });
+
+    const consolidatedList = [...Object.values(consolidatedMap), ...standaloneActiveOrders];
+    return consolidatedList.sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
   }, [allOrdersList]);
 
   // Past Orders: Successfully completed, paid, or cancelled historical orders
@@ -314,7 +398,7 @@ export const CustomerOrdersPage: React.FC = () => {
 
   // Filtered list based on active tab and search filter
   const displayedOrders = useMemo(() => {
-    let list = allOrdersList;
+    let list = [...activeOrders, ...pastOrders];
     if (activeTab === 'active') list = activeOrders;
     if (activeTab === 'past') list = pastOrders;
 
@@ -329,7 +413,7 @@ export const CustomerOrdersPage: React.FC = () => {
     }
 
     return list;
-  }, [allOrdersList, activeOrders, pastOrders, activeTab, searchFilter, restaurantMeta]);
+  }, [activeOrders, pastOrders, activeTab, searchFilter, restaurantMeta]);
 
   // Helpers
   const formatOrderTime = (isoString?: string) => {
@@ -558,6 +642,11 @@ export const CustomerOrdersPage: React.FC = () => {
                         <span className="text-[11px] font-bold px-2 py-0.5 bg-[#F3E8DF] text-[#C85A3F] rounded-full border border-[#E5DCD5]">
                           {tableNum}
                         </span>
+                        {order.submissionsCount && order.submissionsCount > 1 ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-50 text-[#2E8B57] rounded-full border border-emerald-200">
+                            {order.submissionsCount} rounds consolidated
+                          </span>
+                        ) : null}
                       </div>
                       <p className="text-[11px] text-[#756B64] font-medium flex items-center gap-1">
                         <Clock className="w-3 h-3 text-[#C85A3F]" />

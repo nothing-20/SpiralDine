@@ -640,7 +640,6 @@ export const CustomerMenu: React.FC = () => {
       setCartTenantId(tenantId);
     }
     addItem(item, 1);
-    toast.success(`Added ${item.name} to order`);
   };
 
   const handleCustomizedAdd = () => {
@@ -679,8 +678,6 @@ export const CustomerMenu: React.FC = () => {
     };
 
     addItem(customizedItemObj, itemQuantity, notesParts.join(' | '));
-    toast.success(`Added ${customizingItem.name} to order`);
-
     setCustomizingItem(null);
   };
 
@@ -895,11 +892,15 @@ export const CustomerMenu: React.FC = () => {
       const isAdditional = activeOrders.length > 0;
       const orderSequence = activeOrders.length + 1;
       const orderId = generateUniqueOrderId();
+      const primaryOrderId = isAdditional
+        ? ((activeOrders[0] as any)?.primaryOrderId || activeOrders[0]?.orderId)
+        : orderId;
       const orderRef = doc(db, 'restaurants', tenantId, 'orders', orderId);
 
       const orderPayload = {
         id: orderId,
         orderId,
+        primaryOrderId,
         customerId: user?.uid || 'guest-uid',
         customerName: customerName.trim() || user?.displayName || 'Guest Diner',
         customerEmail: user?.email || '',
@@ -936,7 +937,7 @@ export const CustomerMenu: React.FC = () => {
         await kotService.createKotForOrder(tenantId, orderPayload as any, {
           source: currentSession?.orderSource === 'qr' ? 'customer_qr' : 'customer_app',
           customerName: customerName.trim() || user?.displayName || 'Guest Diner',
-          round: 1,
+          round: orderSequence,
           isSupplementary: isAdditional
         });
       } catch (kotErr: any) {
@@ -945,12 +946,19 @@ export const CustomerMenu: React.FC = () => {
         throw new Error(`Kitchen ticket creation failed: ${kotErr?.message || 'Unknown error'}`);
       }
 
+      // Update dining session metadata with primaryOrderId and activeOrderIds
+      currentSession.primaryOrderId = primaryOrderId;
+      currentSession.activeOrderIds = Array.from(new Set([...(currentSession.activeOrderIds || []), orderId]));
+      saveActiveDiningSession(currentSession);
+      syncDiningSessionToFirestore(currentSession).catch(() => {});
+
       // Persist order reference to customer profile if authenticated
       if (user?.uid) {
         try {
           await setDoc(doc(db, 'customers', user.uid, 'orders', orderId), {
             id: orderId,
             orderId,
+            primaryOrderId,
             tenantId,
             restaurantName: restaurantName || tenantId,
             tableNumber: cleanTableNum,
@@ -971,7 +979,8 @@ export const CustomerMenu: React.FC = () => {
         const existingRecent = JSON.parse(existingRecentStr);
         const updatedRecent = [
           {
-            orderId,
+            orderId: primaryOrderId,
+            supplementaryOrderId: orderId !== primaryOrderId ? orderId : undefined,
             tenantId,
             restaurantName: restaurantName || tenantId,
             tableNumber: cleanTableNum,
@@ -980,7 +989,7 @@ export const CustomerMenu: React.FC = () => {
             itemsCount: cartItems.length,
             createdAt: orderPayload.createdAt
           },
-          ...existingRecent.filter((o: any) => o.orderId !== orderId)
+          ...existingRecent.filter((o: any) => o.orderId !== primaryOrderId && o.orderId !== orderId)
         ].slice(0, 20);
         localStorage.setItem('restaurantos_customer_orders', JSON.stringify(updatedRecent));
         window.dispatchEvent(new Event('storage'));
@@ -993,7 +1002,7 @@ export const CustomerMenu: React.FC = () => {
         await tableService.setTableOccupiedWithOrder(
           tenantId, 
           cleanTableNum || resolvedTableId, 
-          orderId, 
+          primaryOrderId, 
           {
             total: totalCartCost,
             itemsCount: cartItems.length,
@@ -1022,13 +1031,14 @@ export const CustomerMenu: React.FC = () => {
       // Operational audit log
       customerService.logCustomerEvent(tenantId, 'Order Created', `Customer placed order ${orderId} on table ${cleanTableNum}`, {
         orderId,
+        primaryOrderId,
         tableNumber: cleanTableNum,
         itemsCount: cartItems.length,
         total: totalCartCost
       }).catch(() => {});
 
       // Navigate immediately to Live Order Tracking
-      navigate(`/customer/restaurant/${tenantId}/order/${orderId}`);
+      navigate(`/customer/restaurant/${tenantId}/order/${primaryOrderId}`);
     } catch (err: any) {
       console.error('[CustomerMenu] Place order error:', err);
       const msg = err?.code === 'permission-denied'

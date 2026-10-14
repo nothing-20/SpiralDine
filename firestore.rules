@@ -387,6 +387,16 @@ service cloud.firestore {
       allow read, create, update: if true;
     }
 
+    // Customer Satisfaction Ratings & Dining Reviews
+    match /satisfactionRatings/{ratingId} {
+      allow read: if true;
+      allow create: if (
+        request.resource.data.get('tenantId', '') == tenantId &&
+        request.resource.data.get('orderId', '') != ''
+      );
+      allow update, delete: if isTenantStaff(tenantId);
+    }
+
     // Canonical Menu Subcollections (categories, items, variants, addons, combos)
     // Read: public for diner viewing & staff operations
     // Create/Delete: restricted to tenant management (Owner, Admin, Manager)

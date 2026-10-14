@@ -343,8 +343,8 @@ export const OwnerOverview: React.FC = () => {
       setTables(list);
     });
 
-    // 4. Satisfaction Ratings (bounded to 15 ratings)
-    const qRatings = query(collection(db, 'restaurants', tenantId, 'satisfactionRatings'), limit(15));
+    // 4. Satisfaction Ratings (bounded to 100 ratings for comprehensive CSAT metrics)
+    const qRatings = query(collection(db, 'restaurants', tenantId, 'satisfactionRatings'), limit(100));
     const unsubRatings = onSnapshot(qRatings, (snap) => {
       const list: any[] = [];
       snap.forEach(d => list.push({ id: d.id, ...d.data() }));
@@ -603,7 +603,7 @@ export const OwnerOverview: React.FC = () => {
 
     let repeatRate: number | null = null;
     if (satisfactionRatings.length > 0) {
-      const repeatCustomersCount = satisfactionRatings.filter(r => r.repeatCustomer).length;
+      const repeatCustomersCount = satisfactionRatings.filter(r => r.repeatCustomer || r.revisitIntention === 'Yes').length;
       repeatRate = Math.round((repeatCustomersCount / satisfactionRatings.length) * 100);
     } else {
       // Calculate real customer repeat rate from unique customer orders
@@ -1742,10 +1742,25 @@ export const OwnerOverview: React.FC = () => {
         </Card>
 
         {/* KPI 4: Customer Experience */}
-        <Card className="p-5 border-[#E5E0D9] bg-white relative overflow-hidden flex flex-col justify-between h-44 hover:border-[#D98B00]/40 transition-all duration-300 shadow-sm rounded-2xl">
+        <Card 
+          role="button"
+          tabIndex={0}
+          aria-label="View Customer Reviews and Experience Analytics"
+          onClick={() => navigate('/owner/reviews')}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              navigate('/owner/reviews');
+            }
+          }}
+          className="p-5 border-[#E5E0D9] bg-white relative overflow-hidden flex flex-col justify-between h-44 cursor-pointer group hover:border-[#D98B00]/70 hover:shadow-md transition-all duration-300 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#D98B00]/40 focus:border-[#D98B00]"
+        >
           <div className="flex justify-between items-start">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-[#52606D]">Customer Experience</span>
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-[#FFF4DC] border border-[#FDE6B0]">
+            <div className="flex items-center space-x-1.5">
+              <span className="text-[10px] uppercase font-bold tracking-wider text-[#52606D]">Customer Experience</span>
+              <ChevronRight className="w-3.5 h-3.5 text-[#52606D] opacity-40 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+            </div>
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-[#FFF4DC] border border-[#FDE6B0] group-hover:bg-[#FDE6B0] transition-colors">
               <ThumbsUp className="w-4 h-4 text-[#D98B00]" />
             </div>
           </div>

@@ -11,10 +11,12 @@ import { customerService } from '../../../shared/services/customerService';
 import { getMenuItemPath } from '../../../shared/firebase/collections';
 import CustomerHeader from '../../../shared/ui/navigation/CustomerHeader';
 import CustomerReceiptView from '../components/CustomerReceiptView';
+import PostDiningFeedbackView from '../components/reviews/PostDiningFeedbackView';
 import ErrorBoundary from '../../../shared/ui/feedback/ErrorBoundary';
 import { billingService } from '../../../shared/services/billingService';
 import { IBill } from '../../../shared/domain/billing/types';
 import { CanonicalBillModal } from '../../../shared/ui/billing/CanonicalBillModal';
+import { IOrder } from '../../../shared/domain/orders/types';
 
 // Icons
 import { 
@@ -153,6 +155,96 @@ export const OrderTracking: React.FC = () => {
   const [repeatCustomer, setRepeatCustomer] = useState(true);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
+  // Consolidated session orders for multi-round dining sessions
+  const [sessionOrders, setSessionOrders] = useState<IOrder[]>([]);
+  const [consolidatedOrder, setConsolidatedOrder] = useState<IOrder | null>(null);
+
+  // Status mapping and explanation for the compact status card
+  const getStatusMeta = (status?: string) => {
+    const s = (status || 'NEW').toUpperCase();
+    switch (s) {
+      case 'NEW':
+      case 'PLACED':
+        return {
+          label: 'Order Received',
+          desc: 'Your ticket is placed and queued in the kitchen prep stream.',
+          badgeBg: 'bg-blue-50 text-blue-700 border-blue-200',
+          dotBg: 'bg-blue-500',
+          pulse: true,
+          icon: Clock
+        };
+      case 'ACCEPTED':
+      case 'CONFIRMED':
+        return {
+          label: 'Accepted',
+          desc: 'The kitchen has accepted your order and assigned a station.',
+          badgeBg: 'bg-blue-50 text-blue-700 border-blue-200',
+          dotBg: 'bg-blue-600',
+          pulse: true,
+          icon: CheckCircle2
+        };
+      case 'PREPARING':
+      case 'CHEF_ASSIGNED':
+      case 'COOKING':
+        return {
+          label: 'Preparing',
+          desc: 'The chefs are actively cooking and preparing your dishes.',
+          badgeBg: 'bg-[#F3E8DF] text-[#C85A3F] border-[#E5DCD5]',
+          dotBg: 'bg-[#C85A3F]',
+          pulse: true,
+          icon: Utensils
+        };
+      case 'READY':
+      case 'PICKED_UP':
+        return {
+          label: 'Ready to Serve',
+          desc: 'Food is plated and on its way to your table.',
+          badgeBg: 'bg-teal-50 text-teal-800 border-teal-200',
+          dotBg: 'bg-teal-500',
+          pulse: true,
+          icon: Sparkles
+        };
+      case 'SERVED':
+      case 'DELIVERED':
+        return {
+          label: 'Served',
+          desc: 'Food has arrived at your table. Enjoy your meal!',
+          badgeBg: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+          dotBg: 'bg-emerald-600',
+          pulse: false,
+          icon: CheckCircle2
+        };
+      case 'DINING_COMPLETED':
+      case 'COMPLETED':
+        return {
+          label: 'Dining Completed',
+          desc: 'Dining completed. You can review your bill and settle payment.',
+          badgeBg: 'bg-amber-50 text-amber-900 border-amber-200',
+          dotBg: 'bg-amber-600',
+          pulse: false,
+          icon: CheckCheck
+        };
+      case 'CANCELLED':
+        return {
+          label: 'Cancelled',
+          desc: 'This order was cancelled by the restaurant management.',
+          badgeBg: 'bg-rose-50 text-rose-800 border-rose-200',
+          dotBg: 'bg-rose-500',
+          pulse: false,
+          icon: AlertTriangle
+        };
+      default:
+        return {
+          label: status || 'In Progress',
+          desc: 'Your table order is in progress.',
+          badgeBg: 'bg-[#F3E8DF] text-[#756B64] border-[#E5DCD5]',
+          dotBg: 'bg-[#756B64]',
+          pulse: false,
+          icon: Clock
+        };
+    }
+  };
+
   // Status Timeline Steps (Strict separation: Order Lifecycle vs Payment Lifecycle)
   const trackingSteps = [
     { key: 'NEW', label: 'Order Received', desc: 'Your ticket is in the kitchen queue.' },
@@ -190,18 +282,55 @@ export const OrderTracking: React.FC = () => {
     }
   }, []);
 
-  // 1.5. Real-time Canonical Bill Listener & Sync
+  // 1.5. Real-time Canonical Bill Listener & Sync (resolves to primary order canonical bill)
   useEffect(() => {
     const effectiveTenant = order?.tenantId || resolvedTenantId || tenantId;
-    if (!effectiveTenant || !orderId) return;
-    const unsub = billingService.subscribeToCanonicalBill(effectiveTenant, orderId, (b) => {
+    const targetBillId = (order as any)?.primaryOrderId || orderId;
+    if (!effectiveTenant || !targetBillId) return;
+    const unsub = billingService.subscribeToCanonicalBill(effectiveTenant, targetBillId, (b) => {
       setCanonicalBill(b);
       if (b?.paymentStatus === 'paid') {
         setPaymentCompleted(true);
       }
     });
     return () => unsub();
-  }, [tenantId, resolvedTenantId, order?.tenantId, orderId]);
+  }, [tenantId, resolvedTenantId, order?.tenantId, (order as any)?.primaryOrderId, orderId]);
+
+  // 1.6. Real-time Session Orders Listener & Consolidation
+  useEffect(() => {
+    const effectiveTenant = order?.tenantId || resolvedTenantId || tenantId;
+    const currentSessionId = (order as any)?.sessionId || (session as any)?.sessionId;
+    if (!effectiveTenant || !currentSessionId || currentSessionId === 'GUEST-SESSION' || !String(currentSessionId).startsWith('SES-')) {
+      if (order) setConsolidatedOrder(order);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'restaurants', effectiveTenant, 'orders'),
+      where('sessionId', '==', currentSessionId)
+    );
+
+    const unsub = onSnapshot(q, async (snap) => {
+      const orders: IOrder[] = [];
+      snap.forEach(d => {
+        const o = { orderId: d.id, ...d.data() } as IOrder;
+        if (o.status !== 'CANCELLED' && o.status !== 'ARCHIVED') {
+          orders.push(o);
+        }
+      });
+      orders.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      setSessionOrders(orders);
+
+      if (order) {
+        const consolidated = await billingService.getConsolidatedSessionOrder(effectiveTenant, order);
+        setConsolidatedOrder(consolidated);
+      }
+    }, (err) => {
+      console.warn('[OrderTracking] Session orders stream warning:', err);
+    });
+
+    return () => unsub();
+  }, [tenantId, resolvedTenantId, order?.tenantId, (order as any)?.sessionId, (session as any)?.sessionId, order?.orderId]);
 
   // Canonical bill generation trigger: Only generate when dining is explicitly completed
   useEffect(() => {
@@ -780,13 +909,17 @@ export const OrderTracking: React.FC = () => {
   const activeIndex = getStepIndex(order?.status || '');
   const isCancelled = (order?.status || '').toUpperCase() === 'CANCELLED';
 
-  // Historical Bill computations from Firestore order snapshot
-  const orderSubtotal = Number(order?.subtotal ?? 0);
-  const orderTax = Number(order?.tax ?? 0);
-  const orderServiceCharge = Number(order?.serviceCharge ?? 0);
-  const orderDiscount = Number(order?.discount ?? 0);
-  const orderTip = Number(order?.tip ?? 0);
+  // Consolidated or single order computations
+  const effectiveDisplayOrder = consolidatedOrder || order;
+  const orderSubtotal = Number(effectiveDisplayOrder?.subtotal ?? order?.subtotal ?? 0);
+  const orderTax = Number(effectiveDisplayOrder?.tax ?? order?.tax ?? 0);
+  const orderServiceCharge = Number(effectiveDisplayOrder?.serviceCharge ?? order?.serviceCharge ?? 0);
+  const orderDiscount = Number(effectiveDisplayOrder?.discount ?? order?.discount ?? 0);
+  const orderTip = Number((effectiveDisplayOrder as any)?.tip ?? (order as any)?.tip ?? 0);
   const orderTotal = Number(
+    canonicalBill?.total ??
+    effectiveDisplayOrder?.total ??
+    effectiveDisplayOrder?.totalAmount ??
     order?.total ??
     order?.totalAmount ??
     (orderSubtotal + orderTax + orderServiceCharge - orderDiscount + orderTip)
@@ -1040,117 +1173,18 @@ export const OrderTracking: React.FC = () => {
   // 3. Post-Payment Dining Experience Feedback Loop (Triggered after bill is settled)
   if (paymentCompleted || isOrderPaid) {
     return (
-      <div className="min-h-screen bg-[#FCFAF7] text-left">
-        <CustomerHeader />
-        <div className="max-w-lg mx-auto px-4 py-12">
-          <div className="bg-white border border-[#E5DCD5] rounded-3xl p-6 md:p-8 space-y-6 shadow-sm">
-            <div className="text-center space-y-1.5 pb-4 border-b border-[#E5DCD5]">
-              <h2 className="text-2xl font-display font-extrabold text-[#202124]">Dining Experience Feedback</h2>
-              <p className="text-xs text-[#756B64]">How was your meal at {restaurantName}?</p>
-            </div>
-
-            {/* Overall Experience select */}
-            <div className="space-y-2">
-              <label className="text-[11px] font-extrabold uppercase tracking-wider text-[#756B64] block">
-                Overall Experience
-              </label>
-              <div className="grid grid-cols-5 gap-1.5 text-center">
-                {[
-                  { key: 'Excellent', label: '😍' },
-                  { key: 'Good', label: '😊' },
-                  { key: 'Neutral', label: '😐' },
-                  { key: 'Needs Attention', label: '🙁' },
-                  { key: 'Complaint', label: '😡' }
-                ].map(opt => (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    onClick={() => setRatingCategory(opt.key as any)}
-                    className={`p-2.5 rounded-xl border flex flex-col items-center justify-center transition-all cursor-pointer ${
-                      ratingCategory === opt.key 
-                        ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F] shadow-xs' 
-                        : 'bg-white border-[#E5DCD5] text-[#756B64] hover:bg-[#FCFAF7]'
-                    }`}
-                  >
-                    <span className="text-2xl">{opt.label}</span>
-                    <span className="text-[9px] font-bold mt-1 block truncate w-full">{opt.key.split(' ')[0]}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Rating Stars Grid */}
-            <div className="grid grid-cols-2 gap-4 pt-1">
-              {[
-                { label: 'Food Quality', val: foodRating, set: setFoodRating },
-                { label: 'Service Speed', val: serviceRating, set: setServiceRating },
-                { label: 'Cleanliness', val: cleanlinessRating, set: setCleanlinessRating },
-                { label: 'Ambience', val: ambienceRating, set: setAmbienceRating }
-              ].map(cat => (
-                <div key={cat.label} className="space-y-1">
-                  <label className="text-[10px] font-bold text-[#756B64] block uppercase">{cat.label}</label>
-                  <div className="flex items-center space-x-1">
-                    {[1, 2, 3, 4, 5].map(star => (
-                      <button
-                        key={star}
-                        type="button"
-                        onClick={() => cat.set(star)}
-                        className="text-[#E5DCD5] hover:text-amber-500 transition-colors cursor-pointer"
-                      >
-                        <Star className={`w-4 h-4 ${star <= cat.val ? 'text-amber-500 fill-current' : ''}`} />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Comments Box */}
-            <div className="space-y-1.5 pt-1">
-              <label className="text-[11px] font-extrabold uppercase tracking-wider text-[#756B64] block">
-                Additional Comments
-              </label>
-              <textarea
-                placeholder="Tell us what you loved or how we can improve..."
-                value={comments}
-                onChange={(e) => setComments(e.target.value)}
-                className="w-full bg-white border border-[#E5DCD5] focus:border-[#C85A3F] focus:ring-1 focus:ring-[#C85A3F] rounded-xl p-3 text-xs text-[#202124] placeholder-[#756B64]/60 outline-none h-20 resize-none transition-all"
-              />
-            </div>
-
-            {/* Repeat Customer Checkbox */}
-            <div className="flex items-center space-x-2.5">
-              <input
-                type="checkbox"
-                id="repeatCustomer"
-                checked={repeatCustomer}
-                onChange={(e) => setRepeatCustomer(e.target.checked)}
-                className="w-4 h-4 accent-[#C85A3F] cursor-pointer"
-              />
-              <label htmlFor="repeatCustomer" className="text-xs font-semibold text-[#756B64] cursor-pointer">
-                I would gladly visit {restaurantName} again!
-              </label>
-            </div>
-
-            <div className="space-y-2 pt-1">
-              <button
-                type="button"
-                onClick={handleSubmitFeedback}
-                className="w-full text-xs font-extrabold py-3.5 bg-[#C85A3F] hover:bg-[#A94332] text-white rounded-xl shadow-md shadow-[#C85A3F]/20 transition-all cursor-pointer"
-              >
-                Submit Feedback Review
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('?view=receipt')}
-                className="w-full text-xs font-semibold py-2 text-[#756B64] hover:text-[#202124] transition-colors cursor-pointer"
-              >
-                Skip & View Receipt →
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <PostDiningFeedbackView
+        tenantId={tenantId || resolvedTenantId || 'restaurant'}
+        orderId={orderId || order?.orderId || order?.id || 'ORD-CURRENT'}
+        restaurantName={restaurantName}
+        restaurantImage={restaurantImage}
+        orderDate={placedAtFormatted}
+        tableNumber={order?.tableNumber}
+        customerName={user?.displayName || (order as any)?.customerName || 'Table Guest'}
+        customerId={user?.uid || order?.customerId}
+        onSkipReceipt={() => navigate('?view=receipt')}
+        onFinishHome={() => navigate('/customer/home')}
+      />
     );
   }
 
@@ -1255,20 +1289,67 @@ export const OrderTracking: React.FC = () => {
           {/* ======================================================== */}
           <div className="lg:col-span-8 space-y-6">
             
-            {/* Card 1: Live Status Timeline */}
+            {/* Card 1: Compact Order Status & Session Card (Replaces the large 6-stage vertical timeline) */}
             <div className="bg-white border border-[#E5DCD5] rounded-2xl p-6 md:p-8 shadow-xs space-y-6">
               
-              {/* Header Title */}
-              <div className="space-y-1">
-                <div className="flex items-center space-x-2">
-                  <Package className="w-5 h-5 text-[#C85A3F]" />
-                  <h2 className="text-xl font-display font-extrabold text-[#202124]">
-                    Order Tracking
-                  </h2>
+              {/* Header Title & Context */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#E5DCD5]">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h2 className="text-xl font-display font-extrabold text-[#202124]">
+                      {restaurantName}
+                    </h2>
+                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-[#F3E8DF] text-[#C85A3F] border border-[#E5DCD5]">
+                      {(() => {
+                        const raw = String(order.tableNumber || order.tableId?.replace(/^TBL-/i, '') || '');
+                        return raw.toLowerCase().includes('walk') ? 'Walk-in' : `Table #${raw}`;
+                      })()}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-[#756B64]">
+                    <span className="font-mono font-bold text-[#202124]">
+                      Order #{orderId}
+                    </span>
+                    {(session?.sessionId || order?.sessionId) && (
+                      <>
+                        <span>•</span>
+                        <span className="font-mono text-[11px] text-[#756B64] bg-[#FCFAF7] px-2 py-0.5 rounded-md border border-[#E5DCD5]">
+                          Session {session?.sessionId || order?.sessionId}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <p className="text-xs text-[#756B64]">
-                  Track your delicious food in real-time
-                </p>
+
+                {/* Status Badges: Actual persisted order status & payment status */}
+                <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                  {(() => {
+                    const sm = getStatusMeta(order.status);
+                    return (
+                      <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-extrabold border ${sm.badgeBg}`}>
+                        <span className={`w-2 h-2 rounded-full ${sm.dotBg} ${sm.pulse ? 'animate-ping' : ''}`} />
+                        <span>{sm.label}</span>
+                      </div>
+                    );
+                  })()}
+                  <div className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold border ${
+                    paymentCompleted || canonicalBill?.paymentStatus === 'paid'
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      : 'bg-amber-50 text-amber-800 border-amber-200'
+                  }`}>
+                    {paymentCompleted || canonicalBill?.paymentStatus === 'paid' ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Paid</span>
+                      </>
+                    ) : (
+                      <>
+                        <Clock className="w-3.5 h-3.5 text-amber-600" />
+                        <span>Payment Pending</span>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* Order Meta Strip */}
@@ -1324,56 +1405,141 @@ export const OrderTracking: React.FC = () => {
                   <span>This order has been cancelled by the restaurant. Please consult your server or manager.</span>
                 </div>
               ) : (
-                /* Vertical Status Timeline */
-                <div className="relative pl-8 pt-2 pb-2 space-y-7 border-l-2 border-[#E5DCD5] ml-4">
-                  {trackingSteps.map((step, idx) => {
-                    const isCompleted = idx < activeIndex;
-                    const isActive = idx === activeIndex;
-
+                /* Compact Status Card */
+                <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl p-4 flex items-start gap-3.5">
+                  {(() => {
+                    const sm = getStatusMeta(order.status);
+                    const StatusIcon = sm.icon;
                     return (
-                      <div key={step.key} className="relative">
-                        
-                        {/* Status Circle Pin */}
-                        <div className={`absolute -left-[45px] w-8 h-8 rounded-full flex items-center justify-center border-2 text-xs font-bold transition-all ${
-                          isCompleted
-                            ? 'bg-[#2E8B57] border-[#2E8B57] text-white shadow-xs'
-                            : isActive
-                              ? 'bg-[#C85A3F] border-[#C85A3F] text-white shadow-md shadow-[#C85A3F]/30 ring-4 ring-[#C85A3F]/15 animate-pulse'
-                              : 'bg-white border-[#E5DCD5] text-[#756B64]'
-                        }`}>
-                          {isCompleted ? <Check className="w-4 h-4 stroke-[3]" /> : idx + 1}
+                      <>
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${sm.badgeBg}`}>
+                          <StatusIcon className="w-5 h-5" />
                         </div>
-
-                        {/* Status Content Card */}
-                        <div className={`transition-all ${
-                          isActive 
-                            ? 'bg-[#F3E8DF]/60 border border-[#C85A3F]/30 rounded-xl p-3.5 shadow-xs' 
-                            : 'p-1'
-                        }`}>
-                          <div className="flex items-center justify-between">
-                            <h3 className={`text-sm md:text-base font-extrabold ${
-                              isActive ? 'text-[#C85A3F]' : isCompleted ? 'text-[#202124]' : 'text-[#756B64]'
-                            }`}>
-                              {step.label}
+                        <div className="space-y-0.5 flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <h3 className="text-sm font-extrabold text-[#202124]">
+                              Current Status: {sm.label}
                             </h3>
-                            {isActive && (
-                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#C85A3F] text-white">
-                                Current Step
-                              </span>
-                            )}
+                            <span className="text-xs text-[#756B64] font-medium flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5 text-[#C85A3F]" />
+                              <span>{elapsedMinutes} mins elapsed</span>
+                            </span>
                           </div>
-                          <p className={`text-xs mt-0.5 ${
-                            isActive ? 'text-[#202124] font-medium' : 'text-[#756B64]'
-                          }`}>
-                            {step.desc}
+                          <p className="text-xs text-[#756B64] leading-relaxed">
+                            {sm.desc}
                           </p>
                         </div>
-
-                      </div>
+                      </>
                     );
-                  })}
+                  })()}
                 </div>
               )}
+
+              {/* Itemized Session Order Section */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#756B64] flex items-center gap-1.5">
+                    <Utensils className="w-3.5 h-3.5 text-[#C85A3F]" />
+                    <span>Itemized Dining Order ({effectiveDisplayOrder.items?.length || 0} items)</span>
+                  </h3>
+                  {sessionOrders.length > 1 && (
+                    <span className="text-[11px] font-bold text-[#C85A3F] bg-[#F3E8DF] px-2 py-0.5 rounded-full border border-[#E5DCD5]">
+                      {sessionOrders.length} Submissions Consolidated
+                    </span>
+                  )}
+                </div>
+
+                {/* Items list */}
+                <div className="space-y-2 border border-[#E5DCD5] rounded-xl p-3 bg-white divide-y divide-[#E5DCD5]/60 max-h-72 overflow-y-auto">
+                  {effectiveDisplayOrder.items && effectiveDisplayOrder.items.length > 0 ? (
+                    effectiveDisplayOrder.items.map((item: any, idx: number) => {
+                      const lookup = menuLookup[item.itemId] || {};
+                      const isVegItem = item.isVeg ?? item.veg ?? lookup.isVeg ?? lookup.veg;
+                      const qty = Number(item.count || item.quantity || 1);
+                      const unitPrice = Number(item.pricePerUnit || item.price || 0);
+
+                      return (
+                        <div key={idx} className="flex items-center justify-between py-2 first:pt-0 last:pb-0 gap-3 text-xs">
+                          <div className="flex items-center space-x-2.5 min-w-0">
+                            <DietaryBadge isVeg={isVegItem} />
+                            <div className="min-w-0">
+                              <p className="font-extrabold text-[#202124] truncate">
+                                {item.name || 'Dish'}
+                              </p>
+                              {item.notes && (
+                                <p className="text-[11px] text-[#756B64] truncate">
+                                  Note: {item.notes}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-3 shrink-0">
+                            <span className="px-2 py-0.5 bg-[#F3E8DF]/60 text-[#202124] font-bold rounded-md text-[11px]">
+                              x{qty}
+                            </span>
+                            <span className="font-mono font-bold text-[#202124] text-xs min-w-[55px] text-right">
+                              {formatPrice(unitPrice * qty)}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <p className="text-xs text-[#756B64] py-2 text-center">No order items recorded</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Consolidated Bill Amount Summary */}
+              <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl p-4 space-y-2.5">
+                <div className="flex items-center justify-between text-xs text-[#756B64]">
+                  <span>Session Subtotal</span>
+                  <span className="font-mono font-medium">{formatPrice(orderSubtotal)}</span>
+                </div>
+                {orderDiscount > 0 && (
+                  <div className="flex items-center justify-between text-xs text-[#2E8B57]">
+                    <span>Discount</span>
+                    <span className="font-mono font-medium">-{formatPrice(orderDiscount)}</span>
+                  </div>
+                )}
+                {orderTax > 0 && (
+                  <div className="flex items-center justify-between text-xs text-[#756B64]">
+                    <span>Taxes & GST</span>
+                    <span className="font-mono font-medium">{formatPrice(orderTax)}</span>
+                  </div>
+                )}
+                {orderServiceCharge > 0 && (
+                  <div className="flex items-center justify-between text-xs text-[#756B64]">
+                    <span>Service Charge</span>
+                    <span className="font-mono font-medium">{formatPrice(orderServiceCharge)}</span>
+                  </div>
+                )}
+                {orderTip > 0 && (
+                  <div className="flex items-center justify-between text-xs text-[#756B64]">
+                    <span>Staff Tip</span>
+                    <span className="font-mono font-medium">{formatCurrency(orderTip / 100)}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between pt-2.5 border-t border-[#E5DCD5]">
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#756B64] block">
+                      Consolidated Bill Total
+                    </span>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-lg md:text-xl font-extrabold text-[#202124]">
+                        {formatPrice(orderTotal)}
+                      </span>
+                    </div>
+                  </div>
+                  <span className={`text-xs font-extrabold px-3 py-1 rounded-full border ${
+                    paymentCompleted || canonicalBill?.paymentStatus === 'paid'
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      : 'bg-amber-50 text-amber-800 border-amber-200'
+                  }`}>
+                    {paymentCompleted || canonicalBill?.paymentStatus === 'paid' ? '✓ Paid in Full' : 'Payment Due'}
+                  </span>
+                </div>
+              </div>
 
             </div>
 
@@ -1431,8 +1597,8 @@ export const OrderTracking: React.FC = () => {
 
               {/* Items List */}
               <div className="space-y-3 divide-y divide-[#E5DCD5]/60 max-h-64 overflow-y-auto pr-1">
-                {order.items && order.items.length > 0 ? (
-                  order.items.map((item: any, idx: number) => {
+                {effectiveDisplayOrder.items && effectiveDisplayOrder.items.length > 0 ? (
+                  effectiveDisplayOrder.items.map((item: any, idx: number) => {
                     const lookup = menuLookup[item.itemId] || {};
                     const thumb = item.image || item.imageUrl || lookup.imageUrl || lookup.image;
                     const isVegItem = item.isVeg ?? item.veg ?? lookup.isVeg ?? lookup.veg;
