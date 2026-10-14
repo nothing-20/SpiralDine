@@ -8,7 +8,12 @@ import {
   setPersistence,
   browserSessionPersistence,
   User,
-  UserCredential
+  UserCredential,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
+  ConfirmationResult,
+  ApplicationVerifier,
+  linkWithPhoneNumber
 } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from './config';
@@ -202,3 +207,46 @@ export const getUserClaims = async (user: User): Promise<{ role?: TUserRole; ten
     tenantId: claims.tenantId as string | undefined
   };
 };
+
+export const createRecaptchaVerifier = (
+  containerIdOrElement: string | HTMLElement,
+  options?: {
+    size?: 'invisible' | 'normal' | 'compact';
+    callback?: (response: any) => void;
+    'expired-callback'?: () => void;
+  }
+): RecaptchaVerifier => {
+  return new RecaptchaVerifier(auth, containerIdOrElement, {
+    size: options?.size || 'invisible',
+    callback: options?.callback,
+    'expired-callback': options?.['expired-callback']
+  });
+};
+
+export const signInWithPhone = async (
+  phoneNumber: string,
+  appVerifier: ApplicationVerifier
+): Promise<ConfirmationResult> => {
+  try {
+    await setPersistence(auth, browserSessionPersistence);
+  } catch (persistErr) {
+    console.warn('[AUTH signInWithPhone] Note setting session persistence:', persistErr);
+  }
+  return signInWithPhoneNumber(auth, phoneNumber, appVerifier);
+};
+
+export const confirmPhoneOtp = async (
+  confirmationResult: ConfirmationResult,
+  verificationCode: string
+): Promise<UserCredential> => {
+  return confirmationResult.confirm(verificationCode);
+};
+
+export const linkPhone = async (
+  user: User,
+  phoneNumber: string,
+  appVerifier: ApplicationVerifier
+): Promise<ConfirmationResult> => {
+  return linkWithPhoneNumber(user, phoneNumber, appVerifier);
+};
+
