@@ -11,6 +11,13 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
+import { useWorkspace } from '../../../context/WorkspaceContext';
+import { 
+  cleanTableIdentifier, 
+  isTableAvailable, 
+  isTableOccupied, 
+  isTableCleaning 
+} from '../../../shared/domain/tables/types';
 import { zodResolver } from '../../../utils/zodResolver';
 
 // UI Kit components
@@ -39,7 +46,8 @@ import {
   Users, 
   Compass, 
   Grid,
-  Copy
+  Copy,
+  AlertCircle
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -96,16 +104,105 @@ interface ISection {
   name: string;
 }
 
+/**
+ * Normalizes raw Firestore document data safely into a complete ITableItem.
+ * Gracefully handles legacy schemas, missing tableNumber, undefined capacities,
+ * and diverse status formats without runtime crashes.
+ */
+const mapFirestoreDocToTable = (
+  id: string, 
+  raw: any, 
+  index: number, 
+  defaultFloor = 'Main Floor', 
+  defaultSection = 'Main Dining Area'
+): ITableItem => {
+  const tableNumber = String(
+    raw.tableNumber || raw.number || cleanTableIdentifier(id) || id || `T${index + 1}`
+  ).trim();
+
+  const tableName = String(
+    raw.tableName || raw.name || `Table ${tableNumber}`
+  ).trim();
+
+  const rawCap = Number(raw.capacity ?? raw.seatingCapacity);
+  const capacity = !isNaN(rawCap) && rawCap > 0 ? rawCap : 4;
+
+  const rawStatus = String(raw.status || raw.tableStatus || 'Available').trim();
+  let status: ITableItem['status'] = 'Available';
+  const sLower = rawStatus.toLowerCase();
+  if (sLower === 'disabled' || raw.isActive === false) {
+    status = 'Disabled';
+  } else if (isTableCleaning(rawStatus)) {
+    status = 'Cleaning';
+  } else if (sLower === 'reserved') {
+    status = 'Reserved';
+  } else if (isTableOccupied(rawStatus, raw.subStatus, raw.diningStatus)) {
+    if (sLower === 'bill_requested' || sLower === 'bill requested') {
+      status = 'Bill Requested';
+    } else if (sLower === 'dining') {
+      status = 'Dining';
+    } else if (sLower === 'preparing') {
+      status = 'Preparing';
+    } else if (sLower === 'ordering') {
+      status = 'Ordering';
+    } else {
+      status = 'Occupied';
+    }
+  } else if (sLower === 'occupied') {
+    status = 'Occupied';
+  } else {
+    status = 'Available';
+  }
+
+  const validShapes = ['square', 'circle', 'rectangle'] as const;
+  const shape = validShapes.includes(raw.shape) ? raw.shape : 'square';
+
+  const posX = typeof raw.positionX === 'number' && !isNaN(raw.positionX)
+    ? Math.max(0, Math.min(raw.positionX, 90))
+    : 10 + (index % 5) * 16;
+  const posY = typeof raw.positionY === 'number' && !isNaN(raw.positionY)
+    ? Math.max(0, Math.min(raw.positionY, 90))
+    : 10 + Math.floor(index / 5) * 16;
+
+  return {
+    id,
+    tableId: raw.tableId || id,
+    tableNumber,
+    tableName,
+    floor: raw.floor || defaultFloor,
+    section: raw.section || defaultSection,
+    capacity,
+    status,
+    shape,
+    positionX: posX,
+    positionY: posY,
+    qrCodeId: raw.qrCodeId || `QR-${id}`,
+    branchId: raw.branchId || 'main',
+    isActive: status !== 'Disabled',
+    isArchived: Boolean(raw.isArchived),
+    notes: raw.notes || raw.tableNotes || '',
+    createdAt: raw.createdAt || new Date().toISOString(),
+    updatedAt: raw.updatedAt || new Date().toISOString(),
+    createdBy: raw.createdBy || 'owner'
+  };
+};
+
 export const OwnerTablesManager: React.FC = () => {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
+  const { workspace, isLoading: workspaceLoading } = useWorkspace();
+  const tenantId = user?.tenantId || workspace?.tenant?.id;
   
   // Real-time collections
   const [tables, setTables] = useState<ITableItem[]>([]);
   const [floors, setFloors] = useState<IFloor[]>([]);
   const [sections, setSections] = useState<ISection[]>([]);
   
-  // App States
+  // Connection and App States
   const [isLoading, setIsLoading] = useState(true);
+  const [isLive, setIsLive] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+
   const [activeTab, setActiveTab] = useState<'visual' | 'list'>('visual');
   const [activeFloorFilter, setActiveFloorFilter] = useState<string>('all');
   const [activeSectionFilter, setActiveSectionFilter] = useState<string>('all');
@@ -157,12 +254,28 @@ export const OwnerTablesManager: React.FC = () => {
 
   // 1. Subscribe to Floor Settings and Tables
   useEffect(() => {
-    if (!user?.tenantId) return;
+    // Hold loading state while auth context resolves
+    if (authLoading || workspaceLoading) {
+      setIsLoading(true);
+      return;
+    }
+
+    if (!tenantId) {
+      setIsLoading(false);
+      setIsLive(false);
+      setError('No restaurant ID found for this account. Please select an active restaurant.');
+      return;
+    }
 
     setIsLoading(true);
+    setError(null);
 
-    const layoutDocRef = doc(db, 'restaurants', user.tenantId, 'settings', 'layout');
+    let isSubscribed = true;
+
+    // 1. Subscribe to Floor Settings
+    const layoutDocRef = doc(db, 'restaurants', tenantId, 'settings', 'layout');
     const unsubLayout = onSnapshot(layoutDocRef, (docSnap) => {
+      if (!isSubscribed) return;
       if (docSnap.exists()) {
         const data = docSnap.data();
         setFloors(data.floors || []);
@@ -175,33 +288,61 @@ export const OwnerTablesManager: React.FC = () => {
       console.warn('[OwnerTablesManager] Layout settings listener error:', err);
     });
 
-    const tablesColRef = collection(db, 'restaurants', user.tenantId, 'tables');
+    // 2. Subscribe to Tables Collection
+    const tablesColRef = collection(db, 'restaurants', tenantId, 'tables');
     const unsubTables = onSnapshot(tablesColRef, (querySnap) => {
-      const list: ITableItem[] = [];
-      querySnap.forEach((doc) => {
-        const item = doc.data() as ITableItem;
-        if (!item.isArchived) {
-          list.push({ id: doc.id, ...(item as any) } as ITableItem);
+      if (!isSubscribed) return;
+      try {
+        const list: ITableItem[] = [];
+        let idx = 0;
+        querySnap.forEach((docSnap) => {
+          const raw = docSnap.data();
+          if (!raw.isArchived) {
+            list.push(mapFirestoreDocToTable(docSnap.id, raw, idx++));
+          }
+        });
+
+        try {
+          list.sort((a, b) => {
+            const numA = a.tableNumber || '';
+            const numB = b.tableNumber || '';
+            return numA.localeCompare(numB, undefined, { numeric: true, sensitivity: 'base' });
+          });
+        } catch (sortErr) {
+          console.warn('[OwnerTablesManager] Table sort fallback warning:', sortErr);
         }
-      });
-      list.sort((a, b) => a.tableNumber.localeCompare(b.tableNumber, undefined, { numeric: true }));
-      setTables(list);
+
+        setTables(list);
+        setIsLoading(false);
+        setIsLive(true);
+        setError(null);
+      } catch (procErr: any) {
+        console.error('[OwnerTablesManager] Failed processing table snapshot:', procErr);
+        setError(procErr?.message || 'Error processing table data.');
+        setIsLoading(false);
+      }
+    }, (err) => {
+      if (!isSubscribed) return;
+      console.error('[OwnerTablesManager] Firestore tables subscription error:', err);
+      setError(err?.message || 'Unable to connect to Firestore tables. Please check your connection.');
       setIsLoading(false);
+      setIsLive(false);
     });
 
     return () => {
+      isSubscribed = false;
       unsubLayout();
       unsubTables();
     };
-  }, [user?.tenantId]);
+  }, [tenantId, authLoading, workspaceLoading, retryCount]);
 
   // ----------------------------------------------------
   // LAYOUT CONFIG OPERATIONS
   // ----------------------------------------------------
   const handleSaveLayout = async (updatedFloors: IFloor[], updatedSections: ISection[]) => {
-    if (!user?.tenantId) return;
+    if (!tenantId) return;
     try {
-      const docRef = doc(db, 'restaurants', user.tenantId, 'settings', 'layout');
+      const docRef = doc(db, 'restaurants', tenantId, 'settings', 'layout');
       await setDoc(docRef, { floors: updatedFloors, sections: updatedSections });
       toast.success('Restaurant layout configuration saved.');
     } catch (e) {
@@ -279,27 +420,30 @@ export const OwnerTablesManager: React.FC = () => {
   const openEditModal = (tbl: ITableItem) => {
     setEditingTable(tbl);
     reset({
-      tableNumber: tbl.tableNumber,
-      tableName: tbl.tableName,
-      capacity: tbl.capacity,
-      floor: tbl.floor,
-      section: tbl.section,
-      shape: tbl.shape,
+      tableNumber: tbl.tableNumber || '',
+      tableName: tbl.tableName || '',
+      capacity: tbl.capacity || 4,
+      floor: tbl.floor || floors[0]?.name || 'Main Floor',
+      section: tbl.section || sections[0]?.name || 'Main Dining Area',
+      shape: tbl.shape || 'square',
       notes: tbl.notes || '',
-      status: tbl.status,
-      isActive: tbl.isActive
+      status: tbl.status || 'Available',
+      isActive: tbl.isActive ?? true
     });
     setIsFormOpen(true);
   };
 
   const onSubmitForm = async (data: TTableForm) => {
-    if (!user?.tenantId) return;
+    if (!tenantId) {
+      toast.error('No restaurant tenant identified.');
+      return;
+    }
 
     const hasDuplicateNumber = tables.some(
-      (t) => t.tableNumber.trim().toLowerCase() === data.tableNumber.trim().toLowerCase() && t.id !== editingTable?.id
+      (t) => (t.tableNumber || '').trim().toLowerCase() === data.tableNumber.trim().toLowerCase() && t.id !== editingTable?.id
     );
     const hasDuplicateName = tables.some(
-      (t) => t.tableName.trim().toLowerCase() === data.tableName.trim().toLowerCase() && t.id !== editingTable?.id
+      (t) => (t.tableName || '').trim().toLowerCase() === data.tableName.trim().toLowerCase() && t.id !== editingTable?.id
     );
 
     if (hasDuplicateNumber) {
@@ -314,7 +458,7 @@ export const OwnerTablesManager: React.FC = () => {
     setIsSubmitting(true);
     try {
       const tableId = editingTable ? editingTable.id : `TBL-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-      const docRef = doc(db, 'restaurants', user.tenantId, 'tables', tableId);
+      const docRef = doc(db, 'restaurants', tenantId, 'tables', tableId);
 
       const tableData = {
         id: tableId,
@@ -329,15 +473,15 @@ export const OwnerTablesManager: React.FC = () => {
         status: data.status,
         tableStatus: data.status,
         shape: data.shape,
-        positionX: editingTable ? editingTable.positionX : 10 + (tables.length % 5) * 15,
-        positionY: editingTable ? editingTable.positionY : 10 + Math.floor(tables.length / 5) * 15,
-        qrCodeId: editingTable ? editingTable.qrCodeId : `QR-${tableId}`,
+        positionX: editingTable ? (editingTable.positionX ?? 10) : 10 + (tables.length % 5) * 15,
+        positionY: editingTable ? (editingTable.positionY ?? 10) : 10 + Math.floor(tables.length / 5) * 15,
+        qrCodeId: editingTable ? (editingTable.qrCodeId || `QR-${tableId}`) : `QR-${tableId}`,
         branchId: 'main',
         isActive: data.status !== 'Disabled',
         notes: data.notes || '',
-        createdAt: editingTable ? editingTable.createdAt : new Date().toISOString(),
+        createdAt: editingTable ? (editingTable.createdAt || new Date().toISOString()) : new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        createdBy: user.displayName || user.email || 'owner'
+        createdBy: user?.displayName || user?.email || 'owner'
       };
 
       await setDoc(docRef, tableData);
@@ -352,21 +496,21 @@ export const OwnerTablesManager: React.FC = () => {
   };
 
   const duplicateTable = async (tbl: ITableItem) => {
-    if (!user?.tenantId) return;
+    if (!tenantId) return;
     try {
       const newId = `TBL-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-      const docRef = doc(db, 'restaurants', user.tenantId, 'tables', newId);
+      const docRef = doc(db, 'restaurants', tenantId, 'tables', newId);
       
       const duplicateData = {
         ...tbl,
         id: newId,
         tableId: newId,
-        tableNumber: `${tbl.tableNumber}-Copy`,
-        tableName: `${tbl.tableName} - Copy`,
-        number: `${tbl.tableNumber}-Copy`,
+        tableNumber: `${tbl.tableNumber || tbl.id}-Copy`,
+        tableName: `${tbl.tableName || 'Table'} - Copy`,
+        number: `${tbl.tableNumber || tbl.id}-Copy`,
         qrCodeId: `QR-${newId}`,
-        positionX: Math.min(tbl.positionX + 5, 90),
-        positionY: Math.min(tbl.positionY + 5, 90),
+        positionX: Math.min((tbl.positionX || 10) + 5, 90),
+        positionY: Math.min((tbl.positionY || 10) + 5, 90),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -380,9 +524,9 @@ export const OwnerTablesManager: React.FC = () => {
   };
 
   const archiveTable = async (tbl: ITableItem) => {
-    if (!user?.tenantId) return;
+    if (!tenantId) return;
     try {
-      const docRef = doc(db, 'restaurants', user.tenantId, 'tables', tbl.id);
+      const docRef = doc(db, 'restaurants', tenantId, 'tables', tbl.id);
       await updateDoc(docRef, { isArchived: true });
       toast.success(`Archived table: ${tbl.tableName}`);
       if (selectedTable?.id === tbl.id) setSelectedTable(null);
@@ -393,9 +537,9 @@ export const OwnerTablesManager: React.FC = () => {
   };
 
   const handleQuickStatusChange = async (tbl: ITableItem, nextStatus: ITableItem['status']) => {
-    if (!user?.tenantId) return;
+    if (!tenantId) return;
     try {
-      const docRef = doc(db, 'restaurants', user.tenantId, 'tables', tbl.id);
+      const docRef = doc(db, 'restaurants', tenantId, 'tables', tbl.id);
       await updateDoc(docRef, { 
         status: nextStatus,
         tableStatus: nextStatus,
@@ -410,9 +554,9 @@ export const OwnerTablesManager: React.FC = () => {
   };
 
   const handleConfirmDelete = async () => {
-    if (!user?.tenantId || !deletingTableId) return;
+    if (!tenantId || !deletingTableId) return;
     try {
-      const docRef = doc(db, 'restaurants', user.tenantId, 'tables', deletingTableId);
+      const docRef = doc(db, 'restaurants', tenantId, 'tables', deletingTableId);
       await deleteDoc(docRef);
       toast.success('Table layout deleted permanently.');
     } catch (e) {
@@ -452,12 +596,12 @@ export const OwnerTablesManager: React.FC = () => {
   };
 
   const handleMouseUp = async () => {
-    if (!draggingTableId || !user?.tenantId) return;
+    if (!draggingTableId || !tenantId) return;
     
     const draggedTable = tables.find((t) => t.id === draggingTableId);
     if (draggedTable) {
       try {
-        const docRef = doc(db, 'restaurants', user.tenantId, 'tables', draggingTableId);
+        const docRef = doc(db, 'restaurants', tenantId, 'tables', draggingTableId);
         await updateDoc(docRef, {
           positionX: draggedTable.positionX,
           positionY: draggedTable.positionY
@@ -476,17 +620,24 @@ export const OwnerTablesManager: React.FC = () => {
     return tables.filter((tbl) => {
       if (activeFloorFilter !== 'all' && tbl.floor !== activeFloorFilter) return false;
       if (activeSectionFilter !== 'all' && tbl.section !== activeSectionFilter) return false;
-      if (statusFilter !== 'all' && tbl.status !== statusFilter) return false;
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'Available' && !isTableAvailable(tbl.status, tbl.isActive)) return false;
+        else if (statusFilter === 'Occupied' && (!isTableOccupied(tbl.status) && tbl.status !== 'Occupied')) return false;
+        else if (statusFilter === 'Cleaning' && !isTableCleaning(tbl.status)) return false;
+        else if (statusFilter === 'Reserved' && (tbl.status || '').toLowerCase() !== 'reserved') return false;
+        else if (statusFilter === 'Disabled' && tbl.status !== 'Disabled' && tbl.isActive !== false) return false;
+        else if (tbl.status !== statusFilter && tbl.status?.toLowerCase() !== statusFilter.toLowerCase()) return false;
+      }
       if (capacityFilter !== 'all') {
         const filterVal = Number(capacityFilter);
-        if (tbl.capacity < filterVal) return false;
+        if ((tbl.capacity || 0) < filterVal) return false;
       }
       if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const matchesNum = tbl.tableNumber.toLowerCase().includes(q);
-        const matchesName = tbl.tableName.toLowerCase().includes(q);
-        const matchesFloor = tbl.floor.toLowerCase().includes(q);
-        const matchesSec = tbl.section.toLowerCase().includes(q);
+        const q = searchQuery.toLowerCase().trim();
+        const matchesNum = (tbl.tableNumber || '').toLowerCase().includes(q);
+        const matchesName = (tbl.tableName || '').toLowerCase().includes(q);
+        const matchesFloor = (tbl.floor || '').toLowerCase().includes(q);
+        const matchesSec = (tbl.section || '').toLowerCase().includes(q);
         if (!matchesNum && !matchesName && !matchesFloor && !matchesSec) return false;
       }
       return true;
@@ -519,7 +670,7 @@ export const OwnerTablesManager: React.FC = () => {
   // QR EXPORTER & CANVAS GENERATION
   // ----------------------------------------------------
   const handlePrintQr = (tbl: ITableItem) => {
-    const qrData = `${window.location.origin}/r/${user?.tenantId}/table/${tbl.id}`;
+    const qrData = `${window.location.origin}/r/${tenantId}/table/${tbl.id}`;
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrData)}`;
 
     const printWindow = window.open('', '_blank');
@@ -590,7 +741,7 @@ export const OwnerTablesManager: React.FC = () => {
   };
 
   const handleDownloadQr = async (tbl: ITableItem) => {
-    const qrData = `${window.location.origin}/r/${user?.tenantId}/table/${tbl.id}`;
+    const qrData = `${window.location.origin}/r/${tenantId}/table/${tbl.id}`;
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qrData)}`;
 
     try {
@@ -648,9 +799,9 @@ export const OwnerTablesManager: React.FC = () => {
   };
 
   const handleRegenerateQr = async (tbl: ITableItem) => {
-    if (!user?.tenantId) return;
+    if (!tenantId) return;
     try {
-      const docRef = doc(db, 'restaurants', user.tenantId, 'tables', tbl.id);
+      const docRef = doc(db, 'restaurants', tenantId, 'tables', tbl.id);
       await updateDoc(docRef, { 
         qrCodeId: `QR-${tbl.tableId}-${Math.floor(Math.random() * 1000)}`,
         updatedAt: new Date().toISOString()
@@ -685,11 +836,31 @@ export const OwnerTablesManager: React.FC = () => {
       {/* Seating Stats Widgets */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {[
-          { label: 'Total Tables', count: tables.length, color: 'text-[#17202A] bg-white border-[#E5E0D9]' },
-          { label: 'Available', count: tables.filter(t => t.status === 'Available').length, color: 'text-[#16845B] bg-[#E8F5EF] border-[#C6E7D8]' },
-          { label: 'Occupied', count: tables.filter(t => t.status === 'Occupied').length, color: 'text-[#C9533B] bg-[#FBEAE5] border-[#F5CBC4]' },
-          { label: 'Reserved', count: tables.filter(t => t.status === 'Reserved').length, color: 'text-[#9A6200] bg-[#FFF4DC] border-[#FDE6B0]' },
-          { label: 'Cleaning', count: tables.filter(t => t.status === 'Cleaning').length, color: 'text-[#1D5D9B] bg-[#EAF2FB] border-[#CBE0F7]' }
+          { 
+            label: 'Total Tables', 
+            count: isLoading ? '—' : tables.length, 
+            color: 'text-[#17202A] bg-white border-[#E5E0D9]' 
+          },
+          { 
+            label: 'Available', 
+            count: isLoading ? '—' : tables.filter(t => isTableAvailable(t.status, t.isActive)).length, 
+            color: 'text-[#16845B] bg-[#E8F5EF] border-[#C6E7D8]' 
+          },
+          { 
+            label: 'Occupied', 
+            count: isLoading ? '—' : tables.filter(t => isTableOccupied(t.status) || t.status === 'Occupied' || t.status === 'Bill Requested' || t.status === 'Dining' || t.status === 'Ordering' || t.status === 'Preparing').length, 
+            color: 'text-[#C9533B] bg-[#FBEAE5] border-[#F5CBC4]' 
+          },
+          { 
+            label: 'Reserved', 
+            count: isLoading ? '—' : tables.filter(t => (t.status || '').toLowerCase() === 'reserved').length, 
+            color: 'text-[#9A6200] bg-[#FFF4DC] border-[#FDE6B0]' 
+          },
+          { 
+            label: 'Cleaning', 
+            count: isLoading ? '—' : tables.filter(t => isTableCleaning(t.status)).length, 
+            color: 'text-[#1D5D9B] bg-[#EAF2FB] border-[#CBE0F7]' 
+          }
         ].map((stat, idx) => (
           <Card key={idx} className={`p-4 border ${stat.color} flex flex-col justify-between rounded-2xl shadow-xs`}>
             <span className="text-[10px] uppercase font-bold tracking-wider opacity-75">{stat.label}</span>
@@ -725,11 +896,53 @@ export const OwnerTablesManager: React.FC = () => {
           </button>
         </div>
 
-        <div className="flex items-center space-x-1 text-slate-500 font-semibold text-[10px] tracking-wide uppercase px-2 py-1 rounded bg-slate-900/30 self-start">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse mr-1" />
-          <span>Realtime Firestore Live</span>
+        <div className={`flex items-center space-x-1.5 font-semibold text-[10px] tracking-wide uppercase px-2.5 py-1 rounded-full self-start transition-colors ${
+          isLive 
+            ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20' 
+            : isLoading 
+            ? 'bg-amber-500/10 text-amber-700 border border-amber-500/20' 
+            : 'bg-rose-500/10 text-rose-700 border border-rose-500/20'
+        }`}>
+          <span className={`w-2 h-2 rounded-full ${
+            isLive 
+              ? 'bg-emerald-500 animate-pulse' 
+              : isLoading 
+              ? 'bg-amber-500 animate-ping' 
+              : 'bg-rose-500'
+          }`} />
+          <span>
+            {isLive 
+              ? 'Realtime Firestore Live' 
+              : isLoading 
+              ? 'Syncing Seating Grid...' 
+              : 'Disconnected'}
+          </span>
         </div>
       </div>
+
+      {/* Error state alert if subscription or resolution fails */}
+      {error && (
+        <Card className="p-4 border-rose-200 bg-rose-50/70 text-left rounded-2xl shadow-xs">
+          <div className="flex items-start justify-between">
+            <div className="flex items-start space-x-3">
+              <AlertCircle className="w-5 h-5 text-rose-600 mt-0.5 flex-shrink-0" />
+              <div>
+                <h3 className="text-sm font-bold text-rose-950">Seating Grid Sync Interrupted</h3>
+                <p className="text-xs text-rose-700 mt-0.5">{error}</p>
+              </div>
+            </div>
+            <Button 
+              size="xs" 
+              variant="secondary" 
+              onClick={() => { setError(null); setRetryCount(c => c + 1); }}
+              className="flex items-center space-x-1 text-xs"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Retry</span>
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {/* Filter panel */}
       <Card className="p-3.5 border-slate-850 bg-slate-900/20 sticky top-0 z-20">
@@ -1282,13 +1495,13 @@ export const OwnerTablesManager: React.FC = () => {
               </div>
               <div className="w-48 h-48 bg-white border border-slate-200 p-3 rounded-xl flex items-center justify-center mx-auto my-4 shadow-inner">
                 <img 
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`${window.location.origin}/r/${user?.tenantId}/table/${qrTable.id}`)}`} 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(`${window.location.origin}/r/${tenantId}/table/${qrTable.id}`)}`} 
                   alt="QR Code" 
                   className="w-full h-full"
                 />
               </div>
               <p className="text-[10px] text-slate-500 text-center select-all break-all max-w-[220px] mx-auto font-mono">
-                {`${window.location.origin}/r/${user?.tenantId}/table/${qrTable.id}`}
+                {`${window.location.origin}/r/${tenantId}/table/${qrTable.id}`}
               </p>
             </div>
 
