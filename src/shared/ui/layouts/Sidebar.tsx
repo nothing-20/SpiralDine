@@ -38,7 +38,8 @@ import {
   FileSpreadsheet,
   ArrowLeftRight,
   ShieldCheck,
-  UtensilsCrossed
+  UtensilsCrossed,
+  Star
 } from 'lucide-react';
 
 interface ISidebarLink {
@@ -218,6 +219,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
         { to: '/owner/reservations', label: 'Reservations', icon: CalendarCheck },
         { to: '/owner/customers', label: 'Customers', icon: Contact2 },
         { to: '/owner/feedback', label: 'Feedback', icon: MessageSquareQuote },
+        { to: '/owner/reviews', label: 'Reviews', icon: Star },
         { to: '/owner/marketing', label: 'Marketing', icon: Megaphone },
         { to: '/owner/alerts', label: 'Alerts', icon: Bell, badge: unreadAlertsCount > 0 ? unreadAlertsCount : undefined },
         { to: '/owner/reports', label: 'Reports', icon: FileSpreadsheet },

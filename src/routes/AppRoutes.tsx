@@ -49,6 +49,7 @@ const OwnerRestaurants = React.lazy(() => import('../apps/owner/pages/OwnerResta
 const OwnerReservations = React.lazy(() => import('../apps/owner/pages/OwnerReservations'));
 const OwnerCustomers = React.lazy(() => import('../apps/owner/pages/OwnerCustomers'));
 const OwnerFeedback = React.lazy(() => import('../apps/owner/pages/OwnerFeedback'));
+const OwnerReviews = React.lazy(() => import('../apps/owner/pages/OwnerReviews'));
 const OwnerMarketing = React.lazy(() => import('../apps/owner/pages/OwnerMarketing'));
 const OwnerAlerts = React.lazy(() => import('../apps/owner/pages/OwnerAlerts'));
 const OwnerReports = React.lazy(() => import('../apps/owner/pages/OwnerReports'));
@@ -331,6 +332,7 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/owner/reservations" element={<OwnerReservations />} />
                 <Route path="/owner/customers" element={<OwnerCustomers />} />
                 <Route path="/owner/feedback" element={<OwnerFeedback />} />
+                <Route path="/owner/reviews" element={<OwnerReviews />} />
                 <Route path="/owner/marketing" element={<OwnerMarketing />} />
                 <Route path="/owner/alerts" element={<OwnerAlerts />} />
                 <Route path="/owner/reports" element={<OwnerReports />} />
@@ -353,6 +355,7 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/dashboard/owner/reservations" element={<OwnerReservations />} />
                 <Route path="/dashboard/owner/customers" element={<OwnerCustomers />} />
                 <Route path="/dashboard/owner/feedback" element={<OwnerFeedback />} />
+                <Route path="/dashboard/owner/reviews" element={<OwnerReviews />} />
                 <Route path="/dashboard/owner/marketing" element={<OwnerMarketing />} />
                 <Route path="/dashboard/owner/alerts" element={<OwnerAlerts />} />
                 <Route path="/dashboard/owner/reports" element={<OwnerReports />} />

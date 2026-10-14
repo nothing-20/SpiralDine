@@ -10,32 +10,37 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({ review }) => {
   // Determine customer name to display
   const isAnon = Boolean(review.isAnonymous);
   const displayName = isAnon
-    ? review.publicCustomerName || maskCustomerName(review.submittedByName)
+    ? 'Anonymous Customer'
     : review.publicCustomerName || review.submittedByName || 'Guest Diner';
 
   const initial = displayName.charAt(0).toUpperCase();
 
-  // Format date nicely
-  const formatDate = (isoString?: string) => {
+  // Format date and time nicely
+  const formatDateTime = (isoString?: string) => {
     if (!isoString) return '';
     try {
       const d = new Date(isoString);
       if (isNaN(d.getTime())) return '';
       return d.toLocaleDateString('en-US', {
-        day: 'numeric',
         month: 'short',
-        year: 'numeric'
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
       });
     } catch (_) {
       return '';
     }
   };
 
-  const reviewDate = formatDate(review.submittedAt || review.createdAt);
+  const reviewDateTime = formatDateTime(review.submittedAt || review.createdAt);
   const starScore = review.starRating || 5;
 
-  const notes = review.notes || review.comments || review.feedback;
-  const hasValidNotes = notes && !notes.toLowerCase().includes('no additional comments') && !notes.toLowerCase().includes('feedback registered without');
+  const rawNotes = (review.notes || review.comments || review.feedback || '').trim();
+  const hasValidNotes = rawNotes.length > 0 && 
+    !rawNotes.toLowerCase().includes('no additional comments') && 
+    !rawNotes.toLowerCase().includes('feedback registered without');
 
   const foodScore = review.foodQuality;
   const serviceScore = review.service || review.serviceSpeed;
@@ -78,8 +83,8 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({ review }) => {
               {review.orderId && (
                 <span>Order #{review.orderId.replace(/^ORD-/i, '')}</span>
               )}
-              {review.orderId && reviewDate && <span>•</span>}
-              {reviewDate && <span>{reviewDate}</span>}
+              {review.orderId && reviewDateTime && <span>•</span>}
+              {reviewDateTime && <span>{reviewDateTime}</span>}
               {review.tableNumber && review.tableNumber !== 'Walk-in' && (
                 <>
                   <span>•</span>
@@ -145,9 +150,13 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({ review }) => {
       </div>
 
       {/* Written Comment */}
-      {hasValidNotes && (
+      {hasValidNotes ? (
         <p className="text-xs sm:text-[13px] text-[#242424] leading-relaxed bg-[#FFFCF9] border border-[#EEE7E1]/70 p-3 rounded-xl italic">
-          "{notes}"
+          "{rawNotes}"
+        </p>
+      ) : (
+        <p className="text-xs sm:text-[12px] text-[#7B8794] italic bg-[#F9F9F8] border border-[#EEE7E1]/50 p-2.5 rounded-xl">
+          No written comment
         </p>
       )}
     </div>
