@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ConfirmationResult, RecaptchaVerifier } from 'firebase/auth';
+import { ConfirmationResult } from 'firebase/auth';
+import { RecaptchaManager } from '../../../shared/services/recaptchaManager';
 import { authService } from '../../../services/authService';
 import { useToastStore } from '../../../components/ui/Toast/Toast';
 import { getDashboardRoute } from '../../../utils/navigation';
 import { cn } from '../../../utils/cn';
+import { resolveAuthenticatedUser } from '../../../shared/services/roleResolver';
 
 // Decorative food imagery
 import leftPlateImg from '../../../assets/left_food_plate.png';
@@ -81,20 +83,20 @@ export const LoginForm: React.FC = () => {
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
 
-  const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
+  const recaptchaManagerRef = useRef<RecaptchaManager | null>(null);
   const otpInputRef = useRef<HTMLInputElement | null>(null);
 
   // Selected country helper
   const selectedCountry = COUNTRY_CODES.find(c => c.code === countryCode) || COUNTRY_CODES[0];
 
-  // Cleanup reCAPTCHA on unmount
+  // Initialize and clean up reCAPTCHA manager safely
   useEffect(() => {
+    recaptchaManagerRef.current = new RecaptchaManager('recaptcha-container');
+
     return () => {
-      if (recaptchaVerifierRef.current) {
-        try {
-          recaptchaVerifierRef.current.clear();
-        } catch (_) {}
-        recaptchaVerifierRef.current = null;
+      if (recaptchaManagerRef.current) {
+        recaptchaManagerRef.current.destroy();
+        recaptchaManagerRef.current = null;
       }
     };
   }, []);
@@ -125,7 +127,6 @@ export const LoginForm: React.FC = () => {
 
   // Shared authoritative profile resolution and role routing
   const handleAuthenticatedUser = async (user: any, method: 'email' | 'phone') => {
-    const { resolveAuthenticatedUser } = await import('../../../shared/services/roleResolver');
     const profile = await resolveAuthenticatedUser(user);
 
     if (!profile) {
@@ -257,34 +258,10 @@ export const LoginForm: React.FC = () => {
     return true;
   };
 
-  const initRecaptchaVerifier = (): RecaptchaVerifier | null => {
-    try {
-      if (recaptchaVerifierRef.current) {
-        try {
-          recaptchaVerifierRef.current.clear();
-        } catch (_) {}
-        recaptchaVerifierRef.current = null;
-      }
-
-      const verifier = authService.createRecaptchaVerifier('recaptcha-container', {
-        size: 'invisible',
-        callback: () => {
-          // reCAPTCHA solved callback
-        },
-        'expired-callback': () => {
-          setPhoneError('reCAPTCHA expired. Please try requesting OTP again.');
-        }
-      });
-      recaptchaVerifierRef.current = verifier;
-      return verifier;
-    } catch (err: any) {
-      console.error('[AUTH reCAPTCHA Error]', err);
-      setPhoneError('Failed to initialize security verification. Please refresh the page.');
-      return null;
-    }
-  };
-
   const handleSendOtp = async (isResend = false) => {
+    // Prevent duplicate requests in flight
+    if (isSendingOtp) return;
+
     if (!validatePhone()) return;
 
     setPhoneError(null);
@@ -294,8 +271,28 @@ export const LoginForm: React.FC = () => {
     console.log('[AUTH Phone Login] Requesting OTP for:', `${countryCode} ******${cleanPhoneDigits.slice(-4)}`);
 
     try {
-      const verifier = initRecaptchaVerifier();
+      if (!recaptchaManagerRef.current) {
+        recaptchaManagerRef.current = new RecaptchaManager('recaptcha-container');
+      }
+
+      // If resending, reset the existing widget without destroying the container
+      if (isResend) {
+        await recaptchaManagerRef.current.reset();
+      }
+
+      // Obtain lifecycle-safe verifier (reuses existing instance when valid)
+      const verifier = await recaptchaManagerRef.current.getVerifier({
+        size: 'invisible',
+        onExpired: () => {
+          setPhoneError('Security verification expired. Please try requesting OTP again.');
+        },
+        onError: (err) => {
+          console.error('[AUTH reCAPTCHA Error]', err);
+        }
+      });
+
       if (!verifier) {
+        setPhoneError('Security verification container is not ready. Please refresh the page.');
         setIsSendingOtp(false);
         return;
       }
@@ -315,8 +312,9 @@ export const LoginForm: React.FC = () => {
         friendlyError = 'Too many requests. Please wait a few minutes before requesting another OTP.';
       } else if (err.code === 'auth/quota-exceeded') {
         friendlyError = 'SMS quota exceeded for this Firebase project. Please contact system administration.';
-      } else if (err.code === 'auth/captcha-check-failed') {
-        friendlyError = 'Security verification (reCAPTCHA) failed. Please try again.';
+      } else if (err.code === 'auth/captcha-check-failed' || err.message?.includes('reCAPTCHA')) {
+        friendlyError = 'Security verification failed. Please try again.';
+        recaptchaManagerRef.current?.destroy();
       } else if (err.code === 'auth/billing-not-enabled') {
         friendlyError = 'Phone authentication requires Firebase project SMS plan configuration.';
       } else if (err.message) {
@@ -380,6 +378,9 @@ export const LoginForm: React.FC = () => {
   };
 
   const handleSwitchMethod = (method: 'email' | 'phone') => {
+    if (recaptchaManagerRef.current) {
+      recaptchaManagerRef.current.destroy();
+    }
     setAuthMethod(method);
     setPhoneError(null);
     setEmailErrors({});

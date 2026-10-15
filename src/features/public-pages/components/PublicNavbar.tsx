@@ -110,7 +110,7 @@ export const PublicNavbar: React.FC = () => {
           ) : (
             <div className="flex items-center space-x-2.5">
               <Link
-                to="/customer/login"
+                to="/login"
                 className="px-3.5 py-2 text-xs font-bold text-[#17202A] hover:text-[#D65336] transition-colors"
               >
                 Sign In
@@ -203,7 +203,7 @@ export const PublicNavbar: React.FC = () => {
               ) : (
                 <>
                   <Link
-                    to="/customer/login"
+                    to="/login"
                     onClick={handleNavClick}
                     className="w-full py-2.5 px-4 border border-[#E8DED6] bg-white text-[#17202A] font-bold text-xs rounded-xl text-center hover:bg-[#F7F0EA] transition-all"
                   >
