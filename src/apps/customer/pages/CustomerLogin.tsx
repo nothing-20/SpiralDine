@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useNavigate, Link } from 'react-router-dom';
-import { ConfirmationResult, RecaptchaVerifier } from 'firebase/auth';
+import { ConfirmationResult } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../../shared/firebase/config';
 import { authService } from '../../../services/authService';
+import { RecaptchaManager } from '../../../shared/services/recaptchaManager';
 import { zodResolver } from '../../../utils/zodResolver';
 import { useToastStore } from '../../../components/ui/Toast/Toast';
 import { cn } from '../../../utils/cn';
@@ -84,7 +85,8 @@ export const CustomerLogin: React.FC = () => {
   const [phoneError, setPhoneError] = useState<string | null>(null);
   const [confirmationResult, setConfirmationResult] = useState<ConfirmationResult | null>(null);
 
-  const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
+  // Lifecycle-safe reCAPTCHA manager instance
+  const recaptchaManagerRef = useRef<RecaptchaManager | null>(null);
   const otpInputRef = useRef<HTMLInputElement | null>(null);
 
   // Option B: Email & Password State
@@ -102,14 +104,14 @@ export const CustomerLogin: React.FC = () => {
     resolver: zodResolver(loginSchema)
   });
 
-  // Cleanup reCAPTCHA on unmount
+  // Initialize and clean up reCAPTCHA manager safely
   useEffect(() => {
+    recaptchaManagerRef.current = new RecaptchaManager('customer-recaptcha-container');
+
     return () => {
-      if (recaptchaVerifierRef.current) {
-        try {
-          recaptchaVerifierRef.current.clear();
-        } catch (_) {}
-        recaptchaVerifierRef.current = null;
+      if (recaptchaManagerRef.current) {
+        recaptchaManagerRef.current.destroy();
+        recaptchaManagerRef.current = null;
       }
     };
   }, []);
@@ -169,34 +171,10 @@ export const CustomerLogin: React.FC = () => {
     return true;
   };
 
-  const initRecaptchaVerifier = (): RecaptchaVerifier | null => {
-    try {
-      if (recaptchaVerifierRef.current) {
-        try {
-          recaptchaVerifierRef.current.clear();
-        } catch (_) {}
-        recaptchaVerifierRef.current = null;
-      }
-
-      const verifier = authService.createRecaptchaVerifier('customer-recaptcha-container', {
-        size: 'invisible',
-        callback: () => {
-          // reCAPTCHA solved
-        },
-        'expired-callback': () => {
-          setPhoneError('Security check expired. Please request OTP again.');
-        }
-      });
-      recaptchaVerifierRef.current = verifier;
-      return verifier;
-    } catch (err: any) {
-      console.error('[AUTH Customer reCAPTCHA Error]', err);
-      setPhoneError('Failed to initialize security verification. Please refresh the page.');
-      return null;
-    }
-  };
-
   const handleSendPhoneOtp = async (isResend = false) => {
+    // Prevent duplicate requests in flight
+    if (isSendingOtp) return;
+
     if (!validatePhone()) return;
 
     setPhoneError(null);
@@ -206,8 +184,28 @@ export const CustomerLogin: React.FC = () => {
     console.log('[AUTH Customer Phone Login] Requesting OTP for:', `${countryCode} ******${cleanPhoneDigits.slice(-4)}`);
 
     try {
-      const verifier = initRecaptchaVerifier();
+      if (!recaptchaManagerRef.current) {
+        recaptchaManagerRef.current = new RecaptchaManager('customer-recaptcha-container');
+      }
+
+      // If resending, reset the existing widget without destroying the container
+      if (isResend) {
+        await recaptchaManagerRef.current.reset();
+      }
+
+      // Obtain the lifecycle-safe verifier (reuses existing instance when valid)
+      const verifier = await recaptchaManagerRef.current.getVerifier({
+        size: 'invisible',
+        onExpired: () => {
+          setPhoneError('Security verification expired. Please request OTP again.');
+        },
+        onError: (err) => {
+          console.error('[Customer Phone Login] reCAPTCHA error callback:', err);
+        }
+      });
+
       if (!verifier) {
+        setPhoneError('Security verification container is not ready. Please refresh the page.');
         setIsSendingOtp(false);
         return;
       }
@@ -221,17 +219,21 @@ export const CustomerLogin: React.FC = () => {
     } catch (err: any) {
       console.error('[AUTH Customer Send OTP Error]', err);
       let friendlyError = 'Failed to send OTP. Please check your network and try again.';
+
       if (err.code === 'auth/invalid-phone-number') {
         friendlyError = 'Invalid mobile phone number format. Please check the country code and number.';
       } else if (err.code === 'auth/too-many-requests') {
         friendlyError = 'Too many requests. Please wait a few minutes before trying again.';
       } else if (err.code === 'auth/quota-exceeded') {
         friendlyError = 'SMS quota exceeded for this Firebase project. Contact administrator.';
-      } else if (err.code === 'auth/captcha-check-failed') {
+      } else if (err.code === 'auth/captcha-check-failed' || err.message?.includes('reCAPTCHA')) {
         friendlyError = 'Security verification failed. Please try again.';
+        // Reset verifier so subsequent attempt has a clean challenge
+        recaptchaManagerRef.current?.destroy();
       } else if (err.message) {
         friendlyError = err.message;
       }
+
       setPhoneError(friendlyError);
       addToast(friendlyError, 'error');
     } finally {
@@ -241,8 +243,9 @@ export const CustomerLogin: React.FC = () => {
 
   const handleVerifyPhoneOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanOtp = otpCode.trim();
+    if (isVerifyingOtp) return;
 
+    const cleanOtp = otpCode.trim();
     if (!cleanOtp || cleanOtp.length !== 6) {
       setPhoneError('Please enter the complete 6-digit verification code.');
       return;
@@ -404,6 +407,10 @@ export const CustomerLogin: React.FC = () => {
   };
 
   const handleSwitchTab = (method: 'phone' | 'email') => {
+    // When switching tabs, clean up reCAPTCHA verifier and DOM remnants safely
+    if (recaptchaManagerRef.current) {
+      recaptchaManagerRef.current.destroy();
+    }
     setAuthMethod(method);
     setPhoneError(null);
     setErrorState(null);
@@ -411,9 +418,7 @@ export const CustomerLogin: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#FCFAF7] text-[#17202A] flex flex-col justify-between relative overflow-x-hidden select-none font-sans">
-      {/* ========================================================================= */}
-      {/* 1. DECORATIVE BACKGROUND TREATMENT                                        */}
-      {/* ========================================================================= */}
+      {/* 1. DECORATIVE BACKGROUND TREATMENT */}
       <div className="absolute top-[18%] left-[-160px] md:left-[-120px] lg:left-[-80px] w-[500px] md:w-[580px] h-[500px] md:h-[580px] rounded-full bg-[#F5ECE4]/80 blur-[2px] pointer-events-none z-0" />
       <div className="absolute bottom-[6%] right-[-160px] md:right-[-120px] lg:right-[-80px] w-[500px] md:w-[580px] h-[500px] md:h-[580px] rounded-full bg-[#F5ECE4]/80 blur-[2px] pointer-events-none z-0" />
 
@@ -467,9 +472,7 @@ export const CustomerLogin: React.FC = () => {
         <div className="w-28 h-0.5 bg-[#D65336]/60 rounded-full mt-1.5 -rotate-2" />
       </div>
 
-      {/* ========================================================================= */}
-      {/* 2. TOP BRANDING HEADER                                                    */}
-      {/* ========================================================================= */}
+      {/* 2. TOP BRANDING HEADER */}
       <header className="w-full max-w-6xl mx-auto px-6 py-5 flex items-center justify-between relative z-20">
         <Link to="/" className="flex items-center space-x-3.5 group cursor-pointer select-none">
           <div className="w-10 h-10 bg-[#D65336] group-hover:bg-[#B9432D] transition-colors rounded-xl flex items-center justify-center shadow-xs">
@@ -493,9 +496,7 @@ export const CustomerLogin: React.FC = () => {
         </Link>
       </header>
 
-      {/* ========================================================================= */}
-      {/* 3. MAIN CONTENT: CENTERED LOGIN CARD                                      */}
-      {/* ========================================================================= */}
+      {/* 3. MAIN CONTENT: CENTERED LOGIN CARD */}
       <main className="w-full max-w-6xl mx-auto px-6 py-6 md:py-10 flex flex-col items-center justify-center flex-1 relative z-10 space-y-8">
         
         {/* Centered White Card */}
@@ -546,9 +547,7 @@ export const CustomerLogin: React.FC = () => {
             </button>
           </div>
 
-          {/* =================================================================== */}
-          {/* METHOD 1: MOBILE NUMBER & OTP (DEFAULT / MAIN)                      */}
-          {/* =================================================================== */}
+          {/* METHOD 1: MOBILE NUMBER & OTP (DEFAULT / MAIN) */}
           {authMethod === 'phone' && (
             <div className="space-y-4">
               {/* Step 1: Mobile Number Entry */}
@@ -743,9 +742,7 @@ export const CustomerLogin: React.FC = () => {
             </div>
           )}
 
-          {/* =================================================================== */}
-          {/* METHOD 2: EMAIL AND PASSWORD                                        */}
-          {/* =================================================================== */}
+          {/* METHOD 2: EMAIL AND PASSWORD */}
           {authMethod === 'email' && (
             <form onSubmit={handleSubmit(onEmailSubmit)} className="space-y-4">
               {/* Error Alert Display */}
@@ -864,7 +861,7 @@ export const CustomerLogin: React.FC = () => {
             </form>
           )}
 
-          {/* reCAPTCHA container for Customer Phone Auth */}
+          {/* Dedicated invisible container for Firebase phone auth reCAPTCHA */}
           <div id="customer-recaptcha-container" className="empty:hidden my-2 flex justify-center" />
 
           {/* Footer inside Card */}
@@ -929,9 +926,7 @@ export const CustomerLogin: React.FC = () => {
         </div>
       </main>
 
-      {/* ========================================================================= */}
-      {/* 4. MINIMALIST FOOTER                                                      */}
-      {/* ========================================================================= */}
+      {/* 4. MINIMALIST FOOTER */}
       <footer className="w-full border-t border-[#E8DED6] bg-[#F5ECE4]/60 relative z-20">
         <div className="max-w-6xl mx-auto px-6 py-5 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-medium text-[#8A817A]">
           <div>
