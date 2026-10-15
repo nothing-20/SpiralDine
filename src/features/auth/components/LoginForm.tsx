@@ -6,6 +6,7 @@ import { authService } from '../../../services/authService';
 import { useToastStore } from '../../../components/ui/Toast/Toast';
 import { getDashboardRoute } from '../../../utils/navigation';
 import { cn } from '../../../utils/cn';
+import { resolveAuthenticatedUser } from '../../../shared/services/roleResolver';
 
 // Decorative food imagery
 import leftPlateImg from '../../../assets/left_food_plate.png';
@@ -126,7 +127,6 @@ export const LoginForm: React.FC = () => {
 
   // Shared authoritative profile resolution and role routing
   const handleAuthenticatedUser = async (user: any, method: 'email' | 'phone') => {
-    const { resolveAuthenticatedUser } = await import('../../../shared/services/roleResolver');
     const profile = await resolveAuthenticatedUser(user);
 
     if (!profile) {

@@ -5,6 +5,7 @@ import { auth, db } from '../firebase/config';
 import { authService } from './authService';
 import { TUserRole, IUser, TAuthStatus } from '../types';
 import { getDashboardRoute } from '../utils/navigation';
+import { resolveAuthenticatedUser } from './roleResolver';
 
 export interface IAuthContextType {
   user: IUser | null;
@@ -99,7 +100,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                   setAuthStatus('AUTHORIZED');
                 } else {
                   // Document missing or role missing — call authoritative roleResolver
-                  const { resolveAuthenticatedUser } = await import('./roleResolver');
                   const profile = await resolveAuthenticatedUser(fUser);
                   if (profile && profile.role) {
                     const resolvedRole = (profile.role === 'super-admin' ? 'super_admin' : profile.role) as TUserRole;

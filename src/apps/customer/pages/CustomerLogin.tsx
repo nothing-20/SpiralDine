@@ -10,6 +10,7 @@ import { RecaptchaManager } from '../../../shared/services/recaptchaManager';
 import { zodResolver } from '../../../utils/zodResolver';
 import { useToastStore } from '../../../components/ui/Toast/Toast';
 import { cn } from '../../../utils/cn';
+import { resolveAuthenticatedUser } from '../../../shared/services/roleResolver';
 
 // Decorative food imagery
 import leftPlateImg from '../../../assets/left_food_plate.png';
@@ -349,7 +350,6 @@ export const CustomerLogin: React.FC = () => {
       const credentials = await authService.signInWithEmail(cleanEmail, data.password, true);
       const fUser = credentials.user;
 
-      const { resolveAuthenticatedUser } = await import('../../../shared/services/roleResolver');
       const profile = await resolveAuthenticatedUser(fUser);
 
       if (!profile || profile.role !== 'customer') {
