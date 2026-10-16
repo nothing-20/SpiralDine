@@ -28,6 +28,22 @@ export interface IResolvedUserProfile {
 export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUserProfile | null> {
   if (!fUser) return null;
 
+  // Handle Firebase Anonymous Guest Authentication directly
+  if (fUser.isAnonymous) {
+    return {
+      uid: fUser.uid,
+      email: '',
+      displayName: 'Guest Diner',
+      role: 'customer' as TUserRole,
+      tenantId: '',
+      branchId: '',
+      department: '',
+      status: 'active',
+      phoneNumber: '',
+      createdAt: fUser.metadata.creationTime || new Date().toISOString()
+    };
+  }
+
   const cleanEmail = (fUser.email || '').trim().toLowerCase();
   const userDocRef = doc(db, 'users', fUser.uid);
 

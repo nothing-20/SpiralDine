@@ -10,5 +10,6 @@ export interface IUser {
   role: TUserRole;
   status: 'active' | 'inactive';
   phoneNumber?: string;
+  isAnonymous?: boolean;
   createdAt: string;
 }

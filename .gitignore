@@ -3,3 +3,5 @@ node_modules
 dist
 .vercel
 .env*
+firestore-debug.log
+.vscode/

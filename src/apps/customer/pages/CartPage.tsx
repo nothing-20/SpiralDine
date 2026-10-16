@@ -15,6 +15,7 @@ import {
   syncDiningSessionToFirestore 
 } from '../../../shared/utils/diningSession';
 import { tableService } from '../../../shared/services/tableService';
+import { orderService } from '../../../shared/services/orderService';
 import { kotService } from '../../../shared/services/kotService';
 import { 
   ShoppingBag, Trash2, ArrowLeft, ArrowRight, Minus, Plus, 
@@ -30,8 +31,8 @@ const CartItemThumbnail: React.FC<{ src?: string; alt: string }> = ({ src, alt }
 
   if (!src || hasError) {
     return (
-      <div className="w-[85px] h-[85px] md:w-[115px] md:h-[95px] rounded-xl bg-[#F3E8DF] border border-[#E5DCD5] flex flex-col items-center justify-center shrink-0 text-[#C85A3F]/70">
-        <Utensils className="w-6 h-6 text-[#C85A3F]" />
+      <div className="w-[72px] h-[72px] sm:w-[85px] sm:h-[85px] md:w-[115px] md:h-[95px] rounded-xl bg-[#F3E8DF] border border-[#E5DCD5] flex flex-col items-center justify-center shrink-0 text-[#C85A3F]/70">
+        <Utensils className="w-5 h-5 sm:w-6 sm:h-6 text-[#C85A3F]" />
       </div>
     );
   }
@@ -41,7 +42,7 @@ const CartItemThumbnail: React.FC<{ src?: string; alt: string }> = ({ src, alt }
       src={src}
       alt={alt}
       onError={() => setHasError(true)}
-      className="w-[85px] h-[85px] md:w-[115px] md:h-[95px] rounded-xl object-cover shrink-0 border border-[#E5DCD5] shadow-xs"
+      className="w-[72px] h-[72px] sm:w-[85px] sm:h-[85px] md:w-[115px] md:h-[95px] rounded-xl object-cover shrink-0 border border-[#E5DCD5] shadow-xs"
     />
   );
 };
@@ -65,8 +66,14 @@ const DietaryBadge: React.FC<{ isVeg?: boolean }> = ({ isVeg }) => {
 export const CartPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user } = useAuth();
+  const { user, ensureGuestAuth } = useAuth();
   const { currency, currencySymbol, formatPrice, formatCurrency } = useCurrency();
+
+  useEffect(() => {
+    ensureGuestAuth().catch(err => {
+      console.warn('[CartPage] Background guest auth init warning:', err);
+    });
+  }, []);
   
   const { 
     cartItems, 
@@ -286,8 +293,8 @@ export const CartPage: React.FC = () => {
   };
 
   // 6. Checkout / Order Placement Handler
-  const handleCheckout = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCheckout = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (isPlacingOrder) return;
     if (!cartItems || cartItems.length === 0) {
       toast.error('Your cart is empty.');
@@ -339,6 +346,57 @@ export const CartPage: React.FC = () => {
         return;
       }
 
+      // 1. Verify items availability, publish state, and canonical pricing
+      let verifiedSubtotal = 0;
+      const verifiedItems: any[] = [];
+
+      for (const item of cartItems) {
+        if (!item.count || item.count <= 0) {
+          toast.error(`Invalid quantity for item "${item.name}".`);
+          setIsPlacingOrder(false);
+          return;
+        }
+
+        const lookup = menuLookup[item.itemId];
+        if (lookup) {
+          if (lookup.isPublished === false || lookup.published === false || lookup.status === 'unpublished') {
+            toast.error(`"${lookup.name || item.name}" is currently unavailable. Please remove it from your basket.`);
+            setIsPlacingOrder(false);
+            return;
+          }
+          if (lookup.isAvailable === false || lookup.available === false || lookup.availability === false) {
+            toast.error(`"${lookup.name || item.name}" is currently sold out. Please remove it from your basket.`);
+            setIsPlacingOrder(false);
+            return;
+          }
+        }
+
+        const canonicalPrice = lookup && Number(lookup.discountPrice || lookup.price) > 0 
+          ? Number(lookup.discountPrice || lookup.price) 
+          : item.pricePerUnit;
+
+        verifiedSubtotal += canonicalPrice * item.count;
+        verifiedItems.push({
+          itemId: item.itemId,
+          name: lookup?.name || item.name,
+          count: item.count,
+          notes: item.notes || '',
+          pricePerUnit: canonicalPrice,
+          image: item.image || item.imageUrl || lookup?.imageUrl || lookup?.image || '',
+          isVeg: item.isVeg ?? item.veg ?? lookup?.isVeg ?? lookup?.veg
+        });
+      }
+
+      const verifiedDiscountVal = Math.round(verifiedSubtotal * (discountPercent / 100));
+      const verifiedTaxable = Math.max(0, verifiedSubtotal - verifiedDiscountVal);
+      const verifiedVatTax = taxRatePercent > 0 ? Math.round(verifiedTaxable * (taxRatePercent / 100)) : 0;
+      const verifiedServiceCharge = serviceFeePercent > 0 ? Math.round(verifiedTaxable * (serviceFeePercent / 100)) : 0;
+      const verifiedGrandTotal = verifiedTaxable + verifiedVatTax + verifiedServiceCharge + (waiterTip * 100);
+
+      // Ensure authentic guest authentication UID before session and order submission
+      const authUser = await ensureGuestAuth();
+      const authenticUid = authUser?.uid || user?.uid || 'guest-uid';
+
       // Ensure active dining session exists and has a valid sessionId
       let currentSession = session || getActiveDiningSession(tenantId);
       if (!currentSession || !currentSession.sessionId) {
@@ -350,6 +408,7 @@ export const CartPage: React.FC = () => {
           tableId: resolvedTableId,
           tableNumber: tableNumber,
           tableName: session?.tableName || `Table ${tableNumber}`,
+          customerId: authenticUid,
           orderSource: session?.orderSource || 'app',
           status: 'active',
           startedAt: new Date().toISOString()
@@ -357,6 +416,8 @@ export const CartPage: React.FC = () => {
         setSession(currentSession);
         saveActiveDiningSession(currentSession);
         syncDiningSessionToFirestore(currentSession).catch(() => {});
+      } else if (!currentSession.customerId || currentSession.customerId === 'guest-uid') {
+        currentSession.customerId = authenticUid;
       }
 
       // Check existing active orders in the current dining session
@@ -388,61 +449,32 @@ export const CartPage: React.FC = () => {
         primaryOrderId = orderId;
       }
 
-      const orderPayload = {
-        id: orderId,
-        orderId,
-        primaryOrderId,
-        customerId: user?.uid || 'guest-uid',
-        customerName: user?.displayName || 'Guest Diner',
-        phone: user?.phoneNumber || '+91 98765 43210',
+      console.log('[CartPage] Authoritatively validating and creating order via trusted boundary...');
+      const validatedResult = await orderService.createValidatedOrder({
         tenantId,
-        restaurantId: tenantId,
-        branchId: resolvedBranchId,
+        tableNumber,
         tableId: resolvedTableId,
-        tableNumber: tableNumber,
         tableName: currentSession?.tableName || `Table ${tableNumber}`,
-        orderType: 'dine_in',
-        orderSource: currentSession?.orderSource || 'app',
-        items: cartItems.map(item => ({
-          itemId: item.itemId,
-          name: item.name,
-          count: item.count,
-          notes: item.notes || '',
-          pricePerUnit: item.pricePerUnit,
-          image: item.image || item.imageUrl || menuLookup[item.itemId]?.imageUrl || menuLookup[item.itemId]?.image || '',
-          isVeg: item.isVeg ?? item.veg ?? menuLookup[item.itemId]?.isVeg ?? menuLookup[item.itemId]?.veg
-        })),
-        subtotal,
-        tax: vatTax,
-        serviceCharge,
-        discount: discountVal,
-        tip: waiterTip * 100,
-        total: grandTotal,
-        totalAmount: grandTotal,
-        status: 'NEW',
-        paymentStatus: 'pending',
-        specialInstructions: specialInstructions.trim(),
+        branchId: resolvedBranchId,
         sessionId: currentSession.sessionId,
+        primaryOrderId,
         orderSequence,
         isAdditionalOrder: isAdditional,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
+        customerId: authenticUid,
+        customerName: user?.displayName || 'Guest Diner',
+        phone: user?.phoneNumber || '+91 98765 43210',
+        orderType: 'dine_in',
+        orderSource: currentSession?.orderSource || 'app',
+        specialInstructions: specialInstructions.trim(),
+        orderId,
+        items: cartItems.map(item => ({
+          itemId: item.itemId,
+          count: item.count,
+          notes: item.notes || ''
+        }))
+      }, { dbInstance: db });
 
-      // Write order directly to restaurants/{tenantId}/orders/{orderId}
-      await setDoc(doc(db, 'restaurants', tenantId, 'orders', orderId), orderPayload);
-
-      // Primary Kitchen Workflow: Create persistent canonical KOT record
-      try {
-        await kotService.createKotForOrder(tenantId, orderPayload as any, {
-          source: currentSession?.orderSource === 'qr' ? 'customer_qr' : 'customer_app',
-          customerName: user?.displayName || currentSession?.customerName || 'Guest Diner',
-          round: orderSequence,
-          isSupplementary: isAdditional
-        });
-      } catch (kotErr) {
-        console.warn('[CartPage] KOT generation warning:', kotErr);
-      }
+      const orderPayload = validatedResult.order;
 
       // Update dining session metadata with primaryOrderId and activeOrderIds
       currentSession.primaryOrderId = primaryOrderId;
@@ -574,13 +606,14 @@ export const CartPage: React.FC = () => {
   }
 
   return (
-    <div className="max-w-[1240px] mx-auto space-y-6 text-left select-none pb-12">
+    <div className="max-w-[1240px] mx-auto space-y-5 sm:space-y-6 text-left select-none pb-44 sm:pb-36 lg:pb-12">
       
       {/* 1. TOP CUSTOMER NAVIGATION */}
       <div className="flex items-center justify-between">
         <button 
+          type="button"
           onClick={handleBackToMenu}
-          className="inline-flex items-center space-x-2 text-xs font-bold text-[#756B64] hover:text-[#C85A3F] transition-colors cursor-pointer group py-1"
+          className="inline-flex items-center space-x-2 text-xs font-bold text-[#756B64] hover:text-[#C85A3F] transition-colors cursor-pointer group py-2 px-2.5 -ml-2 rounded-xl hover:bg-[#F3E8DF]/60 active:scale-95"
         >
           <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-0.5" />
           <span>Back to Menu</span>
@@ -595,7 +628,7 @@ export const CartPage: React.FC = () => {
       {/* 2. PAGE HEADER & CONTEXT */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 pb-2 border-b border-[#E5DCD5]/60">
         <div className="space-y-1">
-          <h1 className="text-3xl md:text-4xl font-display font-extrabold text-[#202124] tracking-tight">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-display font-extrabold text-[#202124] tracking-tight">
             Your Cart
           </h1>
           <p className="text-xs md:text-sm text-[#756B64]">
@@ -676,7 +709,7 @@ export const CartPage: React.FC = () => {
         </div>
       ) : (
         /* 4. MAIN TWO-COLUMN CART WORKSPACE */
-        <form onSubmit={handleCheckout} className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <form id="cart-checkout-form" onSubmit={handleCheckout} className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           
           {/* ======================================================== */}
           {/* LEFT COLUMN: CART ITEMS (Approx 68%)                     */}
@@ -686,9 +719,9 @@ export const CartPage: React.FC = () => {
             <div className="bg-white border border-[#E5DCD5] rounded-2xl p-5 md:p-6 shadow-xs space-y-5">
               
               {/* Card Header: Items Count & Clear All */}
-              <div className="flex items-center justify-between pb-4 border-b border-[#E5DCD5]">
-                <div className="flex items-center space-x-2">
-                  <ShoppingBag className="w-5 h-5 text-[#C85A3F]" />
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-[#E5DCD5]">
+                <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                  <ShoppingBag className="w-5 h-5 text-[#C85A3F] shrink-0" />
                   <h2 className="text-sm md:text-base font-extrabold text-[#202124]">
                     Items in Your Cart
                   </h2>
@@ -702,7 +735,7 @@ export const CartPage: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setShowClearConfirm(true)}
-                    className="inline-flex items-center space-x-1.5 text-xs text-[#756B64] hover:text-[#C85A3F] font-bold transition-colors cursor-pointer"
+                    className="inline-flex items-center space-x-1.5 text-xs text-[#756B64] hover:text-[#C85A3F] font-bold transition-colors cursor-pointer py-1 px-2 rounded-lg hover:bg-[#F3E8DF] active:scale-95"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                     <span>Clear All</span>
@@ -713,14 +746,14 @@ export const CartPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={handleConfirmClear}
-                      className="text-[10.5px] font-extrabold text-white bg-[#A94332] px-2 py-0.5 rounded-md hover:bg-rose-700"
+                      className="text-[10.5px] font-extrabold text-white bg-[#A94332] px-2 py-0.5 rounded-md hover:bg-rose-700 active:scale-95 transition-all"
                     >
                       Yes, Clear
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowClearConfirm(false)}
-                      className="text-[10.5px] font-bold text-[#756B64] hover:text-[#202124]"
+                      className="text-[10.5px] font-bold text-[#756B64] hover:text-[#202124] py-0.5 px-1"
                     >
                       Cancel
                     </button>
@@ -737,10 +770,10 @@ export const CartPage: React.FC = () => {
                   const isVegItem = item.isVeg ?? item.veg ?? itemLookup.isVeg ?? itemLookup.veg;
 
                   return (
-                    <div key={item.itemId} className="py-4.5 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div key={item.itemId} className="py-4.5 first:pt-0 last:pb-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
                       
                       {/* Left: Food Thumbnail & Details */}
-                      <div className="flex items-start space-x-3.5 flex-1 min-w-0">
+                      <div className="flex items-start space-x-3 sm:space-x-3.5 flex-1 min-w-0">
                         <CartItemThumbnail 
                           src={thumbSrc} 
                           alt={item.name} 
@@ -748,7 +781,7 @@ export const CartPage: React.FC = () => {
                         
                         <div className="space-y-1 min-w-0 flex-1">
                           <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                            <h3 className="text-sm md:text-base font-extrabold text-[#202124] line-clamp-2 leading-snug">
+                            <h3 className="text-sm md:text-base font-extrabold text-[#202124] line-clamp-2 leading-snug break-words">
                               {item.name}
                             </h3>
                             <DietaryBadge isVeg={isVegItem} />
@@ -769,7 +802,7 @@ export const CartPage: React.FC = () => {
                           {/* Customization notes or size/addon pills */}
                           {item.notes && (
                             <div className="pt-1">
-                              <span className="inline-flex items-center text-[10.5px] bg-[#F3E8DF] text-[#756B64] font-medium px-2.5 py-0.5 rounded-lg border border-[#E5DCD5]/80">
+                              <span className="inline-flex items-center text-[10.5px] bg-[#F3E8DF] text-[#756B64] font-medium px-2.5 py-0.5 rounded-lg border border-[#E5DCD5]/80 break-words max-w-full">
                                 {item.notes.startsWith('Note:') ? item.notes : `Note: ${item.notes}`}
                               </span>
                             </div>
@@ -778,25 +811,25 @@ export const CartPage: React.FC = () => {
                       </div>
 
                       {/* Right: Stepper Controls, Line Total & Remove */}
-                      <div className="flex items-center justify-between sm:justify-end space-x-4 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-[#E5DCD5]/40">
+                      <div className="flex items-center justify-between sm:justify-end space-x-3 sm:space-x-4 shrink-0 pt-2.5 sm:pt-0 border-t sm:border-t-0 border-[#E5DCD5]/50 w-full sm:w-auto">
                         
                         {/* Quantity Stepper */}
                         <div className="flex items-center space-x-1.5 bg-[#F3E8DF] p-1 rounded-xl border border-[#E5DCD5]">
                           <button
                             type="button"
                             onClick={() => updateQuantity(item.itemId, item.count - 1)}
-                            className="w-7 h-7 bg-white hover:bg-[#E5DCD5] rounded-lg flex items-center justify-center text-[#202124] font-bold transition-colors cursor-pointer"
+                            className="w-8 h-8 sm:w-7 sm:h-7 bg-white hover:bg-[#E5DCD5] active:scale-95 rounded-lg flex items-center justify-center text-[#202124] font-bold transition-all cursor-pointer shadow-2xs"
                             aria-label={`Decrease quantity of ${item.name}`}
                           >
                             <Minus className="w-3.5 h-3.5" />
                           </button>
-                          <span className="text-xs font-extrabold text-[#202124] w-5 text-center">
+                          <span className="text-xs font-extrabold text-[#202124] min-w-[24px] sm:w-5 text-center select-none">
                             {item.count}
                           </span>
                           <button
                             type="button"
                             onClick={() => updateQuantity(item.itemId, item.count + 1)}
-                            className="w-7 h-7 bg-white hover:bg-[#E5DCD5] rounded-lg flex items-center justify-center text-[#202124] font-bold transition-colors cursor-pointer"
+                            className="w-8 h-8 sm:w-7 sm:h-7 bg-white hover:bg-[#E5DCD5] active:scale-95 rounded-lg flex items-center justify-center text-[#202124] font-bold transition-all cursor-pointer shadow-2xs"
                             aria-label={`Increase quantity of ${item.name}`}
                           >
                             <Plus className="w-3.5 h-3.5" />
@@ -804,8 +837,8 @@ export const CartPage: React.FC = () => {
                         </div>
 
                         {/* Line Total */}
-                        <div className="text-right min-w-[70px]">
-                          <span className="text-sm md:text-base font-extrabold text-[#202124]">
+                        <div className="text-right min-w-[65px] sm:min-w-[70px]">
+                          <span className="text-base sm:text-sm md:text-base font-black text-[#202124]">
                             {formatPrice(item.pricePerUnit * item.count)}
                           </span>
                         </div>
@@ -814,7 +847,7 @@ export const CartPage: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => removeItem(item.itemId)}
-                          className="p-2 text-[#756B64] hover:text-[#C85A3F] hover:bg-[#F3E8DF] rounded-xl transition-colors cursor-pointer"
+                          className="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center text-[#756B64] hover:text-[#C85A3F] active:bg-[#F3E8DF] hover:bg-[#F3E8DF] rounded-xl transition-all cursor-pointer"
                           aria-label={`Remove ${item.name}`}
                           title={`Remove ${item.name}`}
                         >
@@ -908,12 +941,12 @@ export const CartPage: React.FC = () => {
                           setCouponError('');
                         }}
                         placeholder="Coupon code (e.g. LAUNCH20)" 
-                        className="flex-1 px-3 py-2 bg-white border border-[#E5DCD5] focus:border-[#C85A3F] focus:ring-1 focus:ring-[#C85A3F] rounded-xl text-xs text-[#202124] focus:outline-none placeholder-[#756B64]/60 uppercase font-semibold"
+                        className="flex-1 px-3.5 py-2.5 min-h-[42px] bg-white border border-[#E5DCD5] focus:border-[#C85A3F] focus:ring-1 focus:ring-[#C85A3F] rounded-xl text-xs text-[#202124] focus:outline-none placeholder-[#756B64]/60 uppercase font-semibold"
                       />
                       <button 
                         type="button"
                         onClick={handleApplyCoupon}
-                        className="px-4 py-2 bg-[#FCFAF7] hover:bg-[#F3E8DF] border border-[#C85A3F] text-xs font-bold text-[#C85A3F] rounded-xl transition-all cursor-pointer"
+                        className="px-4 py-2.5 min-h-[42px] bg-[#FCFAF7] hover:bg-[#F3E8DF] active:scale-95 border border-[#C85A3F] text-xs font-bold text-[#C85A3F] rounded-xl transition-all cursor-pointer shrink-0"
                       >
                         Apply
                       </button>
@@ -944,7 +977,7 @@ export const CartPage: React.FC = () => {
                       key={tip}
                       type="button"
                       onClick={() => setWaiterTip(tip)}
-                      className={`py-2 border text-[11px] font-bold rounded-xl text-center transition-all cursor-pointer ${
+                      className={`py-2.5 min-h-[42px] border text-[11px] font-bold rounded-xl text-center transition-all active:scale-95 cursor-pointer ${
                         waiterTip === tip
                           ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F] shadow-xs'
                           : 'bg-white border-[#E5DCD5] text-[#756B64] hover:border-[#C85A3F]/50 hover:bg-[#FCFAF7]'
@@ -1053,6 +1086,61 @@ export const CartPage: React.FC = () => {
           <span>Support Local Restaurants</span>
         </div>
       </div>
+
+      {/* Mobile scroll clearance spacer so content is never obscured by sticky bar */}
+      <div className="h-16 lg:hidden" aria-hidden="true" />
+
+      {/* 6. MOBILE STICKY CHECKOUT BAR (Visible on mobile/tablet < lg screens when cart has items) */}
+      {cartItems.length > 0 && (
+        <div 
+          className="fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom,0px))] md:bottom-0 left-0 right-0 z-30 lg:hidden bg-white/95 backdrop-blur-md border-t border-[#E5DCD5] shadow-[0_-8px_24px_rgba(32,33,36,0.08)] px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] md:pb-3"
+          role="region"
+          aria-label="Mobile Sticky Checkout Bar"
+        >
+          <div className="max-w-[1240px] mx-auto flex items-center justify-between gap-3">
+            {/* Price & Items Summary */}
+            <div className="flex flex-col min-w-0">
+              <span className="text-[11px] font-extrabold text-[#756B64] uppercase tracking-wider truncate">
+                Total ({totalCartQuantity} {totalCartQuantity === 1 ? 'item' : 'items'})
+              </span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-xl sm:text-2xl font-black text-[#C85A3F] tracking-tight">
+                  {formatPrice(grandTotal)}
+                </span>
+                <span className="text-[10px] text-[#756B64] font-medium hidden sm:inline">
+                  (incl. taxes)
+                </span>
+              </div>
+            </div>
+
+            {/* Checkout Action Button */}
+            <button
+              type="submit"
+              form="cart-checkout-form"
+              onClick={(e) => {
+                if (!e.defaultPrevented) {
+                  handleCheckout(e);
+                }
+              }}
+              disabled={isPlacingOrder || cartItems.length === 0}
+              className="bg-[#C85A3F] hover:bg-[#A94332] active:scale-95 text-white font-extrabold py-3.5 px-5 sm:px-6 rounded-xl flex items-center justify-center gap-2 text-sm shadow-md shadow-[#C85A3F]/25 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shrink-0 min-h-[44px]"
+              aria-label={`Proceed to Checkout for ${formatPrice(grandTotal)}`}
+            >
+              {isPlacingOrder ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Placing...</span>
+                </>
+              ) : (
+                <>
+                  <span>Proceed to Checkout</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
 
       {activeTenantId && (
         <TableSelectionModal

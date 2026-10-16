@@ -1,7 +1,5 @@
 import React, { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { doc, getDoc, updateDoc, addDoc, collection, increment } from 'firebase/firestore';
-import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import Card from '../../../components/ui/Card/Card';
 import Badge from '../../../components/ui/Badge/Badge';
@@ -40,102 +38,57 @@ export const PaymentPage: React.FC = () => {
     setIsProcessing(true);
     setTimeout(async () => {
       try {
-        // Route to the canonical bill on OrderTracking where authentic UPI QR and staff verification takes place
+        // Route to the authoritative canonical bill on OrderTracking where verified payment & staff verification takes place
         if (orderId && tenantId) {
           toast.success('Opening your canonical order bill...');
           navigate(`/customer/restaurant/${tenantId}/order/${orderId}`);
           return;
         }
 
-        // 2. If tableId is available, release the physical table
-        if (tableId && tenantId) {
-          const tableRef = doc(db, 'restaurants', tenantId, 'tables', tableId);
-          await updateDoc(tableRef, {
-            status: 'empty',
-            activeOrderId: '',
-            seatingTime: '',
-            guestsCount: 0,
-            assignedWaiterId: '',
-            assignedWaiterName: '',
-            updatedAt: new Date().toISOString()
-          });
-        }
-
-        // 3. Update customer details in profile (customers/{uid} with fallback)
-        if (user?.uid) {
-          let targetCol = 'customers';
-          try {
-            const custSnap = await getDoc(doc(db, 'customers', user.uid));
-            if (!custSnap.exists()) {
-              const userSnap = await getDoc(doc(db, 'users', user.uid));
-              if (userSnap.exists()) {
-                targetCol = 'users';
-              }
-            }
-          } catch (_e) {
-            targetCol = 'customers';
-          }
-
-          if (orderId && tenantId) {
-            await addDoc(collection(db, targetCol, user.uid, 'diningHistory'), {
-              restaurantId: tenantId,
-              restaurantName: tenantId,
-              orderId: orderId,
-              total: orderTotalVal,
-              date: new Date().toISOString(),
-              diners: splitCount
-            }).catch(err => console.warn('Failed to add dining history:', err));
-          }
-
-          const userDocRef = doc(db, targetCol, user.uid);
-          const pointsEarned = Math.round(orderTotalVal / 100) || 50;
-          await updateDoc(userDocRef, {
-            loyaltyPoints: increment(pointsEarned)
-          }).catch(err => console.warn(err));
-        }
-
+        // If no active order context, direct customer to orders tab
+        toast.error('No active dining order specified. Please select an order from your order list.');
         setIsProcessing(false);
-        setIsPaid(true);
-        toast.success('Payment successfully authorized!', { icon: '🎉' });
+        navigate('/customer/orders');
+        return;
       } catch (err) {
         console.error(err);
         toast.error('Payment processing failed.');
         setIsProcessing(false);
       }
-    }, 2500);
+    }, 500);
   };
 
   if (isPaid) {
     return (
-      <div className="max-w-md mx-auto p-6 space-y-6 text-center select-none bg-slate-900/30 border border-slate-900 rounded-3xl mt-12 backdrop-blur-md">
-        <div className="w-14 h-14 bg-emerald-500/10 border border-emerald-500/20 rounded-full flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/5 animate-bounce">
-          <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+      <div className="max-w-md mx-auto p-6 sm:p-8 space-y-6 text-center select-none bg-white border border-[#E5DCD5] rounded-3xl mt-8 shadow-sm">
+        <div className="w-14 h-14 bg-emerald-50 border border-emerald-200 rounded-full flex items-center justify-center mx-auto shadow-xs animate-bounce text-[#2E8B57]">
+          <CheckCircle2 className="w-8 h-8" />
         </div>
         
         <div className="space-y-1">
-          <h2 className="text-xl font-display font-extrabold text-white">Settlement Complete</h2>
-          <p className="text-xs text-slate-400">Payment receipt has been logged to the checkout system.</p>
+          <h2 className="text-xl font-display font-extrabold text-[#202124]">Settlement Complete</h2>
+          <p className="text-xs text-[#756B64]">Payment receipt has been logged to the checkout system.</p>
         </div>
 
-        <div className="p-4 bg-slate-950 border border-slate-900 rounded-2xl space-y-3.5 text-left text-xs text-slate-350">
-          <div className="flex justify-between font-bold border-b border-slate-900 pb-2 text-white">
+        <div className="p-4 bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl space-y-3.5 text-left text-xs text-[#756B64]">
+          <div className="flex justify-between font-bold border-b border-[#E5DCD5] pb-2 text-[#202124]">
             <span>Transaction Share</span>
-            <span className="text-primary">{formatPrice(individualShare)}</span>
+            <span className="text-[#C85A3F] font-mono font-extrabold">{formatPrice(individualShare)}</span>
           </div>
           <div className="flex justify-between">
             <span>Payment Protocol</span>
-            <span className="font-semibold text-white uppercase">{payMethod}</span>
+            <span className="font-semibold text-[#202124] uppercase">{payMethod}</span>
           </div>
           <div className="flex justify-between">
             <span>Status</span>
-            <span className="text-emerald-400 font-extrabold">AUTHORIZED</span>
+            <span className="text-[#2E8B57] font-extrabold">AUTHORIZED</span>
           </div>
         </div>
 
         <div className="flex flex-col gap-2 pt-2">
           <Button 
             onClick={() => navigate('/customer/home')}
-            className="w-full bg-primary hover:bg-orange-500 text-slate-950 font-bold py-3 rounded-xl text-xs"
+            className="w-full min-h-[44px] bg-[#C85A3F] hover:bg-[#A94332] active:scale-98 text-white font-extrabold py-3 rounded-xl text-xs shadow-xs cursor-pointer"
           >
             Portal Home
           </Button>
@@ -145,55 +98,59 @@ export const PaymentPage: React.FC = () => {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6 text-left select-none">
+    <div className="max-w-2xl mx-auto space-y-6 text-left select-none pb-16 px-4 sm:px-0">
       
-      <div className="flex items-center space-x-1.5 text-slate-400" onClick={() => navigate(-1)}>
-        <ChevronLeft className="w-4 h-4 cursor-pointer" />
-        <span className="text-xs font-semibold cursor-pointer">Back</span>
-      </div>
+      <button 
+        type="button"
+        className="flex items-center space-x-1.5 text-[#756B64] hover:text-[#C85A3F] transition-colors cursor-pointer py-1 group" 
+        onClick={() => navigate(-1)}
+      >
+        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+        <span className="text-xs font-bold">Back</span>
+      </button>
 
       <div className="space-y-1">
-        <h2 className="text-xl font-display font-extrabold text-white">Settlement Check</h2>
-        <p className="text-xs text-slate-400">Choose payment method and divide check split count.</p>
+        <h2 className="text-xl sm:text-2xl font-display font-extrabold text-[#202124]">Settlement Check</h2>
+        <p className="text-xs sm:text-sm text-[#756B64]">Choose payment method and divide check split count.</p>
       </div>
 
-      <form onSubmit={handlePay} className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-900/30 border border-slate-900 p-6 rounded-3xl backdrop-blur-md">
+      <form onSubmit={handlePay} className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white border border-[#E5DCD5] p-5 sm:p-7 rounded-3xl shadow-sm">
         
         {/* LEFT PANEL - SPLIT CHECKS */}
         <div className="space-y-5">
-          <div className="p-4 bg-slate-950 border border-slate-900 rounded-2xl space-y-3">
-            <div className="flex justify-between items-center text-[10.5px] text-slate-450 font-bold uppercase tracking-wider">
+          <div className="p-4 bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl space-y-3">
+            <div className="flex justify-between items-center text-[10.5px] text-[#756B64] font-bold uppercase tracking-wider">
               <span>Split Check Total</span>
-              <span className="text-primary">{splitCount} Diner Party</span>
+              <span className="text-[#C85A3F] font-bold">{splitCount} Diner Party</span>
             </div>
             
             <div className="flex items-center space-x-3 justify-center py-2">
               <button 
                 type="button"
                 onClick={() => setSplitCount(s => Math.max(1, s - 1))}
-                className="w-7 h-7 bg-slate-905 bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-xl flex items-center justify-center text-slate-350 font-bold"
+                className="w-9 h-9 sm:w-8 sm:h-8 bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 rounded-xl flex items-center justify-center text-[#202124] font-bold shadow-2xs active:scale-95 transition-all cursor-pointer"
               >
                 -
               </button>
-              <span className="text-xs font-extrabold text-white w-6 text-center">{splitCount}x</span>
+              <span className="text-xs font-extrabold text-[#202124] w-8 text-center">{splitCount}x</span>
               <button 
                 type="button"
                 onClick={() => setSplitCount(s => s + 1)}
-                className="w-7 h-7 bg-slate-905 bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-xl flex items-center justify-center text-slate-350 font-bold"
+                className="w-9 h-9 sm:w-8 sm:h-8 bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 rounded-xl flex items-center justify-center text-[#202124] font-bold shadow-2xs active:scale-95 transition-all cursor-pointer"
               >
                 +
               </button>
             </div>
 
-            <div className="flex justify-between text-xs font-bold text-slate-350 border-t border-slate-900 pt-3">
+            <div className="flex justify-between text-xs font-bold text-[#202124] border-t border-[#E5DCD5] pt-3">
               <span>Individual Share</span>
-              <span className="text-primary">{formatPrice(orderTotalVal / splitCount)}</span>
+              <span className="text-[#C85A3F] font-mono font-extrabold">{formatPrice(orderTotalVal / splitCount)}</span>
             </div>
           </div>
 
           {/* Payment Protocol Selector */}
           <div className="space-y-2">
-            <label className="text-[10.5px] text-slate-450 font-bold uppercase tracking-wider block">Payment Protocol</label>
+            <label className="text-[10.5px] text-[#756B64] font-bold uppercase tracking-wider block">Payment Protocol</label>
             <div className="grid grid-cols-3 gap-2">
               {[
                 { key: 'card', name: 'Credit Card', icon: CreditCard },
@@ -204,13 +161,13 @@ export const PaymentPage: React.FC = () => {
                   key={item.key}
                   type="button"
                   onClick={() => setPayMethod(item.key as any)}
-                  className={`p-3 border rounded-xl flex flex-col items-center space-y-1.5 transition-all text-center ${
+                  className={`p-3 min-h-[64px] border rounded-xl flex flex-col items-center justify-center space-y-1.5 transition-all text-center cursor-pointer active:scale-95 ${
                     payMethod === item.key
-                      ? 'bg-primary/10 border-primary text-primary'
-                      : 'bg-slate-950 border-slate-900 text-slate-400'
+                      ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F] font-bold shadow-2xs'
+                      : 'bg-[#FCFAF7] hover:bg-white border-[#E5DCD5] hover:border-[#C85A3F]/40 text-[#756B64]'
                   }`}
                 >
-                  <item.icon className="w-4 h-4 text-slate-400" />
+                  <item.icon className={`w-4 h-4 ${payMethod === item.key ? 'text-[#C85A3F]' : 'text-[#756B64]'}`} />
                   <span className="text-[9px] font-extrabold uppercase tracking-wider">{item.name}</span>
                 </button>
               ))}
@@ -251,8 +208,8 @@ export const PaymentPage: React.FC = () => {
             )}
 
             {payMethod === 'cash' && (
-              <div className="p-4 bg-slate-950 border border-slate-900 rounded-2xl space-y-2 text-xs text-slate-400 leading-relaxed font-semibold">
-                <Info className="w-5 h-5 text-primary" />
+              <div className="p-4 bg-[#FFF8F2] border border-[#C85A3F]/30 rounded-2xl space-y-2 text-xs text-[#756B64] leading-relaxed font-semibold">
+                <Info className="w-5 h-5 text-[#C85A3F]" />
                 <p>Table Cash request has been sent. A waiter will walk over to your table soon with the physical bill folio.</p>
               </div>
             )}
@@ -261,9 +218,9 @@ export const PaymentPage: React.FC = () => {
           <Button
             type="submit"
             disabled={isProcessing}
-            className="w-full bg-primary text-slate-950 font-bold py-3.5 rounded-2xl flex items-center justify-center gap-1.5 text-xs shadow-lg mt-6"
+            className="w-full min-h-[48px] bg-[#C85A3F] hover:bg-[#A94332] active:scale-98 text-white font-extrabold py-3.5 rounded-2xl flex items-center justify-center gap-1.5 text-xs sm:text-sm shadow-md shadow-[#C85A3F]/20 cursor-pointer disabled:opacity-50 mt-6"
           >
-            <CreditCard className="w-4 h-4 text-slate-950" />
+            <CreditCard className="w-4 h-4 text-white" />
             <span>
               {isProcessing ? 'Authorizing Check...' : `Pay Total ${formatPrice(orderTotalVal / splitCount)}`}
             </span>

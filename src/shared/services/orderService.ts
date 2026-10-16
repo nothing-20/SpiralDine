@@ -1,12 +1,49 @@
 import { ordersService, kitchenTicketsService } from '../firebase/firestore';
 import { IOrder } from '../domain/orders/types';
 import { kotService } from './kotService';
+import { orderValidationService, IOrderCreationRequest, IValidatedOrderResult } from './orderValidationService';
 
 /**
  * Service for handling Order and Kitchen Ticket database operations.
  * Connects the frontend to Firestore collection streams.
  */
 export const orderService = {
+  /**
+   * Creates an authoritatively validated order through the trusted validation boundary.
+   * In browser environments, routes through /api/orders/create with Firebase ID token.
+   */
+  createValidatedOrder: async (
+    request: IOrderCreationRequest,
+    options?: { dbInstance?: any; actor?: any; skipKotCreation?: boolean }
+  ): Promise<IValidatedOrderResult> => {
+    if (typeof window !== 'undefined' && typeof fetch !== 'undefined') {
+      try {
+        const { auth } = await import('../firebase/config');
+        const token = await auth.currentUser?.getIdToken();
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+        const res = await fetch('/api/orders/create', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(request)
+        });
+        if (res.ok) {
+          return await res.json();
+        }
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Server order creation failed with status ${res.status}`);
+      } catch (err: any) {
+        if (err.message && !err.message.includes('Failed to fetch') && !err.message.includes('NetworkError')) {
+          throw err;
+        }
+        console.warn('[orderService] /api/orders/create unreachable, using direct validation service:', err);
+      }
+    }
+    return orderValidationService.validateAndCreateOrder(request, options);
+  },
+
   /**
    * Retrieves all orders for a tenant, or all orders if no tenant is specified.
    * 

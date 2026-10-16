@@ -76,13 +76,17 @@ export function calculateSmartPriority(order: IKdsOrder): TPriority {
 /** Returns elapsed minutes from an ISO date string to now. */
 export const getElapsedMinutes = (dateStr: string): number => {
   if (!dateStr) return 0;
-  return (Date.now() - new Date(dateStr).getTime()) / 60000;
+  const time = new Date(dateStr).getTime();
+  if (isNaN(time)) return 0;
+  return Math.max(0, (Date.now() - time) / 60000);
 };
 
 /** Returns elapsed seconds from an ISO date string to now. */
 export const getElapsedSeconds = (dateStr: string): number => {
   if (!dateStr) return 0;
-  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  const time = new Date(dateStr).getTime();
+  if (isNaN(time)) return 0;
+  return Math.max(0, Math.floor((Date.now() - time) / 1000));
 };
 
 /** Formats elapsed seconds to MM:SS. */

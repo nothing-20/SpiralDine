@@ -260,16 +260,19 @@ export const AppRoutes: React.FC = () => {
         {/* Staff activation — public, no auth guard needed (employee activates before they have an account) */}
         <Route path="/staff/activate" element={<StaffActivate />} />
         
-        {/* Protected customer routes */}
-        <Route element={<CustomerGuard />}>
-          <Route element={<CustomerLayout />}>
+        {/* Customer routes with layout */}
+        <Route element={<CustomerLayout />}>
+          {/* Public customer routes inside layout (accessible to guest diners and customers) */}
+          <Route path="/customer/cart" element={<CartPage />} />
+          <Route path="/customer/restaurant/:tenantId" element={<RestaurantDetails />} />
+          
+          {/* Protected customer routes requiring authentication */}
+          <Route element={<CustomerGuard />}>
             <Route path="/customer/home" element={<CustomerHome />} />
             <Route path="/customer/explore" element={<DiscoverPage />} />
             <Route path="/customer/discover" element={<DiscoverPage />} />
             <Route path="/customer/restaurants" element={<Navigate to="/customer/home" replace />} />
-            <Route path="/customer/restaurant/:tenantId" element={<RestaurantDetails />} />
             <Route path="/customer/booking" element={<TableBooking />} />
-            <Route path="/customer/cart" element={<CartPage />} />
             <Route path="/customer/orders" element={<CustomerOrdersPage />} />
             <Route path="/customer/payment" element={<PaymentPage />} />
             <Route path="/customer/reservations" element={<Navigate to="/customer/profile?section=reservations" replace />} />

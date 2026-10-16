@@ -427,18 +427,18 @@ export const RestaurantDetails: React.FC = () => {
       </div>
 
       {/* 2. Restaurant Basic Info Section */}
-      <div className="flex flex-col md:flex-row justify-between items-start gap-4 p-6 bg-white border border-[#EEE7E1] rounded-3xl relative -mt-16 mx-4 z-10 shadow-sm">
-        <div className="flex items-start space-x-4">
-          <div className="w-16 h-16 bg-[#FFF8F2] border border-[#EEE7E1] rounded-2xl overflow-hidden shrink-0 flex items-center justify-center text-[#E85D3F] font-display font-extrabold text-xl shadow-inner">
+      <div className="flex flex-col md:flex-row justify-between items-start gap-4 p-4 sm:p-6 bg-white border border-[#EEE7E1] rounded-3xl relative -mt-16 mx-2 sm:mx-4 z-10 shadow-sm">
+        <div className="flex items-start space-x-3.5 sm:space-x-4 min-w-0">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 bg-[#FFF8F2] border border-[#EEE7E1] rounded-2xl overflow-hidden shrink-0 flex items-center justify-center text-[#E85D3F] font-display font-extrabold text-xl shadow-inner">
             {restaurant.logoUrl ? (
               <img src={restaurant.logoUrl} alt={restaurant.name} className="h-full w-full object-cover" />
             ) : (
               <span>{restaurant.name.charAt(0).toUpperCase()}</span>
             )}
           </div>
-          <div className="space-y-1">
-            <h2 className="text-xl font-display font-extrabold text-[#242424]">{restaurant.name}</h2>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-[#6B6B6B] font-semibold">
+          <div className="space-y-1 min-w-0">
+            <h2 className="text-lg sm:text-xl font-display font-extrabold text-[#242424] truncate" title={restaurant.name}>{restaurant.name}</h2>
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs text-[#6B6B6B] font-semibold">
               <span>{restaurant.cuisine}</span>
               {restaurant.priceRange && (
                 <>
@@ -461,7 +461,7 @@ export const RestaurantDetails: React.FC = () => {
                 </>
               )}
             </div>
-            <div className="flex items-center text-xs text-[#888888] font-medium pt-0.5">
+            <div className="flex items-center text-xs text-[#888888] font-medium pt-0.5 truncate">
               <MapPin className="w-3.5 h-3.5 text-[#E85D3F] mr-1 shrink-0" />
               <span className="truncate max-w-md">{restaurant.address}</span>
             </div>
@@ -469,13 +469,13 @@ export const RestaurantDetails: React.FC = () => {
         </div>
 
         {/* Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto pt-2 md:pt-0">
+        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 sm:gap-2.5 w-full md:w-auto pt-2 md:pt-0">
           {restaurant.googleMapsUrl && (
             <a 
               href={restaurant.googleMapsUrl}
               target="_blank" 
               rel="noopener noreferrer"
-              className="px-4 py-2.5 bg-[#FFF8F2] border border-[#EEE7E1] hover:border-[#E85D3F]/40 text-xs font-bold text-[#E85D3F] rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-xs"
+              className="min-h-[44px] px-4 py-2.5 bg-[#FFF8F2] border border-[#EEE7E1] hover:border-[#E85D3F]/40 active:scale-98 text-xs font-bold text-[#E85D3F] rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs"
             >
               <MapPin className="w-3.5 h-3.5" />
               <span>View on Maps</span>
@@ -484,13 +484,13 @@ export const RestaurantDetails: React.FC = () => {
           )}
           <Button 
             onClick={() => navigate(`/customer/booking?tenantId=${restaurant.id}`)}
-            className="px-4 py-2.5 bg-[#FFF8F2] border border-[#EEE7E1] hover:border-[#E85D3F]/40 text-xs font-extrabold text-[#242424] rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
+            className="min-h-[44px] px-4 py-2.5 bg-[#FFF8F2] border border-[#EEE7E1] hover:border-[#E85D3F]/40 active:scale-98 text-xs font-extrabold text-[#242424] rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-xs cursor-pointer"
           >
             <Calendar className="w-3.5 h-3.5 text-[#E85D3F]" /> Book Table
           </Button>
           <Button 
             onClick={handleOrderNow}
-            className="px-5 py-2.5 bg-[#E85D3F] hover:bg-[#D04B2F] text-white font-extrabold rounded-xl flex items-center justify-center gap-1.5 transition-all text-xs shadow-xs cursor-pointer"
+            className="min-h-[44px] px-5 py-2.5 bg-[#E85D3F] hover:bg-[#D04B2F] active:scale-98 text-white font-extrabold rounded-xl flex items-center justify-center gap-1.5 transition-all text-xs shadow-xs cursor-pointer"
           >
             <Coffee className="w-3.5 h-3.5" /> Order Now
           </Button>
@@ -498,7 +498,7 @@ export const RestaurantDetails: React.FC = () => {
       </div>
 
       {/* 3. Section Tabs */}
-      <div className="flex space-x-2 border-b border-[#EEE7E1] px-4">
+      <div className="flex space-x-2 border-b border-[#EEE7E1] px-4 overflow-x-auto scrollbar-none">
         {[
           { key: 'menu', label: `Menu (${menuItems.length})`, icon: Utensils },
           { key: 'reviews', label: `Reviews & Ratings (${reviews.length})`, icon: Star },
@@ -507,7 +507,7 @@ export const RestaurantDetails: React.FC = () => {
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key as any)}
-            className={`px-4 py-3 text-xs font-extrabold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+            className={`px-4 py-3 text-xs font-extrabold flex items-center gap-2 border-b-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === tab.key 
                 ? 'border-[#E85D3F] text-[#E85D3F]' 
                 : 'border-transparent text-[#6B6B6B] hover:text-[#242424]'

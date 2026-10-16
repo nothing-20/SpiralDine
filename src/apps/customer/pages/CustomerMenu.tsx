@@ -69,7 +69,13 @@ export const CustomerMenu: React.FC = () => {
   const { tenantId } = useParams<{ tenantId: string }>();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, ensureGuestAuth } = useAuth();
+
+  useEffect(() => {
+    ensureGuestAuth().catch(err => {
+      console.warn('[CustomerMenu] Background guest auth init warning:', err);
+    });
+  }, []);
 
   // Cart operations
   const {
@@ -104,6 +110,8 @@ export const CustomerMenu: React.FC = () => {
   const [combosList, setCombosList] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [coverImageFailed, setCoverImageFailed] = useState(false);
+  const [failedImageIds, setFailedImageIds] = useState<Record<string, boolean>>({});
 
   // Filter & Search States
   const [searchQuery, setSearchQuery] = useState('');
@@ -169,6 +177,8 @@ export const CustomerMenu: React.FC = () => {
     setRestaurantName('Loading...');
     setCoverImage('');
     setLogoUrl('');
+    setCoverImageFailed(false);
+    setFailedImageIds({});
     setCuisines('');
     setRating(null);
     setReviewCount(null);
@@ -545,12 +555,13 @@ export const CustomerMenu: React.FC = () => {
   const scrollToCategory = (catName: string) => {
     setActiveCategory(catName);
     if (catName === 'all') {
-      window.scrollTo({ top: 250, behavior: 'smooth' });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
     const sectionEl = document.getElementById(`cat-sec-${catName.replace(/\s+/g, '-').toLowerCase()}`);
     if (sectionEl) {
-      const yOffset = -90;
+      const isMobile = window.innerWidth < 1024;
+      const yOffset = isMobile ? -115 : -90;
       const y = sectionEl.getBoundingClientRect().top + window.pageYOffset + yOffset;
       window.scrollTo({ top: y, behavior: 'smooth' });
     }
@@ -869,6 +880,10 @@ export const CustomerMenu: React.FC = () => {
         return;
       }
 
+      // Ensure authentic guest authentication UID before session and order submission
+      const authUser = await ensureGuestAuth();
+      const authenticUid = authUser?.uid || user?.uid || 'guest-uid';
+
       // Ensure active dining session exists and has a valid sessionId
       let currentSession = session || getActiveDiningSession(tenantId);
       if (!currentSession || !currentSession.sessionId) {
@@ -880,6 +895,7 @@ export const CustomerMenu: React.FC = () => {
           tableId: resolvedTableId,
           tableNumber: cleanTableNum,
           tableName: `Table ${cleanTableNum}`,
+          customerId: authenticUid,
           orderSource: searchParams.get('source') === 'qr' ? 'qr' : 'app',
           status: 'active',
           startedAt: new Date().toISOString()
@@ -901,7 +917,7 @@ export const CustomerMenu: React.FC = () => {
         id: orderId,
         orderId,
         primaryOrderId,
-        customerId: user?.uid || 'guest-uid',
+        customerId: authenticUid,
         customerName: customerName.trim() || user?.displayName || 'Guest Diner',
         customerEmail: user?.email || '',
         phone: customerPhone.trim() || user?.phoneNumber || '+91 98765 43210',
@@ -1124,15 +1140,114 @@ export const CustomerMenu: React.FC = () => {
       {/* 1. Global Customer Header */}
       <CustomerHeader tableNumber={tableNumber} restaurantName={restaurantName} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-6">
-        {/* 2. Restaurant Hero / Identity Section */}
-        <div className="relative w-full rounded-3xl overflow-hidden border border-[#E5DCD5] shadow-xs bg-[#202124] text-white">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 pb-32 sm:pb-28 lg:pb-12 space-y-4 sm:space-y-6">
+        {/* 2.a. Mobile Compact Restaurant Header (< 768px) */}
+        <div className="md:hidden bg-white border border-[#E5DCD5] rounded-2xl p-3.5 shadow-xs space-y-2.5">
+          <div className="flex items-start gap-3">
+            {/* Compact Media Thumbnail / Fallback */}
+            {(coverImage || logoUrl) && !coverImageFailed ? (
+              <img
+                src={logoUrl || coverImage}
+                alt={restaurantName}
+                onError={() => setCoverImageFailed(true)}
+                className="w-16 h-16 rounded-xl object-cover border border-[#E5DCD5] shrink-0 bg-[#F3E8DF]/50 shadow-xs"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-[#202124] to-[#3a2820] flex items-center justify-center shrink-0 text-[#F3E8DF] shadow-xs">
+                <Utensils className="w-7 h-7 text-[#F3E8DF]/60" />
+              </div>
+            )}
+
+            {/* Identity & Status */}
+            <div className="flex-1 min-w-0 space-y-1">
+              <div className="flex items-center justify-between gap-1.5">
+                <h1 className="text-base font-display font-extrabold text-[#202124] truncate leading-tight">
+                  {restaurantName}
+                </h1>
+                {isOpen ? (
+                  <span className="inline-flex items-center gap-1 bg-[#2E8B57]/10 text-[#2E8B57] text-[10px] font-extrabold px-2 py-0.5 rounded-full shrink-0 border border-[#2E8B57]/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#2E8B57] animate-pulse" />
+                    Open
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 bg-[#756B64]/10 text-[#756B64] text-[10px] font-extrabold px-2 py-0.5 rounded-full shrink-0 border border-[#756B64]/20">
+                    Closed
+                  </span>
+                )}
+              </div>
+
+              {/* Rating & Cuisines */}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[#756B64]">
+                {rating !== null && (
+                  <div className="flex items-center gap-0.5 bg-[#C85A3F] text-white px-1.5 py-0.5 rounded font-extrabold text-[10px]">
+                    <Star className="w-2.5 h-2.5 fill-current" />
+                    <span>{rating.toFixed(1)}</span>
+                    {reviewCount !== null && (
+                      <span className="text-[9px] text-white/80 font-normal">({reviewCount})</span>
+                    )}
+                  </div>
+                )}
+                {cuisines && (
+                  <span className="font-medium text-[#202124] truncate max-w-[130px]">{cuisines}</span>
+                )}
+                {locality && (
+                  <span className="flex items-center gap-0.5 text-[#756B64]">
+                    <MapPin className="w-2.5 h-2.5 text-[#C85A3F] shrink-0" />
+                    <span className="truncate max-w-[100px]">{locality}</span>
+                  </span>
+                )}
+              </div>
+
+              {avgPrepTime !== null && (
+                <div className="flex items-center gap-1 text-[10px] text-[#756B64]">
+                  <Clock className="w-2.5 h-2.5 text-[#C85A3F] shrink-0" />
+                  <span>~{avgPrepTime} mins wait</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Table Context & View Restaurant Action Bar */}
+          <div className="flex items-center justify-between pt-2 border-t border-[#F3E8DF] gap-2">
+            {tableNumber ? (
+              <div className="bg-[#F3E8DF]/70 border border-[#C85A3F]/20 px-2.5 py-1 rounded-lg text-[11px] font-bold text-[#C85A3F] flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-[#C85A3F] shrink-0" />
+                <span>Ordering at Table {tableNumber}</span>
+              </div>
+            ) : (
+              <span className="text-[11px] text-[#756B64] font-medium">Dine-in Menu</span>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                if (tenantId && tableNumber && !orderPlacedRef.current && activeOrders.length === 0) {
+                  tableService.releaseTableBrowsing(
+                    tenantId,
+                    tableNumber,
+                    { name: user?.displayName || '', phone: user?.phoneNumber || '', customerId: user?.uid || '' }
+                  ).catch(() => {});
+                  clearActiveDiningSession();
+                }
+                navigate(`/customer/restaurant/${tenantId}`);
+              }}
+              className="text-[#202124] hover:text-[#C85A3F] text-[11px] font-extrabold flex items-center gap-1 transition-colors px-2 py-1 rounded-lg hover:bg-[#F3E8DF]/50 cursor-pointer"
+            >
+              <span>Restaurant Details</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* 2.b. Desktop Restaurant Hero / Identity Section (Preserved) */}
+        <div className="hidden md:block relative w-full rounded-3xl overflow-hidden border border-[#E5DCD5] shadow-xs bg-[#202124] text-white">
           {/* Background Image / Fallback */}
           <div className="w-full h-44 sm:h-52 md:h-56 relative overflow-hidden">
-            {coverImage ? (
+            {coverImage && !coverImageFailed ? (
               <img
                 src={coverImage}
                 alt={restaurantName}
+                onError={() => setCoverImageFailed(true)}
                 className="w-full h-full object-cover brightness-[0.75]"
               />
             ) : (
@@ -1201,6 +1316,7 @@ export const CustomerMenu: React.FC = () => {
                 </div>
               )}
               <button
+                type="button"
                 onClick={() => {
                   if (tenantId && tableNumber && !orderPlacedRef.current && activeOrders.length === 0) {
                     tableService.releaseTableBrowsing(
@@ -1322,10 +1438,11 @@ export const CustomerMenu: React.FC = () => {
           </div>
 
           {/* Horizontal Quick Category Filters (Scrollable Chips) */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none select-none pt-1">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none select-none pt-1 scroll-smooth">
             <button
+              type="button"
               onClick={() => scrollToCategory('all')}
-              className={`px-4 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap transition-all border cursor-pointer ${
+              className={`px-4 py-2 sm:py-1.5 min-h-[38px] sm:min-h-[32px] rounded-full text-xs font-extrabold whitespace-nowrap transition-all border cursor-pointer flex items-center shrink-0 ${
                 activeCategory === 'all'
                   ? 'bg-[#C85A3F] border-[#C85A3F] text-white shadow-xs'
                   : 'bg-white border-[#E5DCD5] text-[#202124] hover:border-[#C85A3F]/40'
@@ -1338,14 +1455,51 @@ export const CustomerMenu: React.FC = () => {
               return (
                 <button
                   key={cat.id}
+                  type="button"
                   onClick={() => scrollToCategory(cat.name)}
-                  className={`px-4 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border cursor-pointer ${
+                  className={`px-4 py-2 sm:py-1.5 min-h-[38px] sm:min-h-[32px] rounded-full text-xs font-bold whitespace-nowrap transition-all border cursor-pointer flex items-center gap-1 shrink-0 ${
                     activeCategory === cat.name
-                      ? 'bg-[#C85A3F] border-[#C85A3F] text-white shadow-xs'
+                      ? 'bg-[#C85A3F] border-[#C85A3F] text-white shadow-xs font-extrabold'
                       : 'bg-white border-[#E5DCD5] text-[#202124] hover:border-[#C85A3F]/40'
                   }`}
                 >
-                  {cat.name} {count > 0 && <span className="opacity-80 font-normal">({count})</span>}
+                  <span>{cat.name}</span>
+                  {count > 0 && <span className="opacity-80 font-normal">({count})</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Mobile Sticky Quick Category Navigator (< 1024px) */}
+        <div className="lg:hidden sticky top-[57px] z-30 -mx-4 px-4 py-2 bg-[#FCFAF7]/95 backdrop-blur-md border-y border-[#E5DCD5] shadow-xs">
+          <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-none select-none scroll-smooth">
+            <button
+              type="button"
+              onClick={() => scrollToCategory('all')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold whitespace-nowrap transition-all border cursor-pointer shrink-0 min-h-[36px] flex items-center ${
+                activeCategory === 'all'
+                  ? 'bg-[#C85A3F] border-[#C85A3F] text-white shadow-xs'
+                  : 'bg-white border-[#E5DCD5] text-[#202124] hover:border-[#C85A3F]/40'
+              }`}
+            >
+              All ({menuItems.length})
+            </button>
+            {categories.map((cat) => {
+              const count = menuItems.filter(m => m.category === cat.name || m.categoryId === cat.id).length;
+              return (
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={() => scrollToCategory(cat.name)}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border cursor-pointer shrink-0 min-h-[36px] flex items-center gap-1 ${
+                    activeCategory === cat.name
+                      ? 'bg-[#C85A3F] border-[#C85A3F] text-white shadow-xs font-extrabold'
+                      : 'bg-white border-[#E5DCD5] text-[#202124] hover:border-[#C85A3F]/40'
+                  }`}
+                >
+                  <span>{cat.name}</span>
+                  {count > 0 && <span className="opacity-75 text-[11px]">({count})</span>}
                 </button>
               );
             })}
@@ -1436,8 +1590,8 @@ export const CustomerMenu: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Cards Grid: 3 cards per row desktop, 2 on tablet, 1 on mobile */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {/* Cards Grid: Mobile-optimized horizontal cards, tablet/desktop vertical grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3.5 sm:gap-4">
                     {items.map((item) => {
                       const isVeg = item.isVeg || item.veg || item.vegetarian;
                       const isAvailable = item.isAvailable !== false && item.available !== false;
@@ -1449,87 +1603,169 @@ export const CustomerMenu: React.FC = () => {
                       return (
                         <div
                           key={item.id}
-                          className={`bg-white border border-[#E5DCD5] rounded-2xl p-3.5 flex flex-col justify-between shadow-xs hover:border-[#C85A3F]/40 hover:shadow-md transition-all duration-200 group ${
+                          className={`bg-white border border-[#E5DCD5] rounded-2xl p-3 sm:p-3.5 flex flex-col justify-between shadow-xs hover:border-[#C85A3F]/40 hover:shadow-md transition-all duration-200 group ${
                             !isAvailable ? 'opacity-60' : ''
                           }`}
                         >
-                          <div className="space-y-3">
-                            {/* 1. Dish Image + Badges */}
-                            <div className="w-full h-36 sm:h-38 rounded-xl overflow-hidden bg-[#FCFAF7] border border-[#E5DCD5] relative shrink-0">
-                              {(item.imageUrl || item.image) ? (
-                                <img
-                                  src={item.imageUrl || item.image}
-                                  alt={item.name}
-                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                  loading="lazy"
-                                />
-                              ) : (
-                                <div className="w-full h-full flex flex-col items-center justify-center text-[#756B64] bg-[#F3E8DF]/40">
-                                  <Utensils className="w-8 h-8 text-[#C85A3F]/40 mb-1" />
-                                  <span className="text-[10px] font-semibold text-[#756B64]">House Specialty</span>
-                                </div>
-                              )}
-
-                              {/* Single Promo Badge (Top Left) */}
+                          {/* Card Content: Mobile row layout, Tablet/Desktop column layout */}
+                          <div className="flex flex-row sm:flex-col justify-between items-start gap-3 w-full">
+                            {/* Text Details (Left on mobile, Top on desktop) */}
+                            <div className="flex-1 min-w-0 space-y-1.5 sm:space-y-3 sm:order-2">
+                              {/* Single Promo Badge on Mobile */}
                               {promoBadge && (
-                                <span className="absolute top-2 left-2 bg-[#C85A3F] text-white text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md shadow-xs">
+                                <span className="sm:hidden inline-block bg-[#C85A3F] text-white text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded shadow-xs mb-0.5">
                                   {promoBadge}
                                 </span>
                               )}
 
-                              {/* Preparation Time (Bottom Right) ONLY if real */}
-                              {prepTime && (
-                                <span className="absolute bottom-2 right-2 bg-black/75 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
-                                  <Clock className="w-3 h-3 text-[#F3E8DF]" />
-                                  <span>{prepTime}m</span>
-                                </span>
-                              )}
-
-                              {/* Sold out overlay */}
-                              {!isAvailable && (
-                                <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center">
-                                  <span className="text-white text-[11px] font-extrabold bg-[#202124]/90 px-3 py-1 rounded-md uppercase tracking-wider">
-                                    Sold Out
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-
-                            {/* 2. Dish Name + Dietary Indicator */}
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1.5">
-                                {isVeg !== undefined && (
-                                  <span
-                                    className={`inline-flex items-center justify-center w-3.5 h-3.5 border rounded-xs shrink-0 ${
-                                      isVeg
-                                        ? 'border-[#2E8B57]'
-                                        : 'border-[#C85A3F]'
-                                    }`}
-                                    title={isVeg ? 'Vegetarian' : 'Non-Vegetarian'}
-                                  >
+                              <div className="space-y-1">
+                                <div className="flex items-start gap-1.5">
+                                  {isVeg !== undefined && (
                                     <span
-                                      className={`w-2 h-2 rounded-full ${
-                                        isVeg ? 'bg-[#2E8B57]' : 'bg-[#C85A3F]'
+                                      className={`inline-flex items-center justify-center w-3.5 h-3.5 border rounded-xs shrink-0 mt-0.5 ${
+                                        isVeg ? 'border-[#2E8B57]' : 'border-[#C85A3F]'
                                       }`}
-                                    />
+                                      title={isVeg ? 'Vegetarian' : 'Non-Vegetarian'}
+                                    >
+                                      <span
+                                        className={`w-2 h-2 rounded-full ${
+                                          isVeg ? 'bg-[#2E8B57]' : 'bg-[#C85A3F]'
+                                        }`}
+                                      />
+                                    </span>
+                                  )}
+                                  <h3 className="font-extrabold text-sm text-[#202124] leading-snug break-words">
+                                    {item.name}
+                                  </h3>
+                                </div>
+
+                                {/* Price on mobile */}
+                                <div className="flex items-baseline gap-1.5 sm:hidden">
+                                  <span className="text-sm font-extrabold text-[#202124]">
+                                    {formatPrice(item.discountPrice || item.price)}
+                                  </span>
+                                  {item.discountPrice && item.discountPrice < item.price && (
+                                    <span className="text-[10px] text-[#756B64] line-through">
+                                      {formatPrice(item.price)}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Preparation time badge on mobile */}
+                                {prepTime && (
+                                  <div className="sm:hidden flex items-center gap-1 text-[10px] text-[#756B64]">
+                                    <Clock className="w-3 h-3 text-[#C85A3F]" />
+                                    <span>{prepTime}m prep</span>
+                                  </div>
+                                )}
+
+                                {/* Short Description */}
+                                {item.description && (
+                                  <p className="text-[11px] text-[#756B64] line-clamp-2 leading-relaxed">
+                                    {item.description}
+                                  </p>
+                                )}
+
+                                {/* Customisable indicator badge */}
+                                {hasVariantsOrAddons && (
+                                  <span className="inline-block text-[10px] font-bold text-[#C85A3F] bg-[#F3E8DF] px-2 py-0.5 rounded-md">
+                                    Customisable
                                   </span>
                                 )}
-                                <h3 className="font-extrabold text-sm text-[#202124] leading-snug line-clamp-2">
-                                  {item.name}
-                                </h3>
+                              </div>
+                            </div>
+
+                            {/* Thumbnail & Action (Right on mobile, Top on desktop) */}
+                            <div className="flex flex-col items-center shrink-0 sm:w-full sm:order-1 relative">
+                              <div className="w-24 h-24 sm:w-full sm:h-38 rounded-xl overflow-hidden bg-[#FCFAF7] border border-[#E5DCD5] relative">
+                                {(item.imageUrl || item.image) && !failedImageIds[item.id] ? (
+                                  <img
+                                    src={item.imageUrl || item.image}
+                                    alt={item.name}
+                                    onError={() => setFailedImageIds(prev => ({ ...prev, [item.id]: true }))}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex flex-col items-center justify-center text-[#756B64] bg-[#F3E8DF]/40">
+                                    <Utensils className="w-6 h-6 sm:w-8 sm:h-8 text-[#C85A3F]/40 mb-1" />
+                                    <span className="text-[9px] sm:text-[10px] font-semibold text-[#756B64]">House Specialty</span>
+                                  </div>
+                                )}
+
+                                {/* Desktop Single Promo Badge (Top Left) */}
+                                {promoBadge && (
+                                  <span className="hidden sm:inline-block absolute top-2 left-2 bg-[#C85A3F] text-white text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md shadow-xs">
+                                    {promoBadge}
+                                  </span>
+                                )}
+
+                                {/* Desktop Preparation Time (Bottom Right) */}
+                                {prepTime && (
+                                  <span className="hidden sm:flex absolute bottom-2 right-2 bg-black/75 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-md items-center gap-1">
+                                    <Clock className="w-3 h-3 text-[#F3E8DF]" />
+                                    <span>{prepTime}m</span>
+                                  </span>
+                                )}
+
+                                {/* Sold out overlay */}
+                                {!isAvailable && (
+                                  <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center">
+                                    <span className="text-white text-[10px] sm:text-[11px] font-extrabold bg-[#202124]/90 px-2 sm:px-3 py-1 rounded-md uppercase tracking-wider text-center">
+                                      Sold Out
+                                    </span>
+                                  </div>
+                                )}
                               </div>
 
-                              {/* 3. Short Description (omitted if not present) */}
-                              {item.description && (
-                                <p className="text-[11px] text-[#756B64] line-clamp-2 leading-relaxed">
-                                  {item.description}
-                                </p>
-                              )}
+                              {/* Mobile Add / Stepper Button */}
+                              <div className="sm:hidden mt-2 w-full flex justify-center">
+                                {!isAvailable ? (
+                                  <span className="text-[10px] font-bold text-[#756B64] bg-[#F3E8DF] px-2.5 py-1.5 rounded-lg uppercase">
+                                    Unavailable
+                                  </span>
+                                ) : cartCount > 0 ? (
+                                  <div className="flex items-center justify-between gap-1.5 bg-[#F3E8DF] p-1 rounded-xl border border-[#E5DCD5] min-w-[96px] h-10 shadow-xs">
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity(item.id, cartCount - 1)}
+                                      className="w-8 h-8 bg-white hover:bg-[#E5DCD5] active:bg-[#E5DCD5] text-[#202124] font-extrabold rounded-lg flex items-center justify-center text-xs shadow-xs cursor-pointer transition-colors"
+                                      aria-label={`Decrease ${item.name} quantity`}
+                                    >
+                                      <Minus className="w-3.5 h-3.5" />
+                                    </button>
+                                    <span className="text-xs font-extrabold text-[#202124] min-w-[20px] text-center">
+                                      {cartCount}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => updateQuantity(item.id, cartCount + 1)}
+                                      className="w-8 h-8 bg-white hover:bg-[#E5DCD5] active:bg-[#E5DCD5] text-[#202124] font-extrabold rounded-lg flex items-center justify-center text-xs shadow-xs cursor-pointer transition-colors"
+                                      aria-label={`Increase ${item.name} quantity`}
+                                    >
+                                      <Plus className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleQuickAdd(item, e)}
+                                    className="w-full min-h-[40px] px-3 py-2 bg-[#C85A3F] hover:bg-[#A94332] active:scale-95 text-white text-xs font-extrabold rounded-xl transition-all shadow-xs flex items-center justify-center gap-1 cursor-pointer"
+                                    aria-label={`Add ${item.name} to cart`}
+                                  >
+                                    <Plus className="w-3.5 h-3.5" />
+                                    <span>ADD</span>
+                                    {hasVariantsOrAddons && (
+                                      <span className="text-[9px] opacity-80">+</span>
+                                    )}
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </div>
 
-                          {/* 4. Price & Add / Stepper Action */}
-                          <div className="pt-3 mt-2 border-t border-[#F3E8DF] flex items-center justify-between gap-2">
+                          {/* Desktop Price & Add / Stepper Action (hidden on mobile, sm:flex) */}
+                          <div className="hidden sm:flex pt-3 mt-2 border-t border-[#F3E8DF] items-center justify-between gap-2 sm:order-3">
                             <div className="flex items-baseline gap-1.5">
                               <span className="text-sm font-extrabold text-[#202124]">
                                 {formatPrice(item.discountPrice || item.price)}
@@ -1856,32 +2092,52 @@ export const CustomerMenu: React.FC = () => {
             <span>Direct Kitchen Dispatch</span>
           </div>
         </div>
+
+        {/* Mobile floating cart clearance spacer to prevent covering last items or reassurance */}
+        {(totalCartCount > 0 || activeOrders.length > 0) && (
+          <div className="h-16 lg:hidden" aria-hidden="true" />
+        )}
       </main>
 
       {/* 6. Floating Bottom Cart Bar for Mobile (< 1024px) */}
       {totalCartCount > 0 ? (
-        <div className="lg:hidden fixed bottom-4 inset-x-4 z-40 max-w-lg mx-auto">
+        <div 
+          style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
+          className="lg:hidden fixed inset-x-4 z-40 max-w-lg mx-auto"
+        >
           <button
+            type="button"
             onClick={() => setIsMobileCartOpen(true)}
-            className="w-full bg-[#C85A3F] hover:bg-[#A94332] text-white px-5 py-3.5 rounded-2xl shadow-xl shadow-[#C85A3F]/30 flex items-center justify-between font-extrabold transition-transform active:scale-[0.98] cursor-pointer"
+            aria-label={`View order, ${totalCartCount} ${totalCartCount === 1 ? 'item' : 'items'}, total ${formatPrice(totalCartCost)}`}
+            className="w-full min-h-[54px] bg-[#C85A3F] hover:bg-[#A94332] active:bg-[#A94332] text-white px-5 py-3.5 rounded-2xl shadow-xl shadow-[#C85A3F]/30 flex items-center justify-between font-extrabold transition-transform active:scale-[0.98] cursor-pointer"
           >
             <div className="flex items-center gap-2.5">
-              <ShoppingBag className="w-5 h-5" />
-              <span className="text-xs">
+              <div className="relative">
+                <ShoppingBag className="w-5 h-5" />
+                <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 bg-white text-[#C85A3F] text-[9px] font-black rounded-full flex items-center justify-center shadow-xs">
+                  {totalCartCount > 99 ? '99+' : totalCartCount}
+                </span>
+              </div>
+              <span className="text-xs font-bold">
                 {totalCartCount} {totalCartCount === 1 ? 'item' : 'items'} · {formatPrice(totalCartCost)}
               </span>
             </div>
-            <div className="flex items-center gap-1 text-xs">
+            <div className="flex items-center gap-1 text-xs font-extrabold bg-white/20 px-3 py-1 rounded-xl">
               <span>View Order</span>
               <ChevronRight className="w-4 h-4" />
             </div>
           </button>
         </div>
       ) : activeOrders.length > 0 ? (
-        <div className="lg:hidden fixed bottom-4 inset-x-4 z-40 max-w-lg mx-auto">
+        <div 
+          style={{ bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
+          className="lg:hidden fixed inset-x-4 z-40 max-w-lg mx-auto"
+        >
           <button
+            type="button"
             onClick={() => navigate(`/customer/restaurant/${tenantId}/active-order`)}
-            className="w-full bg-[#202124] hover:bg-[#333] text-white px-5 py-3.5 rounded-2xl shadow-xl flex items-center justify-between font-extrabold transition-transform active:scale-[0.98] cursor-pointer border border-white/10"
+            aria-label={`View active order for Table ${tableNumber || session?.tableNumber}`}
+            className="w-full min-h-[54px] bg-[#202124] hover:bg-[#333] active:bg-[#333] text-white px-5 py-3.5 rounded-2xl shadow-xl flex items-center justify-between font-extrabold transition-transform active:scale-[0.98] cursor-pointer border border-white/10"
           >
             <div className="flex items-center gap-2.5">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -1889,8 +2145,8 @@ export const CustomerMenu: React.FC = () => {
                 Table {tableNumber || session?.tableNumber}: {activeOrders.length} {activeOrders.length === 1 ? 'order' : 'orders'} · {formatPrice(activeOrdersTotal)}
               </span>
             </div>
-            <div className="flex items-center gap-1 text-xs text-emerald-400">
-              <span>View Active Order</span>
+            <div className="flex items-center gap-1 text-xs text-emerald-400 bg-white/10 px-3 py-1 rounded-xl">
+              <span>View Active</span>
               <ChevronRight className="w-4 h-4" />
             </div>
           </button>
@@ -1900,15 +2156,20 @@ export const CustomerMenu: React.FC = () => {
       {/* 7. Mobile Cart Drawer / Bottom Sheet */}
       {isMobileCartOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
-          <div className="bg-white border border-[#E5DCD5] rounded-t-3xl sm:rounded-3xl p-5 w-full max-w-md max-h-[85vh] overflow-y-auto space-y-4 text-left relative shadow-2xl">
+          <div 
+            style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))' }}
+            className="bg-white border border-[#E5DCD5] rounded-t-3xl sm:rounded-3xl p-5 w-full max-w-md max-h-[85vh] overflow-y-auto space-y-4 text-left relative shadow-2xl"
+          >
             <div className="flex items-center justify-between pb-3 border-b border-[#E5DCD5]">
               <div className="flex items-center gap-2">
                 <ShoppingBag className="w-4 h-4 text-[#C85A3F]" />
                 <h3 className="text-sm font-extrabold text-[#202124]">Your Order Summary</h3>
               </div>
               <button
+                type="button"
                 onClick={() => setIsMobileCartOpen(false)}
-                className="p-1.5 bg-[#F3E8DF] hover:bg-[#E5DCD5] rounded-full text-[#756B64] hover:text-[#202124]"
+                aria-label="Close cart summary"
+                className="p-2 bg-[#F3E8DF] hover:bg-[#E5DCD5] rounded-full text-[#756B64] hover:text-[#202124] transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1923,19 +2184,23 @@ export const CustomerMenu: React.FC = () => {
                     {ci.notes && <p className="text-[10px] text-[#C85A3F]">{ci.notes}</p>}
                     <span className="text-[11px] font-bold text-[#756B64]">{formatPrice(ci.pricePerUnit * ci.count)}</span>
                   </div>
-                  <div className="flex items-center gap-1 bg-[#F3E8DF] p-1 rounded-xl shrink-0">
+                  <div className="flex items-center gap-1.5 bg-[#F3E8DF] p-1 rounded-xl shrink-0">
                     <button
+                      type="button"
                       onClick={() => updateQuantity(ci.itemId, ci.count - 1)}
-                      className="w-5 h-5 bg-white text-[#202124] font-bold rounded flex items-center justify-center text-xs"
+                      className="w-7 h-7 bg-white text-[#202124] font-bold rounded flex items-center justify-center text-xs shadow-xs active:bg-gray-100 cursor-pointer"
+                      aria-label={`Decrease ${ci.name} quantity`}
                     >
-                      <Minus className="w-3 h-3" />
+                      <Minus className="w-3.5 h-3.5" />
                     </button>
-                    <span className="text-xs font-extrabold text-[#202124] w-3.5 text-center">{ci.count}</span>
+                    <span className="text-xs font-extrabold text-[#202124] w-4 text-center">{ci.count}</span>
                     <button
+                      type="button"
                       onClick={() => updateQuantity(ci.itemId, ci.count + 1)}
-                      className="w-5 h-5 bg-white text-[#202124] font-bold rounded flex items-center justify-center text-xs"
+                      className="w-7 h-7 bg-white text-[#202124] font-bold rounded flex items-center justify-center text-xs shadow-xs active:bg-gray-100 cursor-pointer"
+                      aria-label={`Increase ${ci.name} quantity`}
                     >
-                      <Plus className="w-3 h-3" />
+                      <Plus className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -1970,27 +2235,29 @@ export const CustomerMenu: React.FC = () => {
                   placeholder="Your Name *"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  className="w-full bg-white border border-[#E5DCD5] rounded-xl px-3 py-2 text-xs text-[#202124] outline-none"
+                  className="w-full bg-white border border-[#E5DCD5] rounded-xl px-3 py-2.5 text-xs text-[#202124] outline-none"
                 />
                 <input
                   type="text"
                   placeholder="Cooking instructions (e.g. Less spicy)"
                   value={orderInstructions}
                   onChange={(e) => setOrderInstructions(e.target.value)}
-                  className="w-full bg-white border border-[#E5DCD5] rounded-xl px-3 py-2 text-xs text-[#202124] outline-none"
+                  className="w-full bg-white border border-[#E5DCD5] rounded-xl px-3 py-2.5 text-xs text-[#202124] outline-none"
                 />
                 <button
+                  type="button"
                   onClick={handlePlaceOrder}
                   disabled={isPlacingOrder}
-                  className="w-full bg-[#C85A3F] text-white font-extrabold text-xs py-3.5 rounded-xl transition-all shadow-md shadow-[#C85A3F]/20 cursor-pointer"
+                  className="w-full min-h-[48px] bg-[#C85A3F] hover:bg-[#A94332] active:bg-[#A94332] text-white font-extrabold text-xs py-3.5 rounded-xl transition-all shadow-md shadow-[#C85A3F]/20 cursor-pointer"
                 >
-                  {isPlacingOrder ? 'Sending to Kitchen...' : `Confirm Order • ${formatPrice(totalCartCost)}`}
+                  {isPlacingOrder ? 'Sending to Kitchen...' : (activeOrders.length > 0 ? `Confirm Add-on Order • ${formatPrice(totalCartCost)}` : `Confirm Order • ${formatPrice(totalCartCost)}`)}
                 </button>
               </div>
             ) : (
               <button
+                type="button"
                 onClick={() => navigate('/customer/cart')}
-                className="w-full bg-[#C85A3F] text-white font-extrabold text-xs py-3.5 rounded-xl shadow-md shadow-[#C85A3F]/20 flex items-center justify-center gap-1 cursor-pointer"
+                className="w-full min-h-[48px] bg-[#C85A3F] hover:bg-[#A94332] active:bg-[#A94332] text-white font-extrabold text-xs py-3.5 rounded-xl shadow-md shadow-[#C85A3F]/20 flex items-center justify-center gap-1 cursor-pointer"
               >
                 <span>View Cart & Checkout</span>
                 <ArrowRight className="w-4 h-4" />
@@ -2034,8 +2301,9 @@ export const CustomerMenu: React.FC = () => {
                     return (
                       <button
                         key={v.id || v.name}
+                        type="button"
                         onClick={() => setSelectedVariant(v)}
-                        className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer ${
+                        className={`p-2.5 min-h-[44px] rounded-xl border text-center transition-all cursor-pointer flex flex-col justify-center items-center ${
                           isSelected
                             ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F] font-extrabold'
                             : 'bg-[#FCFAF7] border-[#E5DCD5] text-[#202124] hover:border-[#C85A3F]/50'
@@ -2066,12 +2334,13 @@ export const CustomerMenu: React.FC = () => {
                     return (
                       <button
                         key={addon.id || addon.name}
+                        type="button"
                         onClick={() => {
                           setSelectedAddons(prev =>
                             isChecked ? prev.filter(a => (a.id || a.name) !== (addon.id || addon.name)) : [...prev, addon]
                           );
                         }}
-                        className={`w-full p-2.5 rounded-xl border flex items-center justify-between text-xs transition-all cursor-pointer ${
+                        className={`w-full p-2.5 min-h-[44px] rounded-xl border flex items-center justify-between text-xs transition-all cursor-pointer ${
                           isChecked
                             ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#202124] font-bold'
                             : 'bg-[#FCFAF7] border-[#E5DCD5] text-[#756B64] hover:border-[#C85A3F]/50'
@@ -2106,23 +2375,28 @@ export const CustomerMenu: React.FC = () => {
             <div className="flex items-center gap-3 pt-2 border-t border-[#F3E8DF]">
               <div className="flex items-center gap-2 bg-[#F3E8DF] p-1.5 rounded-xl shrink-0">
                 <button
+                  type="button"
                   onClick={() => setItemQuantity(prev => Math.max(1, prev - 1))}
-                  className="w-7 h-7 bg-white text-[#202124] font-bold rounded-lg flex items-center justify-center text-xs cursor-pointer"
+                  className="w-8 h-8 bg-white text-[#202124] font-bold rounded-lg flex items-center justify-center text-xs shadow-xs active:bg-gray-100 cursor-pointer"
+                  aria-label="Decrease quantity"
                 >
-                  <Minus className="w-3.5 h-3.5" />
+                  <Minus className="w-4 h-4" />
                 </button>
                 <span className="text-xs font-extrabold text-[#202124] w-4 text-center">{itemQuantity}</span>
                 <button
+                  type="button"
                   onClick={() => setItemQuantity(prev => prev + 1)}
-                  className="w-7 h-7 bg-white text-[#202124] font-bold rounded-lg flex items-center justify-center text-xs cursor-pointer"
+                  className="w-8 h-8 bg-white text-[#202124] font-bold rounded-lg flex items-center justify-center text-xs shadow-xs active:bg-gray-100 cursor-pointer"
+                  aria-label="Increase quantity"
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Plus className="w-4 h-4" />
                 </button>
               </div>
 
               <button
+                type="button"
                 onClick={handleCustomizedAdd}
-                className="flex-1 py-3 bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold text-xs rounded-xl shadow-md shadow-[#C85A3F]/20 cursor-pointer transition-all"
+                className="flex-1 min-h-[48px] py-3 bg-[#C85A3F] hover:bg-[#A94332] active:bg-[#A94332] text-white font-extrabold text-xs rounded-xl shadow-md shadow-[#C85A3F]/20 cursor-pointer transition-all"
               >
                 Add to Order
               </button>

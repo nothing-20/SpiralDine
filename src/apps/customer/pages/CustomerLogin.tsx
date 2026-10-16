@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { ConfirmationResult } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../../shared/firebase/config';
@@ -70,7 +70,21 @@ type TLoginForm = z.infer<typeof loginSchema>;
 
 export const CustomerLogin: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { addToast } = useToastStore();
+
+  const getSuccessRedirect = () => {
+    const from = (location.state as any)?.from;
+    if (from?.pathname) {
+      return `${from.pathname}${from.search || ''}`;
+    }
+    const searchParams = new URLSearchParams(location.search);
+    const redirectParam = searchParams.get('redirect');
+    if (redirectParam) {
+      return redirectParam;
+    }
+    return '/customer/home';
+  };
 
   // Primary authentication method is Mobile Number as requested
   const [authMethod, setAuthMethod] = useState<'phone' | 'email'>('phone');
@@ -315,9 +329,9 @@ export const CustomerLogin: React.FC = () => {
         });
       }
 
-      console.log('[AUTH Customer Phone Login] Successful customer sign-in. Navigating to /customer/home');
+      console.log('[AUTH Customer Phone Login] Successful customer sign-in. Navigating to destination.');
       addToast('Signed in successfully!', 'success');
-      navigate('/customer/home', { replace: true });
+      navigate(getSuccessRedirect(), { replace: true });
     } catch (err: any) {
       console.error('[AUTH Customer Phone Verify OTP Error]', err);
       let friendlyError = 'Failed to verify OTP. Please try again.';
@@ -378,7 +392,7 @@ export const CustomerLogin: React.FC = () => {
       }
 
       addToast('Signed in successfully!', 'success');
-      navigate('/customer/home', { replace: true });
+      navigate(getSuccessRedirect(), { replace: true });
     } catch (e: any) {
       console.error('[AUTH Customer Login] Authentication failed:', e);
       let errMsg = e.message || 'Login failed. Please verify credentials.';
@@ -497,10 +511,10 @@ export const CustomerLogin: React.FC = () => {
       </header>
 
       {/* 3. MAIN CONTENT: CENTERED LOGIN CARD */}
-      <main className="w-full max-w-6xl mx-auto px-6 py-6 md:py-10 flex flex-col items-center justify-center flex-1 relative z-10 space-y-8">
+      <main className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 md:py-10 flex flex-col items-center justify-center flex-1 relative z-10 space-y-8">
         
         {/* Centered White Card */}
-        <div className="max-w-md w-full p-8 md:p-10 bg-white border border-[#E9DED6] rounded-[24px] shadow-md relative overflow-hidden text-left">
+        <div className="max-w-md w-full p-6 sm:p-8 md:p-10 bg-white border border-[#E9DED6] rounded-[24px] shadow-md relative overflow-hidden text-left">
           
           {/* Card Icon & Header */}
           <div className="space-y-3 text-center mb-6">

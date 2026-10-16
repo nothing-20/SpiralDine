@@ -113,8 +113,14 @@ export const OrderTracking: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const isReceiptRequested = searchParams.get('view') === 'receipt';
-  const { user } = useAuth();
+  const { user, ensureGuestAuth } = useAuth();
   const { formatPrice, formatCurrency } = useCurrency();
+
+  useEffect(() => {
+    ensureGuestAuth().catch(err => {
+      console.warn('[OrderTracking] Background guest auth init warning:', err);
+    });
+  }, []);
 
   // Core Data States
   const [order, setOrder] = useState<any | null>(null);
@@ -1200,22 +1206,36 @@ export const OrderTracking: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-[#FCFAF7] text-left select-none pb-16">
+    <div className="min-h-screen bg-[#FCFAF7] text-left select-none pb-36 sm:pb-24 pb-[calc(7rem+env(safe-area-inset-bottom,0px))]">
       
       {/* 1. TOP CUSTOMER NAVIGATION */}
       <CustomerHeader />
 
-      <div className="max-w-[1240px] mx-auto px-4 md:px-8 py-6 space-y-6">
+      <div className="max-w-[1240px] mx-auto px-4 md:px-8 py-5 sm:py-6 space-y-5 sm:space-y-6">
         
-        {/* Navigation Breadcrumb */}
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => navigate(tenantId ? `/customer/restaurant/${tenantId}` : -1 as any)}
-            className="inline-flex items-center space-x-2 text-xs font-bold text-[#756B64] hover:text-[#C85A3F] transition-colors cursor-pointer group py-1"
-          >
-            <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-0.5" />
-            <span>Back to Restaurant</span>
-          </button>
+        {/* Navigation Breadcrumb & Quick Actions */}
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate(tenantId ? `/customer/restaurant/${tenantId}/menu` : -1 as any)}
+              className="inline-flex items-center space-x-2 text-xs font-bold text-[#756B64] hover:text-[#C85A3F] transition-colors cursor-pointer group py-2 px-2.5 -ml-2 rounded-xl hover:bg-[#F3E8DF]/60 active:scale-95"
+            >
+              <ArrowLeft className="w-4 h-4 transition-transform group-hover:-translate-x-0.5" />
+              <span>Back to Menu</span>
+            </button>
+
+            {tenantId && (
+              <button
+                type="button"
+                onClick={() => navigate(`/customer/restaurant/${tenantId}/active-order`)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs font-bold rounded-xl transition-all active:scale-95 cursor-pointer shadow-2xs"
+                title="View all orders for your table visit"
+              >
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Dining Session</span>
+              </button>
+            )}
+          </div>
 
           <span className="hidden sm:block text-xs font-serif italic text-[#C85A3F]/80">
             Real-Time Dining Updates
@@ -1353,19 +1373,19 @@ export const OrderTracking: React.FC = () => {
               </div>
 
               {/* Order Meta Strip */}
-              <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
-                <div>
-                  <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider block">
+              <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl p-3 sm:p-3.5 grid grid-cols-3 gap-2 text-xs">
+                <div className="min-w-0">
+                  <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider block truncate">
                     Order ID
                   </span>
-                  <div className="flex items-center space-x-1.5 mt-0.5">
-                    <strong className="font-mono font-bold text-[#202124] text-xs md:text-sm uppercase">
+                  <div className="flex items-center space-x-1 mt-0.5 min-w-0">
+                    <strong className="font-mono font-bold text-[#202124] text-xs md:text-sm uppercase truncate">
                       {orderId}
                     </strong>
                     <button
                       type="button"
                       onClick={handleCopyOrderId}
-                      className="text-[#756B64] hover:text-[#C85A3F] p-1 rounded transition-colors cursor-pointer"
+                      className="text-[#756B64] hover:text-[#C85A3F] p-1 rounded transition-colors cursor-pointer shrink-0"
                       title="Copy Order ID"
                       aria-label="Copy Order ID"
                     >
@@ -1378,25 +1398,68 @@ export const OrderTracking: React.FC = () => {
                   </div>
                 </div>
 
-                <div>
-                  <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider block">
+                <div className="min-w-0">
+                  <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider block truncate">
                     Placed At
                   </span>
-                  <strong className="font-bold text-[#202124] text-xs md:text-sm block mt-0.5">
+                  <strong className="font-bold text-[#202124] text-xs md:text-sm block mt-0.5 truncate">
                     {placedAtFormatted}
                   </strong>
                 </div>
 
-                <div>
-                  <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider block">
-                    Elapsed Time
+                <div className="min-w-0">
+                  <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider block truncate">
+                    Elapsed
                   </span>
-                  <div className="flex items-center space-x-1 text-[#C85A3F] font-bold text-xs md:text-sm mt-0.5">
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>{elapsedMinutes} mins</span>
+                  <div className="flex items-center space-x-1 text-[#C85A3F] font-bold text-xs md:text-sm mt-0.5 truncate">
+                    <Clock className="w-3.5 h-3.5 shrink-0" />
+                    <span>{elapsedMinutes}m</span>
                   </div>
                 </div>
               </div>
+
+              {/* Multi-Segment Visual Progress Tracker */}
+              {!isCancelled && (
+                <div className="space-y-2 pt-1 pb-1">
+                  {/* 5-Segment Connected Progress Track */}
+                  <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+                    {trackingSteps.slice(0, 5).map((step, idx) => {
+                      const isStepDone = activeIndex > idx;
+                      const isStepCurrent = activeIndex === idx;
+                      return (
+                        <div key={step.key} className="space-y-1">
+                          <div 
+                            className={`h-2 sm:h-2.5 rounded-full transition-all ${
+                              isStepDone 
+                                ? 'bg-[#2E8B57]' 
+                                : isStepCurrent 
+                                ? 'bg-[#C85A3F] animate-pulse' 
+                                : 'bg-[#E5DCD5]'
+                            }`}
+                            title={`${step.label}: ${isStepDone ? 'Completed' : isStepCurrent ? 'In Progress' : 'Pending'}`}
+                          />
+                          <span className={`text-[10px] font-bold block truncate text-center hidden sm:block ${
+                            isStepDone ? 'text-[#2E8B57]' : isStepCurrent ? 'text-[#C85A3F]' : 'text-[#756B64]/70'
+                          }`}>
+                            {step.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Active Step Indicator Pill for Mobile Viewports */}
+                  <div className="flex items-center justify-between text-[11px] text-[#756B64] sm:hidden pt-0.5">
+                    <span className="font-extrabold text-[#C85A3F] flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-[#C85A3F] animate-ping" />
+                      <span>Step {Math.min(activeIndex + 1, 5)} of 5: {trackingSteps[Math.min(activeIndex, 4)]?.label}</span>
+                    </span>
+                    <span className="text-[#756B64] font-medium font-mono">
+                      {elapsedMinutes}m elapsed
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {/* Order Cancelled Alert */}
               {isCancelled ? (
@@ -1459,23 +1522,25 @@ export const OrderTracking: React.FC = () => {
                       const unitPrice = Number(item.pricePerUnit || item.price || 0);
 
                       return (
-                        <div key={idx} className="flex items-center justify-between py-2 first:pt-0 last:pb-0 gap-3 text-xs">
-                          <div className="flex items-center space-x-2.5 min-w-0">
-                            <DietaryBadge isVeg={isVegItem} />
-                            <div className="min-w-0">
-                              <p className="font-extrabold text-[#202124] truncate">
+                        <div key={idx} className="flex items-start justify-between py-2 first:pt-0 last:pb-0 gap-2.5 text-xs">
+                          <div className="flex items-start space-x-2.5 min-w-0 flex-1">
+                            <span className="mt-0.5 shrink-0">
+                              <DietaryBadge isVeg={isVegItem} />
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-extrabold text-[#202124] break-words">
                                 {item.name || 'Dish'}
                               </p>
                               {item.notes && (
-                                <p className="text-[11px] text-[#756B64] truncate">
+                                <p className="text-[11px] text-[#756B64] break-words mt-0.5">
                                   Note: {item.notes}
                                 </p>
                               )}
                             </div>
                           </div>
-                          <div className="flex items-center space-x-3 shrink-0">
+                          <div className="flex items-center space-x-2.5 shrink-0 ml-2">
                             <span className="px-2 py-0.5 bg-[#F3E8DF]/60 text-[#202124] font-bold rounded-md text-[11px]">
-                              x{qty}
+                              ×{qty}
                             </span>
                             <span className="font-mono font-bold text-[#202124] text-xs min-w-[55px] text-right">
                               {formatPrice(unitPrice * qty)}
@@ -1727,7 +1792,7 @@ export const OrderTracking: React.FC = () => {
                           type="button"
                           disabled={isMarkingDiningCompleted}
                           onClick={handleCompleteDining}
-                          className="w-full py-2 bg-[#C85A3F] hover:bg-[#A94332] text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          className="w-full min-h-[44px] py-2.5 bg-[#C85A3F] hover:bg-[#A94332] active:scale-98 text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
                         >
                           <Utensils className="w-3.5 h-3.5" />
                           <span>{isMarkingDiningCompleted ? 'Finalizing Bill...' : 'Done Eating — Get Bill'}</span>
@@ -1755,7 +1820,7 @@ export const OrderTracking: React.FC = () => {
                         <button
                           type="button"
                           onClick={handleOpenCanonicalBill}
-                          className="w-full bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold py-3 px-4 rounded-xl text-xs shadow-md shadow-[#C85A3F]/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                          className="w-full min-h-[44px] bg-[#C85A3F] hover:bg-[#A94332] active:scale-98 text-white font-extrabold py-3 px-4 rounded-xl text-xs shadow-md shadow-[#C85A3F]/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
                         >
                           <DollarSign className="w-4 h-4" />
                           <span>View & Settle Bill</span>
@@ -1783,7 +1848,7 @@ export const OrderTracking: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => setCancelDialogRequest(activeBillRequest)}
-                              className="px-3 py-1.5 bg-white hover:bg-amber-100/60 text-amber-900 border border-amber-300 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                              className="min-h-[36px] px-3.5 py-1.5 bg-white hover:bg-amber-100/60 active:scale-95 text-amber-900 border border-amber-300 rounded-lg text-xs font-bold transition-all shadow-2xs cursor-pointer"
                             >
                               Cancel Request
                             </button>
@@ -1791,7 +1856,7 @@ export const OrderTracking: React.FC = () => {
                           <button
                             type="button"
                             onClick={handleOpenCanonicalBill}
-                            className="w-full bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold py-2.5 px-4 rounded-xl text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                            className="w-full min-h-[44px] bg-[#C85A3F] hover:bg-[#A94332] active:scale-98 text-white font-extrabold py-2.5 px-4 rounded-xl text-xs shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
                           >
                             <DollarSign className="w-3.5 h-3.5" />
                             <span>Open Bill & Settle</span>
@@ -1816,7 +1881,7 @@ export const OrderTracking: React.FC = () => {
                           <button
                             type="button"
                             onClick={handleOpenCanonicalBill}
-                            className="w-full bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold py-3 px-4 rounded-xl text-xs shadow-md shadow-[#C85A3F]/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                            className="w-full min-h-[44px] bg-[#C85A3F] hover:bg-[#A94332] active:scale-98 text-white font-extrabold py-3 px-4 rounded-xl text-xs shadow-md shadow-[#C85A3F]/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
                           >
                             <DollarSign className="w-4 h-4" />
                             <span>View & Settle Bill</span>
@@ -1828,7 +1893,7 @@ export const OrderTracking: React.FC = () => {
                         type="button"
                         disabled={isSubmittingRequest}
                         onClick={handleRequestBill}
-                        className="w-full bg-white hover:bg-[#F3E8DF] border-2 border-[#C85A3F] text-[#C85A3F] hover:text-[#A94332] font-extrabold py-3.5 px-4 rounded-xl text-xs transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                        className="w-full min-h-[44px] bg-white hover:bg-[#F3E8DF] active:scale-98 border-2 border-[#C85A3F] text-[#C85A3F] hover:text-[#A94332] font-extrabold py-3.5 px-4 rounded-xl text-xs transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                       >
                         <Receipt className="w-4 h-4" />
                         <span>{isSubmittingRequest ? 'Requesting Bill...' : 'Request Bill & Pay'}</span>
@@ -1970,7 +2035,7 @@ export const OrderTracking: React.FC = () => {
                       handleCallWaiter(opt.label);
                     }
                   }}
-                  className="p-3 bg-[#FCFAF7] hover:bg-[#F3E8DF] border border-[#E5DCD5] hover:border-[#C85A3F]/50 rounded-xl flex flex-col items-center justify-center text-center gap-1.5 transition-all cursor-pointer group"
+                  className="p-3 min-h-[54px] bg-[#FCFAF7] hover:bg-[#F3E8DF] active:scale-95 border border-[#E5DCD5] hover:border-[#C85A3F]/50 rounded-xl flex flex-col items-center justify-center text-center gap-1.5 transition-all cursor-pointer group"
                 >
                   <span className="font-bold text-xs text-[#202124] group-hover:text-[#C85A3F]">
                     {opt.label}
