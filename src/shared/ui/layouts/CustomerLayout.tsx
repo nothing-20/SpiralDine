@@ -6,6 +6,7 @@ import { Coffee, Calendar, User, Bell, Check, QrCode, X, Camera, ShieldAlert, Sh
 import { collection, query, onSnapshot, getDoc, doc } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import toast from 'react-hot-toast';
+import QrScannerModal from '../components/QrScannerModal';
 
 interface INotification {
   id: string;
@@ -156,26 +157,6 @@ export const CustomerLayout: React.FC = () => {
   const markAllRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     toast.success('All notifications marked as read');
-  };
-
-  // QR Validation Scan handler
-  const handleScanSimulation = (tenantId: string, tableId: string, token: string) => {
-    // 1. Validate QR Token format
-    if (!token || token.length < 6) {
-      toast.error('Invalid QR Token signature.');
-      return;
-    }
-    // 2. Validate Restaurant / Branch / Table params
-    if (!tenantId || !tableId) {
-      toast.error('Could not map scanned table to any active branch.');
-      return;
-    }
-    
-    setIsQrScannerOpen(false);
-    toast.success(`Table QR Verified! Opening session for ${tableId.replace('TBL-', 'Table ')}...`, { icon: '🍽️' });
-    
-    // Redirect to digital ordering portal session page
-    navigate(`/r/${tenantId}/table/${tableId}`);
   };
 
   return (
@@ -360,36 +341,17 @@ export const CustomerLayout: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-6 pb-24 md:pb-8 md:px-8 relative bg-[#FCFAF7] w-full max-w-7xl mx-auto z-10">
+      <main className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-6 pb-28 md:pb-8 md:px-8 relative bg-[#FCFAF7] w-full max-w-7xl mx-auto z-10">
         <Outlet />
       </main>
 
-      {/* MOBILE BOTTOM NAVIGATION BAR (md:hidden) WITH SAFE-AREA INSET SUPPORT */}
+      {/* MOBILE BOTTOM NAVIGATION BAR (md:hidden) FIXED TO BOTTOM VIEWPORT WITH SAFE-AREA INSET SUPPORT */}
       <nav 
         aria-label="Mobile Navigation"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
-        className="md:hidden bg-[#FCFAF7]/95 border-t border-[#F3E8DF] backdrop-blur-md flex items-center justify-around px-1 z-40 shrink-0 relative"
+        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-[#FCFAF7]/95 border-t border-[#F3E8DF] backdrop-blur-md flex items-center justify-around px-2 shadow-lg"
       >
-        
-        {/* HOME */}
-        <NavLink
-          to="/customer/home"
-          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 h-14 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
-        >
-          <Coffee className="w-4.5 h-4.5 mb-0.5" />
-          <span className="text-[8.5px] font-extrabold font-sans">Home</span>
-        </NavLink>
-
-        {/* EXPLORE */}
-        <NavLink
-          to="/customer/explore"
-          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 h-14 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
-        >
-          <Compass className="w-4.5 h-4.5 mb-0.5" />
-          <span className="text-[8.5px] font-extrabold font-sans">Explore</span>
-        </NavLink>
-
-        {/* QR SCAN BUTTON */}
+        {/* 1. QR SCANNER */}
         <button
           type="button"
           onClick={() => setIsQrScannerOpen(true)}
@@ -399,17 +361,26 @@ export const CustomerLayout: React.FC = () => {
           <div className="w-8 h-8 bg-[#C85A3F] text-white rounded-full flex items-center justify-center shadow-md shadow-[#C85A3F]/30 border border-[#C85A3F]">
             <QrCode className="w-4.5 h-4.5" />
           </div>
-          <span className="text-[8px] font-extrabold font-sans mt-0.5">Scan</span>
+          <span className="text-[8.5px] font-extrabold font-sans mt-0.5">QR Scanner</span>
         </button>
 
-        {/* CART WITH LIVE COUNT BADGE */}
+        {/* 2. HOME */}
+        <NavLink
+          to="/customer/home"
+          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 h-14 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
+        >
+          <Coffee className="w-5 h-5 mb-0.5" />
+          <span className="text-[8.5px] font-extrabold font-sans">Home</span>
+        </NavLink>
+
+        {/* 3. CART WITH LIVE COUNT BADGE */}
         <NavLink
           to="/customer/cart"
           aria-label={`Shopping Cart, ${totalCartCount} ${totalCartCount === 1 ? 'item' : 'items'}`}
           className={({ isActive }) => `flex flex-col items-center justify-center flex-1 h-14 transition-all relative ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
         >
           <div className="relative">
-            <ShoppingBag className="w-4.5 h-4.5 mb-0.5" />
+            <ShoppingBag className="w-5 h-5 mb-0.5" />
             {totalCartCount > 0 && (
               <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 bg-[#C85A3F] text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-xs">
                 {totalCartCount > 99 ? '99+' : totalCartCount}
@@ -419,87 +390,21 @@ export const CustomerLayout: React.FC = () => {
           <span className="text-[8.5px] font-extrabold font-sans">Cart</span>
         </NavLink>
 
-        {/* ORDERS */}
+        {/* 4. ORDERS */}
         <NavLink
           to="/customer/orders"
           className={({ isActive }) => `flex flex-col items-center justify-center flex-1 h-14 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
         >
-          <Utensils className="w-4.5 h-4.5 mb-0.5" />
+          <Utensils className="w-5 h-5 mb-0.5" />
           <span className="text-[8.5px] font-extrabold font-sans">Orders</span>
         </NavLink>
-
-        {/* PROFILE */}
-        <NavLink
-          to="/customer/profile"
-          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 h-14 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
-        >
-          <User className="w-4.5 h-4.5 mb-0.5" />
-          <span className="text-[8.5px] font-extrabold font-sans">Profile</span>
-        </NavLink>
-        
       </nav>
 
-      {/* FULL SCREEN CAMERA VIEWFINDER OVERLAY - ACCESSIBLE HIGH CONTRAST */}
-      {isQrScannerOpen && (
-        <div className="fixed inset-0 bg-[#FCFAF7]/95 backdrop-blur-md flex items-center justify-center p-6 z-50 overflow-hidden shadow-2xl">
-          
-          <button 
-            type="button"
-            onClick={() => setIsQrScannerOpen(false)}
-            aria-label="Close QR scanner"
-            className="absolute top-6 right-6 p-2.5 bg-white border border-[#E5DCD5] rounded-xl text-[#756B64] hover:text-[#202124] hover:bg-[#F3E8DF] transition-colors cursor-pointer shadow-xs"
-          >
-            <X className="w-5 h-5" />
-          </button>
-
-          <div className="w-full flex flex-col items-center space-y-6 max-w-xs text-center">
-            <div className="space-y-1">
-              <h3 className="text-base font-extrabold text-[#202124]">Scan Table QR Code</h3>
-              <p className="text-xs text-[#756B64] font-medium">Position the table card QR inside the scanner viewfinder.</p>
-            </div>
-
-            {/* Viewfinder chassis */}
-            <div className="w-48 h-48 border-2 border-[#C85A3F]/70 rounded-3xl relative overflow-hidden flex items-center justify-center bg-white shadow-inner">
-              {/* Laser animation */}
-              <div className="absolute left-0 right-0 h-0.5 bg-[#C85A3F] shadow-lg shadow-[#C85A3F]/80 animate-bounce" />
-              <Camera className="w-10 h-10 text-[#756B64]/40 animate-pulse" />
-            </div>
-
-            {/* Simulated QR Triggers */}
-            <div className="w-full space-y-2">
-              <span className="text-[10px] text-[#756B64] font-extrabold uppercase tracking-wider block">Verify Onboarded Tables</span>
-              <div className="grid grid-cols-1 gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => handleScanSimulation('l-ambroisie', 'TBL-4', 'QR-TOKEN-LA-4')}
-                  className="py-2.5 bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 hover:bg-[#F3E8DF]/40 rounded-xl text-xs text-[#202124] hover:text-[#C85A3F] font-bold transition-all text-left px-3.5 flex justify-between items-center shadow-xs cursor-pointer"
-                >
-                  <span>L'Ambroisie (Table 4)</span>
-                  <span className="text-[#C85A3F] font-extrabold text-[11px]">Simulate Scan</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleScanSimulation('shuko', 'TBL-2', 'QR-TOKEN-SK-2')}
-                  className="py-2.5 bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 hover:bg-[#F3E8DF]/40 rounded-xl text-xs text-[#202124] hover:text-[#C85A3F] font-bold transition-all text-left px-3.5 flex justify-between items-center shadow-xs cursor-pointer"
-                >
-                  <span>Shuko Sushi (Table 2)</span>
-                  <span className="text-[#C85A3F] font-extrabold text-[11px]">Simulate Scan</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleScanSimulation('osteria', 'TBL-5', 'QR-TOKEN-OS-5')}
-                  className="py-2.5 bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 hover:bg-[#F3E8DF]/40 rounded-xl text-xs text-[#202124] hover:text-[#C85A3F] font-bold transition-all text-left px-3.5 flex justify-between items-center shadow-xs cursor-pointer"
-                >
-                  <span>Osteria Francescana (Table 5)</span>
-                  <span className="text-[#C85A3F] font-extrabold text-[11px]">Simulate Scan</span>
-                </button>
-              </div>
-            </div>
-
-          </div>
-
-        </div>
-      )}
+      {/* REAL CAMERA QR SCANNER MODAL */}
+      <QrScannerModal
+        isOpen={isQrScannerOpen}
+        onClose={() => setIsQrScannerOpen(false)}
+      />
 
     </div>
   );

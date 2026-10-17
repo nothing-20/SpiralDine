@@ -18,6 +18,7 @@ import {
 import { collection, query, onSnapshot, getDoc, doc } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import toast from 'react-hot-toast';
+import QrScannerModal from '../components/QrScannerModal';
 
 interface INotification {
   id: string;
@@ -170,21 +171,6 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
   const markAllRead = () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     toast.success('All notifications marked as read');
-  };
-
-  const handleScanSimulation = (tenantId: string, tableId: string, token: string) => {
-    if (!token || token.length < 6) {
-      toast.error('Invalid QR Token signature.');
-      return;
-    }
-    if (!tenantId || !tableId) {
-      toast.error('Could not map scanned table to any active branch.');
-      return;
-    }
-
-    setIsQrScannerOpen(false);
-    toast.success(`Table QR Verified! Opening session for ${tableId.replace('TBL-', 'Table ')}...`, { icon: '🍽️' });
-    navigate(`/r/${tenantId}/table/${tableId}`);
   };
 
   return (
@@ -389,52 +375,11 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
         </div>
       </header>
 
-      {/* QR Scanner Viewfinder Modal */}
-      {isQrScannerOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-6 z-50 overflow-hidden shadow-2xl">
-          <div className="bg-white border border-[#E5DCD5] rounded-3xl p-6 max-w-xs w-full text-center relative shadow-2xl space-y-5">
-            <button
-              onClick={() => setIsQrScannerOpen(false)}
-              className="absolute top-4 right-4 p-1.5 bg-[#F3E8DF] hover:bg-[#E5DCD5] rounded-full text-[#756B64] hover:text-[#202124] transition-colors"
-              aria-label="Close QR scanner"
-            >
-              <X className="w-4 h-4" />
-            </button>
-
-            <div className="space-y-1 pt-2">
-              <h3 className="text-sm font-extrabold text-[#202124]">Scan Table QR Code</h3>
-              <p className="text-[11px] text-[#756B64]">Position the table QR code inside the camera viewfinder.</p>
-            </div>
-
-            <div className="w-44 h-44 mx-auto border-2 border-[#C85A3F] rounded-2xl relative overflow-hidden flex items-center justify-center bg-[#FCFAF7]">
-              <div className="absolute left-0 right-0 h-0.5 bg-[#C85A3F] shadow-md shadow-[#C85A3F]/80 animate-bounce" />
-              <Camera className="w-10 h-10 text-[#C85A3F]/40 animate-pulse" />
-            </div>
-
-            <div className="space-y-2 text-left">
-              <span className="text-[10px] text-[#756B64] font-extrabold uppercase tracking-wider block">
-                Quick Table Sessions
-              </span>
-              <div className="space-y-1.5">
-                <button
-                  onClick={() => handleScanSimulation('bawarchi-restaurant', 'TBL-12', 'QR-TOKEN-BW-12')}
-                  className="w-full py-2 px-3 bg-[#FCFAF7] hover:bg-[#F3E8DF] border border-[#E5DCD5] rounded-xl text-[11px] text-[#202124] font-bold transition-all flex justify-between items-center"
-                >
-                  <span>Bawarchi (Table 12)</span>
-                  <span className="text-[#C85A3F] font-extrabold text-[10px]">Test QR →</span>
-                </button>
-                <button
-                  onClick={() => handleScanSimulation('paradise-biryani', 'TBL-5', 'QR-TOKEN-PB-5')}
-                  className="w-full py-2 px-3 bg-[#FCFAF7] hover:bg-[#F3E8DF] border border-[#E5DCD5] rounded-xl text-[11px] text-[#202124] font-bold transition-all flex justify-between items-center"
-                >
-                  <span>Paradise (Table 5)</span>
-                  <span className="text-[#C85A3F] font-extrabold text-[10px]">Test QR →</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* REAL CAMERA QR SCANNER MODAL */}
+      <QrScannerModal
+        isOpen={isQrScannerOpen}
+        onClose={() => setIsQrScannerOpen(false)}
+      />
     </>
   );
 };

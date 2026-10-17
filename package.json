@@ -16,6 +16,7 @@
     "firebase": "^10.12.2",
     "firebase-admin": "^14.4.0",
     "framer-motion": "^11.2.10",
+    "jsqr": "^1.4.0",
     "lucide-react": "^0.395.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
