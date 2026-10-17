@@ -1437,8 +1437,8 @@ export const CustomerMenu: React.FC = () => {
             </div>
           </div>
 
-          {/* Horizontal Quick Category Filters (Scrollable Chips) */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none select-none pt-1 scroll-smooth">
+          {/* Horizontal Quick Category Filters (Scrollable Chips - Desktop only, hidden on mobile/tablet to prevent duplicate navigation) */}
+          <div className="hidden lg:flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none select-none pt-1 scroll-smooth">
             <button
               type="button"
               onClick={() => scrollToCategory('all')}
