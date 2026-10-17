@@ -24,13 +24,20 @@ A complete rollback must consider all six independent architectural layers:
 
 SpiralDine's frontend is hosted on Vercel under the canonical alias `https://spiral-dine.vercel.app`.
 
+### Active vs Rollback Production Deployment Records:
+- **Active Live Production Deployment:** `dpl_9UDvMZJPyfcMZTrxHNGN9oDGtyMk` (`https://spiraldine-1xogf4j2u-no-one-0.vercel.app`)
+  - **Release Commit:** `4174506` (`build(vercel): add .vercelignore to comply with Hobby plan function limit`)
+  - **Status:** `● Ready`
+- **Known-Good Rollback Target Deployment:** `dpl_Gm6JNQXC3PoAttGnJk4j978bPRFR` (`https://spiraldine-apz9syk5k-no-one-0.vercel.app`)
+  - **Base Commit:** `f76c49e` / `1f31e76`
+  - **Status:** `● Ready`
+
 ### Option 1: Instant Rollback via Vercel Dashboard (Recommended)
 1. Open the [Vercel Dashboard](https://vercel.com) and navigate to project **`spiraldine`** (Team: `no-one-0`).
 2. Go to the **Deployments** tab.
 3. Locate the previous production deployment:
    - **Target Deployment ID:** `dpl_Gm6JNQXC3PoAttGnJk4j978bPRFR`
    - **Target Deployment URL:** `https://spiraldine-apz9syk5k-no-one-0.vercel.app`
-   - **Base Production Commit:** `1f31e76` (`Merge pull request #6 from nothing-20/feature/kot-first-architecture`)
 4. Click the three dots (`...`) next to that deployment and select **"Assign Domain"** or **"Promote to Production"**.
 5. Vercel instantly remaps the traffic for `https://spiral-dine.vercel.app` to the previous build in zero seconds with zero downtime.
 
