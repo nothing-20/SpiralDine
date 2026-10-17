@@ -1081,7 +1081,7 @@ export const CustomerMenu: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#FCFAF7] text-[#202124] antialiased">
         <CustomerHeader tableNumber={tableNumber} restaurantName={restaurantName} />
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-6 space-y-6">
           {/* Hero skeleton */}
           <div className="w-full h-48 sm:h-56 bg-[#F3E8DF] animate-pulse rounded-3xl" />
           {/* Search skeleton */}
@@ -1099,9 +1099,9 @@ export const CustomerMenu: React.FC = () => {
                 <div key={i} className="h-10 bg-[#F3E8DF] animate-pulse rounded-xl" />
               ))}
             </div>
-            <div className="lg:col-span-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="lg:col-span-6 grid grid-cols-2 sm:grid-cols-2 gap-2.5 sm:gap-4">
               {[1, 2, 3, 4].map(i => (
-                <div key={i} className="h-72 bg-[#F3E8DF] animate-pulse rounded-2xl" />
+                <div key={i} className="h-56 sm:h-72 bg-[#F3E8DF] animate-pulse rounded-2xl" />
               ))}
             </div>
             <div className="hidden lg:block lg:col-span-3 h-80 bg-[#F3E8DF] animate-pulse rounded-3xl" />
@@ -1140,7 +1140,7 @@ export const CustomerMenu: React.FC = () => {
       {/* 1. Global Customer Header */}
       <CustomerHeader tableNumber={tableNumber} restaurantName={restaurantName} />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 pb-32 sm:pb-28 lg:pb-12 space-y-4 sm:space-y-6">
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-5 pb-32 sm:pb-28 lg:pb-12 space-y-4 sm:space-y-6">
         {/* 2.a. Mobile Compact Restaurant Header (< 768px) */}
         <div className="md:hidden bg-white border border-[#E5DCD5] rounded-2xl p-3.5 shadow-xs space-y-2.5">
           <div className="flex items-start gap-3">
@@ -1472,7 +1472,7 @@ export const CustomerMenu: React.FC = () => {
         </div>
 
         {/* Mobile Sticky Quick Category Navigator (< 1024px) */}
-        <div className="lg:hidden sticky top-[57px] z-30 -mx-4 px-4 py-2 bg-[#FCFAF7]/95 backdrop-blur-md border-y border-[#E5DCD5] shadow-xs">
+        <div className="lg:hidden sticky top-[57px] z-30 -mx-3 px-3 sm:-mx-6 sm:px-6 py-2 bg-[#FCFAF7]/95 backdrop-blur-md border-y border-[#E5DCD5] shadow-xs">
           <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-none select-none scroll-smooth">
             <button
               type="button"
@@ -1590,8 +1590,8 @@ export const CustomerMenu: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Cards Grid: Mobile-optimized horizontal cards, tablet/desktop vertical grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3.5 sm:gap-4">
+                  {/* Cards Grid: 2-column on mobile phones (2x2 grid), 2-column on tablet, 3-column on desktop */}
+                  <div className="grid grid-cols-2 sm:grid-cols-2 xl:grid-cols-3 gap-2.5 sm:gap-4">
                     {items.map((item) => {
                       const isVeg = item.isVeg || item.veg || item.vegetarian;
                       const isAvailable = item.isAvailable !== false && item.available !== false;
@@ -1603,171 +1603,95 @@ export const CustomerMenu: React.FC = () => {
                       return (
                         <div
                           key={item.id}
-                          className={`bg-white border border-[#E5DCD5] rounded-2xl p-3 sm:p-3.5 flex flex-col justify-between shadow-xs hover:border-[#C85A3F]/40 hover:shadow-md transition-all duration-200 group ${
+                          className={`bg-white border border-[#E5DCD5] rounded-2xl p-2.5 sm:p-3.5 flex flex-col justify-between shadow-xs hover:border-[#C85A3F]/40 hover:shadow-md transition-all duration-200 group h-full ${
                             !isAvailable ? 'opacity-60' : ''
                           }`}
                         >
-                          {/* Card Content: Mobile row layout, Tablet/Desktop column layout */}
-                          <div className="flex flex-row sm:flex-col justify-between items-start gap-3 w-full">
-                            {/* Text Details (Left on mobile, Top on desktop) */}
-                            <div className="flex-1 min-w-0 space-y-1.5 sm:space-y-3 sm:order-2">
-                              {/* Single Promo Badge on Mobile */}
-                              {promoBadge && (
-                                <span className="sm:hidden inline-block bg-[#C85A3F] text-white text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded shadow-xs mb-0.5">
-                                  {promoBadge}
+                          {/* Top: Food Thumbnail & Badges */}
+                          <div className="w-full aspect-[4/3] sm:aspect-auto sm:h-38 rounded-xl overflow-hidden bg-[#FCFAF7] border border-[#E5DCD5] relative shrink-0">
+                            {(item.imageUrl || item.image) && !failedImageIds[item.id] ? (
+                              <img
+                                src={item.imageUrl || item.image}
+                                alt={item.name}
+                                onError={() => setFailedImageIds(prev => ({ ...prev, [item.id]: true }))}
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex flex-col items-center justify-center text-[#756B64] bg-[#F3E8DF]/40">
+                                <Utensils className="w-5 h-5 sm:w-8 sm:h-8 text-[#C85A3F]/40 mb-1" />
+                                <span className="text-[9px] sm:text-[10px] font-semibold text-[#756B64]">House Specialty</span>
+                              </div>
+                            )}
+
+                            {/* Single Promo Badge (Top Left) */}
+                            {promoBadge && (
+                              <span className="absolute top-1.5 left-1.5 sm:top-2 sm:left-2 bg-[#C85A3F] text-white text-[9px] font-extrabold uppercase px-1.5 sm:px-2 py-0.5 rounded shadow-xs max-w-[85%] truncate">
+                                {promoBadge}
+                              </span>
+                            )}
+
+                            {/* Preparation Time (Bottom Right) */}
+                            {prepTime && (
+                              <span className="absolute bottom-1.5 right-1.5 sm:bottom-2 sm:right-2 bg-black/75 backdrop-blur-xs text-white text-[9px] sm:text-[10px] font-bold px-1.5 sm:px-2 py-0.5 rounded-md flex items-center gap-1">
+                                <Clock className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-[#F3E8DF]" />
+                                <span>{prepTime}m</span>
+                              </span>
+                            )}
+
+                            {/* Sold out overlay */}
+                            {!isAvailable && (
+                              <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center">
+                                <span className="text-white text-[10px] sm:text-[11px] font-extrabold bg-[#202124]/90 px-2 sm:px-3 py-1 rounded-md uppercase tracking-wider text-center">
+                                  Sold Out
                                 </span>
-                              )}
-
-                              <div className="space-y-1">
-                                <div className="flex items-start gap-1.5">
-                                  {isVeg !== undefined && (
-                                    <span
-                                      className={`inline-flex items-center justify-center w-3.5 h-3.5 border rounded-xs shrink-0 mt-0.5 ${
-                                        isVeg ? 'border-[#2E8B57]' : 'border-[#C85A3F]'
-                                      }`}
-                                      title={isVeg ? 'Vegetarian' : 'Non-Vegetarian'}
-                                    >
-                                      <span
-                                        className={`w-2 h-2 rounded-full ${
-                                          isVeg ? 'bg-[#2E8B57]' : 'bg-[#C85A3F]'
-                                        }`}
-                                      />
-                                    </span>
-                                  )}
-                                  <h3 className="font-extrabold text-sm text-[#202124] leading-snug break-words">
-                                    {item.name}
-                                  </h3>
-                                </div>
-
-                                {/* Price on mobile */}
-                                <div className="flex items-baseline gap-1.5 sm:hidden">
-                                  <span className="text-sm font-extrabold text-[#202124]">
-                                    {formatPrice(item.discountPrice || item.price)}
-                                  </span>
-                                  {item.discountPrice && item.discountPrice < item.price && (
-                                    <span className="text-[10px] text-[#756B64] line-through">
-                                      {formatPrice(item.price)}
-                                    </span>
-                                  )}
-                                </div>
-
-                                {/* Preparation time badge on mobile */}
-                                {prepTime && (
-                                  <div className="sm:hidden flex items-center gap-1 text-[10px] text-[#756B64]">
-                                    <Clock className="w-3 h-3 text-[#C85A3F]" />
-                                    <span>{prepTime}m prep</span>
-                                  </div>
-                                )}
-
-                                {/* Short Description */}
-                                {item.description && (
-                                  <p className="text-[11px] text-[#756B64] line-clamp-2 leading-relaxed">
-                                    {item.description}
-                                  </p>
-                                )}
-
-                                {/* Customisable indicator badge */}
-                                {hasVariantsOrAddons && (
-                                  <span className="inline-block text-[10px] font-bold text-[#C85A3F] bg-[#F3E8DF] px-2 py-0.5 rounded-md">
-                                    Customisable
-                                  </span>
-                                )}
                               </div>
-                            </div>
-
-                            {/* Thumbnail & Action (Right on mobile, Top on desktop) */}
-                            <div className="flex flex-col items-center shrink-0 sm:w-full sm:order-1 relative">
-                              <div className="w-24 h-24 sm:w-full sm:h-38 rounded-xl overflow-hidden bg-[#FCFAF7] border border-[#E5DCD5] relative">
-                                {(item.imageUrl || item.image) && !failedImageIds[item.id] ? (
-                                  <img
-                                    src={item.imageUrl || item.image}
-                                    alt={item.name}
-                                    onError={() => setFailedImageIds(prev => ({ ...prev, [item.id]: true }))}
-                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                    loading="lazy"
-                                  />
-                                ) : (
-                                  <div className="w-full h-full flex flex-col items-center justify-center text-[#756B64] bg-[#F3E8DF]/40">
-                                    <Utensils className="w-6 h-6 sm:w-8 sm:h-8 text-[#C85A3F]/40 mb-1" />
-                                    <span className="text-[9px] sm:text-[10px] font-semibold text-[#756B64]">House Specialty</span>
-                                  </div>
-                                )}
-
-                                {/* Desktop Single Promo Badge (Top Left) */}
-                                {promoBadge && (
-                                  <span className="hidden sm:inline-block absolute top-2 left-2 bg-[#C85A3F] text-white text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-md shadow-xs">
-                                    {promoBadge}
-                                  </span>
-                                )}
-
-                                {/* Desktop Preparation Time (Bottom Right) */}
-                                {prepTime && (
-                                  <span className="hidden sm:flex absolute bottom-2 right-2 bg-black/75 backdrop-blur-xs text-white text-[10px] font-bold px-2 py-0.5 rounded-md items-center gap-1">
-                                    <Clock className="w-3 h-3 text-[#F3E8DF]" />
-                                    <span>{prepTime}m</span>
-                                  </span>
-                                )}
-
-                                {/* Sold out overlay */}
-                                {!isAvailable && (
-                                  <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center">
-                                    <span className="text-white text-[10px] sm:text-[11px] font-extrabold bg-[#202124]/90 px-2 sm:px-3 py-1 rounded-md uppercase tracking-wider text-center">
-                                      Sold Out
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Mobile Add / Stepper Button */}
-                              <div className="sm:hidden mt-2 w-full flex justify-center">
-                                {!isAvailable ? (
-                                  <span className="text-[10px] font-bold text-[#756B64] bg-[#F3E8DF] px-2.5 py-1.5 rounded-lg uppercase">
-                                    Unavailable
-                                  </span>
-                                ) : cartCount > 0 ? (
-                                  <div className="flex items-center justify-between gap-1.5 bg-[#F3E8DF] p-1 rounded-xl border border-[#E5DCD5] min-w-[96px] h-10 shadow-xs">
-                                    <button
-                                      type="button"
-                                      onClick={() => updateQuantity(item.id, cartCount - 1)}
-                                      className="w-8 h-8 bg-white hover:bg-[#E5DCD5] active:bg-[#E5DCD5] text-[#202124] font-extrabold rounded-lg flex items-center justify-center text-xs shadow-xs cursor-pointer transition-colors"
-                                      aria-label={`Decrease ${item.name} quantity`}
-                                    >
-                                      <Minus className="w-3.5 h-3.5" />
-                                    </button>
-                                    <span className="text-xs font-extrabold text-[#202124] min-w-[20px] text-center">
-                                      {cartCount}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => updateQuantity(item.id, cartCount + 1)}
-                                      className="w-8 h-8 bg-white hover:bg-[#E5DCD5] active:bg-[#E5DCD5] text-[#202124] font-extrabold rounded-lg flex items-center justify-center text-xs shadow-xs cursor-pointer transition-colors"
-                                      aria-label={`Increase ${item.name} quantity`}
-                                    >
-                                      <Plus className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={(e) => handleQuickAdd(item, e)}
-                                    className="w-full min-h-[40px] px-3 py-2 bg-[#C85A3F] hover:bg-[#A94332] active:scale-95 text-white text-xs font-extrabold rounded-xl transition-all shadow-xs flex items-center justify-center gap-1 cursor-pointer"
-                                    aria-label={`Add ${item.name} to cart`}
-                                  >
-                                    <Plus className="w-3.5 h-3.5" />
-                                    <span>ADD</span>
-                                    {hasVariantsOrAddons && (
-                                      <span className="text-[9px] opacity-80">+</span>
-                                    )}
-                                  </button>
-                                )}
-                              </div>
-                            </div>
+                            )}
                           </div>
 
-                          {/* Desktop Price & Add / Stepper Action (hidden on mobile, sm:flex) */}
-                          <div className="hidden sm:flex pt-3 mt-2 border-t border-[#F3E8DF] items-center justify-between gap-2 sm:order-3">
-                            <div className="flex items-baseline gap-1.5">
-                              <span className="text-sm font-extrabold text-[#202124]">
+                          {/* Middle: Food Details */}
+                          <div className="flex-1 min-w-0 pt-2 sm:pt-2.5 space-y-1 sm:space-y-1.5 text-left">
+                            {/* Veg/Non-veg & Title */}
+                            <div className="flex items-start gap-1 sm:gap-1.5">
+                              {isVeg !== undefined && (
+                                <span
+                                  className={`inline-flex items-center justify-center w-3 h-3 sm:w-3.5 sm:h-3.5 border rounded-xs shrink-0 mt-0.5 ${
+                                    isVeg ? 'border-[#2E8B57]' : 'border-[#C85A3F]'
+                                  }`}
+                                  title={isVeg ? 'Vegetarian' : 'Non-Vegetarian'}
+                                >
+                                  <span
+                                    className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${
+                                      isVeg ? 'bg-[#2E8B57]' : 'bg-[#C85A3F]'
+                                    }`}
+                                  />
+                                </span>
+                              )}
+                              <h3 className="font-extrabold text-xs sm:text-sm text-[#202124] leading-snug line-clamp-2 break-words">
+                                {item.name}
+                              </h3>
+                            </div>
+
+                            {/* Customisable indicator badge */}
+                            {hasVariantsOrAddons && (
+                              <span className="inline-block text-[9px] sm:text-[10px] font-bold text-[#C85A3F] bg-[#F3E8DF] px-1.5 sm:px-2 py-0.5 rounded-md w-fit">
+                                Customisable
+                              </span>
+                            )}
+
+                            {/* Short Description (Tablet & Desktop only) */}
+                            {item.description && (
+                              <p className="hidden sm:block text-[11px] text-[#756B64] line-clamp-2 leading-relaxed">
+                                {item.description}
+                              </p>
+                            )}
+                          </div>
+
+                          {/* Bottom: Price & Add / Stepper Actions */}
+                          <div className="pt-2 sm:pt-3 mt-2 border-t border-[#F3E8DF] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-2">
+                            {/* Price */}
+                            <div className="flex items-baseline gap-1 sm:gap-1.5 flex-wrap">
+                              <span className="text-xs sm:text-sm font-extrabold text-[#202124]">
                                 {formatPrice(item.discountPrice || item.price)}
                               </span>
                               {item.discountPrice && item.discountPrice < item.price && (
@@ -1777,47 +1701,49 @@ export const CustomerMenu: React.FC = () => {
                               )}
                             </div>
 
-                            {/* Add / Stepper Button */}
-                            {!isAvailable ? (
-                              <span className="text-[10px] font-bold text-[#756B64] bg-[#F3E8DF] px-2.5 py-1 rounded-lg uppercase">
-                                Unavailable
-                              </span>
-                            ) : cartCount > 0 ? (
-                              <div className="flex items-center gap-1.5 bg-[#F3E8DF] p-1 rounded-xl border border-[#E5DCD5]">
-                                <button
-                                  type="button"
-                                  onClick={() => updateQuantity(item.id, cartCount - 1)}
-                                  className="w-6 h-6 bg-white hover:bg-[#E5DCD5] text-[#202124] font-extrabold rounded-lg flex items-center justify-center text-xs shadow-xs cursor-pointer transition-colors"
-                                  aria-label={`Decrease ${item.name} quantity`}
-                                >
-                                  <Minus className="w-3 h-3" />
-                                </button>
-                                <span className="text-xs font-extrabold text-[#202124] w-4 text-center">
-                                  {cartCount}
+                            {/* Add / Stepper Action */}
+                            <div className="w-full sm:w-auto">
+                              {!isAvailable ? (
+                                <span className="block text-center text-[10px] font-bold text-[#756B64] bg-[#F3E8DF] px-2 sm:px-2.5 py-1.5 sm:py-1 rounded-lg uppercase">
+                                  Unavailable
                                 </span>
+                              ) : cartCount > 0 ? (
+                                <div className="flex items-center justify-between sm:justify-center gap-1 sm:gap-1.5 bg-[#F3E8DF] p-1 rounded-xl border border-[#E5DCD5] w-full sm:w-auto shadow-xs">
+                                  <button
+                                    type="button"
+                                    onClick={() => updateQuantity(item.id, cartCount - 1)}
+                                    className="w-7 h-7 sm:w-6 sm:h-6 bg-white hover:bg-[#E5DCD5] active:bg-[#E5DCD5] text-[#202124] font-extrabold rounded-lg flex items-center justify-center text-xs shadow-xs cursor-pointer transition-colors"
+                                    aria-label={`Decrease ${item.name} quantity`}
+                                  >
+                                    <Minus className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                                  </button>
+                                  <span className="text-xs font-extrabold text-[#202124] min-w-[20px] sm:w-4 text-center">
+                                    {cartCount}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateQuantity(item.id, cartCount + 1)}
+                                    className="w-7 h-7 sm:w-6 sm:h-6 bg-white hover:bg-[#E5DCD5] active:bg-[#E5DCD5] text-[#202124] font-extrabold rounded-lg flex items-center justify-center text-xs shadow-xs cursor-pointer transition-colors"
+                                    aria-label={`Increase ${item.name} quantity`}
+                                  >
+                                    <Plus className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              ) : (
                                 <button
                                   type="button"
-                                  onClick={() => updateQuantity(item.id, cartCount + 1)}
-                                  className="w-6 h-6 bg-white hover:bg-[#E5DCD5] text-[#202124] font-extrabold rounded-lg flex items-center justify-center text-xs shadow-xs cursor-pointer transition-colors"
-                                  aria-label={`Increase ${item.name} quantity`}
+                                  onClick={(e) => handleQuickAdd(item, e)}
+                                  className="w-full sm:w-auto min-h-[34px] sm:min-h-0 px-3 sm:px-3.5 py-1.5 bg-[#C85A3F] hover:bg-[#A94332] active:scale-95 text-white text-xs font-extrabold rounded-xl transition-all shadow-xs flex items-center justify-center gap-1 cursor-pointer"
+                                  aria-label={`Add ${item.name} to cart`}
                                 >
-                                  <Plus className="w-3 h-3" />
+                                  <Plus className="w-3.5 h-3.5" />
+                                  <span>ADD</span>
+                                  {hasVariantsOrAddons && (
+                                    <span className="text-[9px] opacity-80">+</span>
+                                  )}
                                 </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={(e) => handleQuickAdd(item, e)}
-                                className="px-3.5 py-1.5 bg-[#C85A3F] hover:bg-[#A94332] text-white text-xs font-extrabold rounded-xl transition-all shadow-xs flex items-center gap-1 cursor-pointer active:scale-95"
-                                aria-label={`Add ${item.name} to cart`}
-                              >
-                                <Plus className="w-3.5 h-3.5" />
-                                <span>Add</span>
-                                {hasVariantsOrAddons && (
-                                  <span className="text-[9px] opacity-80">+</span>
-                                )}
-                              </button>
-                            )}
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
