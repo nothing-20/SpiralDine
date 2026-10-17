@@ -1,0 +1,3 @@
+# Vercel deployment ignore file
+# Exclude health check lambda to comply with Vercel Hobby plan 12-function limit
+api/health.ts
