@@ -8,7 +8,8 @@ import {
   RefreshCw,
   Keyboard,
   CheckCircle2,
-  ScanLine
+  ScanLine,
+  Info
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -40,17 +41,17 @@ export function parseSpiralDineQr(raw: string): ParsedTableQr | null {
       const tableRaw = data.tableId || data.table || data.t;
       if (tenantId && tableRaw) {
         const cleanTenant = String(tenantId).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-        const cleanTableNum = String(tableRaw).trim().replace(/^TBL-/i, '').replace(/[^0-9]/g, '');
-        if (cleanTenant && cleanTableNum && /^[a-z0-9_-]+$/.test(cleanTenant) && /^[0-9]+$/.test(cleanTableNum)) {
+        const cleanTableNum = String(tableRaw).trim().replace(/^(table|tbl)[-\s]*/i, '').replace(/[^a-z0-9_-]/gi, '');
+        if (cleanTenant && cleanTableNum && /^[a-z0-9_-]+$/.test(cleanTenant) && /^[a-z0-9_-]+$/i.test(cleanTableNum)) {
           return {
             tenantId: cleanTenant,
-            tableId: `TBL-${cleanTableNum}`,
+            tableId: cleanTableNum.toUpperCase().startsWith('TBL-') ? cleanTableNum.toUpperCase() : `TBL-${cleanTableNum}`,
             tableNumber: cleanTableNum,
           };
         }
       }
     } catch (_) {
-      // Ignore JSON parse failure and proceed to URL/text parsing
+      // Ignore JSON parse failure and proceed
     }
   }
 
@@ -77,10 +78,11 @@ export function parseSpiralDineQr(raw: string): ParsedTableQr | null {
   const rTableMatch = path.match(/\/r\/([a-zA-Z0-9_-]+)\/table\/([a-zA-Z0-9_-]+)/i);
   if (rTableMatch) {
     const tenantId = rTableMatch[1].toLowerCase();
-    const cleanTableNum = rTableMatch[2].replace(/^TBL-/i, '');
+    const rawTable = rTableMatch[2];
+    const cleanTableNum = rawTable.replace(/^(table|tbl)[-\s]*/i, '');
     return {
       tenantId,
-      tableId: rTableMatch[2].startsWith('TBL-') ? rTableMatch[2] : `TBL-${cleanTableNum}`,
+      tableId: rawTable.toUpperCase().startsWith('TBL-') ? rawTable : `TBL-${cleanTableNum}`,
       tableNumber: cleanTableNum,
     };
   }
@@ -92,10 +94,10 @@ export function parseSpiralDineQr(raw: string): ParsedTableQr | null {
     const params = new URLSearchParams(search);
     const tableParam = params.get('table') || params.get('tableId') || params.get('t');
     if (tableParam) {
-      const cleanTableNum = tableParam.replace(/^TBL-/i, '');
+      const cleanTableNum = tableParam.replace(/^(table|tbl)[-\s]*/i, '');
       return {
         tenantId,
-        tableId: tableParam.startsWith('TBL-') ? tableParam : `TBL-${cleanTableNum}`,
+        tableId: tableParam.toUpperCase().startsWith('TBL-') ? tableParam : `TBL-${cleanTableNum}`,
         tableNumber: cleanTableNum,
       };
     }
@@ -106,17 +108,18 @@ export function parseSpiralDineQr(raw: string): ParsedTableQr | null {
     return null;
   }
 
-  // Pattern C: shorthand manual entry only: "tenantId/tableNumber" or "tenantId/table/number" or "tenantId:tableNumber"
-  // e.g. "bawarchi-restaurant/12" or "gourmet-palace-saas/3"
-  const shorthandMatch = trimmed.match(/^([a-zA-Z0-9_-]+)(?:\/table)?[\/:\s]+(?:TBL-)?([0-9]+)$/i);
+  // Pattern C: shorthand manual entry: "tenantId/tableId" or "tenantId/table/tableId"
+  const shorthandMatch = trimmed.match(/^([a-zA-Z0-9_-]+)(?:\/table)?[\/:]+(?:table|tbl)?[-\s]*([a-zA-Z0-9_-]+)$/i);
   if (shorthandMatch) {
     const tenantId = shorthandMatch[1].toLowerCase();
-    const cleanTableNum = shorthandMatch[2];
-    return {
-      tenantId,
-      tableId: `TBL-${cleanTableNum}`,
-      tableNumber: cleanTableNum,
-    };
+    const cleanTableNum = shorthandMatch[2].replace(/^(table|tbl)[-\s]*/i, '');
+    if (tenantId && cleanTableNum) {
+      return {
+        tenantId,
+        tableId: `TBL-${cleanTableNum}`,
+        tableNumber: cleanTableNum,
+      };
+    }
   }
 
   return null;
@@ -141,20 +144,46 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  const scanTimerRef = useRef<any>(null);
   const hasDetectedRef = useRef<boolean>(false);
+  const isScanningActiveRef = useRef<boolean>(false);
+  const barcodeDetectorRef = useRef<any>(null);
 
   const [status, setStatus] = useState<CameraStatus>('requesting');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [scanHint, setScanHint] = useState<string>('Center the table QR code in the box');
   const [manualInput, setManualInput] = useState('');
   const [showManualFallback, setShowManualFallback] = useState(false);
   const [isProcessingCode, setIsProcessingCode] = useState(false);
 
-  // Stop camera tracks cleanly
+  // Initialize BarcodeDetector if natively available (Hardware-accelerated on Android Chrome)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+      try {
+        barcodeDetectorRef.current = new (window as any).BarcodeDetector({
+          formats: ['qr_code'],
+        });
+      } catch (err) {
+        console.warn('[QrScannerModal] BarcodeDetector init failed, using jsQR fallback:', err);
+        barcodeDetectorRef.current = null;
+      }
+    }
+  }, []);
+
+  // Stop camera tracks and timers cleanly
   const stopCameraStream = useCallback(() => {
+    isScanningActiveRef.current = false;
+
+    if (scanTimerRef.current !== null) {
+      clearTimeout(scanTimerRef.current);
+      scanTimerRef.current = null;
+    }
+
     if (animFrameRef.current !== null) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
     }
+
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => {
         try {
@@ -163,6 +192,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
       });
       streamRef.current = null;
     }
+
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
@@ -175,14 +205,16 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
       setIsProcessingCode(true);
 
       const tableDisplay = parsed.tableNumber || parsed.tableId.replace(/^TBL-/i, '');
-      toast.success(`Table QR Verified! Opening session for Table ${tableDisplay}...`, {
+      toast.success(`Table QR Verified! Opening Table ${tableDisplay}...`, {
         icon: '🍽️',
+        id: 'table-verified-toast',
       });
 
       if (onSuccess) {
         onSuccess(parsed);
       } else {
-        navigate(`/r/${parsed.tenantId}/table/${parsed.tableId}`);
+        // Direct navigation to the customer menu with table context and QR source established
+        navigate(`/customer/restaurant/${parsed.tenantId}/menu?table=${tableDisplay}&source=qr`);
       }
 
       onClose();
@@ -201,55 +233,102 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
         toast.error('The scanned QR code is not a valid SpiralDine table QR code.', {
           id: 'invalid-qr-toast',
         });
+        setScanHint('Unrecognized code. Please scan the QR code on your table.');
         return false;
       }
     },
     [handleValidQr]
   );
 
-  // Scanning loop
-  const scanLoop = useCallback(() => {
-    if (hasDetectedRef.current) return;
+  // Continuous frame-scanning loop with dual-engine (native BarcodeDetector + optimized jsQR)
+  const scanFrame = useCallback(async () => {
+    if (hasDetectedRef.current || !isScanningActiveRef.current) return;
 
     const video = videoRef.current;
-    const canvas = canvasRef.current;
+    if (!video || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+      // Video not ready with frame data yet; wait for next frame
+      animFrameRef.current = requestAnimationFrame(scanFrame);
+      return;
+    }
 
-    if (video && canvas && video.readyState === video.HAVE_ENOUGH_DATA) {
-      const width = video.videoWidth;
-      const height = video.videoHeight;
+    let detectedRawText: string | null = null;
 
-      if (width > 0 && height > 0) {
-        canvas.width = width;
-        canvas.height = height;
+    // 1. Primary Engine: Native Hardware BarcodeDetector (instant on Android Chrome)
+    if (barcodeDetectorRef.current) {
+      try {
+        const barcodes = await barcodeDetectorRef.current.detect(video);
+        if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+          detectedRawText = barcodes[0].rawValue;
+        }
+      } catch (_) {
+        // Fall back to jsQR if detector fails on this frame
+      }
+    }
+
+    // 2. Secondary Engine: Optimized jsQR with central crop & max 480x480 resolution
+    if (!detectedRawText && !hasDetectedRef.current) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+
+        // Crop to the center square region (matching the user's on-screen viewfinder)
+        const cropSize = Math.min(vw, vh);
+        const startX = Math.floor((vw - cropSize) / 2);
+        const startY = Math.floor((vh - cropSize) / 2);
+
+        // Constrain canvas dimensions to max 480x480 for fast decoding
+        const targetSize = Math.min(cropSize, 480);
+        if (canvas.width !== targetSize || canvas.height !== targetSize) {
+          canvas.width = targetSize;
+          canvas.height = targetSize;
+        }
+
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
         if (ctx) {
-          ctx.drawImage(video, 0, 0, width, height);
-          const imageData = ctx.getImageData(0, 0, width, height);
-          const code = jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: 'dontInvert',
+          ctx.drawImage(video, startX, startY, cropSize, cropSize, 0, 0, targetSize, targetSize);
+          const imageData = ctx.getImageData(0, 0, targetSize, targetSize);
+
+          // Support both standard and inverted QR patterns
+          const code = jsQR(imageData.data, targetSize, targetSize, {
+            inversionAttempts: 'attemptBoth',
           });
 
-          if (code && code.data && !hasDetectedRef.current) {
-            const parsed = parseSpiralDineQr(code.data);
-            if (parsed) {
-              hasDetectedRef.current = true;
-              handleValidQr(parsed);
-              return;
-            }
+          if (code && code.data) {
+            detectedRawText = code.data;
           }
         }
       }
     }
 
-    animFrameRef.current = requestAnimationFrame(scanLoop);
+    // If code detected:
+    if (detectedRawText && !hasDetectedRef.current) {
+      const parsed = parseSpiralDineQr(detectedRawText);
+      if (parsed) {
+        hasDetectedRef.current = true;
+        handleValidQr(parsed);
+        return;
+      } else {
+        setScanHint('QR detected, but not a SpiralDine table. Center table card.');
+      }
+    }
+
+    // Schedule next frame with 60ms throttle (~16 checks/sec, 60fps smooth video, zero CPU choke)
+    if (isScanningActiveRef.current && !hasDetectedRef.current) {
+      scanTimerRef.current = setTimeout(() => {
+        animFrameRef.current = requestAnimationFrame(scanFrame);
+      }, 60);
+    }
   }, [handleValidQr]);
 
   // Start camera stream
   const startCamera = useCallback(async () => {
     stopCameraStream();
     hasDetectedRef.current = false;
+    isScanningActiveRef.current = false;
     setStatus('requesting');
     setErrorMessage(null);
+    setScanHint('Position the table QR code inside the frame');
 
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setStatus('unsupported');
@@ -270,11 +349,20 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
       streamRef.current = stream;
 
       if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute('playsinline', 'true'); // Required for iOS Safari
-        await videoRef.current.play();
+        const video = videoRef.current;
+        video.srcObject = stream;
+        video.setAttribute('playsinline', 'true');
+        video.setAttribute('autoplay', 'true');
+        video.muted = true;
+
+        // Wait until video has begun playing before starting loop
+        await video.play().catch((playErr) => {
+          console.warn('[QrScannerModal] Video play warning:', playErr);
+        });
+
         setStatus('active');
-        animFrameRef.current = requestAnimationFrame(scanLoop);
+        isScanningActiveRef.current = true;
+        animFrameRef.current = requestAnimationFrame(scanFrame);
       }
     } catch (err: any) {
       console.warn('[QrScannerModal] Camera error:', err);
@@ -284,17 +372,17 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
         err?.name === 'SecurityError'
       ) {
         setStatus('denied');
-        setErrorMessage('Camera access was denied. Please allow camera permissions in your browser or enter your table code manually.');
+        setErrorMessage('Camera access was blocked. Please enable camera permissions in your browser or enter your table code manually.');
       } else if (err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError') {
         setStatus('unsupported');
         setErrorMessage('No camera device was found on this device.');
       } else {
         setStatus('error');
-        setErrorMessage('Unable to start the camera. Please try again or use the manual fallback.');
+        setErrorMessage('Unable to start camera. Please try again or use manual table entry.');
       }
       setShowManualFallback(true);
     }
-  }, [scanLoop, stopCameraStream]);
+  }, [scanFrame, stopCameraStream]);
 
   // Lifecycle when modal opens/closes
   useEffect(() => {
@@ -353,13 +441,13 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
         <div className="space-y-1 mb-4 pt-1 w-full">
           <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#F3E8DF] text-[#C85A3F] text-[10px] font-extrabold uppercase tracking-wider mb-1">
             <ScanLine className="w-3.5 h-3.5" />
-            <span>Table Scanner</span>
+            <span>Live Table Scanner</span>
           </div>
           <h3 id="qr-scanner-title" className="text-base font-extrabold text-[#202124]">
             Scan Table QR Code
           </h3>
           <p className="text-xs text-[#756B64] font-medium max-w-xs mx-auto">
-            Point your camera at the QR code on your restaurant dining table.
+            {scanHint}
           </p>
         </div>
 
@@ -368,11 +456,12 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
           {/* Live Video Feed */}
           <video
             ref={videoRef}
-            className={`absolute inset-0 w-full h-full object-cover ${
+            className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
               status === 'active' ? 'opacity-100' : 'opacity-0'
             }`}
             muted
             playsInline
+            autoPlay
           />
 
           {/* Offscreen Canvas for Frame Decoding */}
@@ -380,19 +469,28 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
 
           {/* Active Camera Viewfinder Overlay */}
           {status === 'active' && (
-            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-between p-4">
               {/* Corner targeting marks */}
-              <div className="absolute top-3 left-3 w-6 h-6 border-t-2 border-l-2 border-[#C85A3F]" />
-              <div className="absolute top-3 right-3 w-6 h-6 border-t-2 border-r-2 border-[#C85A3F]" />
-              <div className="absolute bottom-3 left-3 w-6 h-6 border-b-2 border-l-2 border-[#C85A3F]" />
-              <div className="absolute bottom-3 right-3 w-6 h-6 border-b-2 border-r-2 border-[#C85A3F]" />
+              <div className="absolute top-3 left-3 w-7 h-7 border-t-3 border-l-3 border-[#C85A3F] rounded-tl-lg" />
+              <div className="absolute top-3 right-3 w-7 h-7 border-t-3 border-r-3 border-[#C85A3F] rounded-tr-lg" />
+              <div className="absolute bottom-3 left-3 w-7 h-7 border-b-3 border-l-3 border-[#C85A3F] rounded-bl-lg" />
+              <div className="absolute bottom-3 right-3 w-7 h-7 border-b-3 border-r-3 border-[#C85A3F] rounded-br-lg" />
 
-              {/* Scanning laser line */}
-              <div className="absolute inset-x-4 h-0.5 bg-gradient-to-r from-transparent via-[#C85A3F] to-transparent shadow-[0_0_12px_#C85A3F] animate-bounce" />
+              {/* Laser scanning beam */}
+              <div className="absolute inset-x-6 top-1/2 -translate-y-1/2 h-0.5 bg-gradient-to-r from-transparent via-[#C85A3F] to-transparent shadow-[0_0_12px_#C85A3F] animate-pulse" />
 
-              <span className="text-[10px] font-bold text-white/90 bg-black/60 px-2.5 py-1 rounded-full backdrop-blur-xs">
-                Scanning for Table QR...
-              </span>
+              <div className="w-full flex justify-center pt-1">
+                <span className="text-[10px] font-extrabold text-white/95 bg-black/65 px-3 py-1 rounded-full backdrop-blur-xs flex items-center gap-1.5 shadow-sm">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  <span>Camera Active — Aim at Table QR</span>
+                </span>
+              </div>
+
+              <div className="w-full flex justify-center pb-1">
+                <span className="text-[9.5px] font-bold text-white/80 bg-black/50 px-2.5 py-0.5 rounded-full">
+                  Hold steady 10–20 cm away
+                </span>
+              </div>
             </div>
           )}
 
@@ -401,7 +499,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
             <div className="flex flex-col items-center justify-center space-y-2 p-4 text-center text-white">
               <Camera className="w-8 h-8 text-[#C85A3F] animate-pulse" />
               <p className="text-xs font-semibold text-white/90">Starting camera...</p>
-              <p className="text-[10px] text-white/60">Please approve camera permission if prompted</p>
+              <p className="text-[10px] text-white/60">Please allow camera permissions if prompted</p>
             </div>
           )}
 
@@ -411,9 +509,9 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
               <div className="w-10 h-10 rounded-full bg-red-100 text-red-600 flex items-center justify-center">
                 <AlertTriangle className="w-5 h-5" />
               </div>
-              <h4 className="text-xs font-bold text-[#202124]">Camera Permission Denied</h4>
+              <h4 className="text-xs font-bold text-[#202124]">Camera Permission Blocked</h4>
               <p className="text-[11px] text-[#756B64] leading-relaxed">
-                Camera access was blocked. Please enable camera permissions in your browser or use manual entry below.
+                Camera access was denied. Please allow camera permissions in your browser address bar or use manual entry below.
               </p>
               <button
                 type="button"
@@ -421,7 +519,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#C85A3F] text-white text-xs font-bold rounded-lg hover:bg-[#A94332] transition-colors cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span>Retry Permission</span>
+                <span>Retry Camera</span>
               </button>
             </div>
           )}
@@ -451,26 +549,26 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
           {isProcessingCode && (
             <div className="absolute inset-0 bg-[#202124]/90 backdrop-blur-xs flex flex-col items-center justify-center text-white space-y-2 z-30">
               <CheckCircle2 className="w-10 h-10 text-emerald-400 animate-pulse" />
-              <span className="text-xs font-bold">QR Code Verified!</span>
+              <span className="text-xs font-bold">QR Verified! Opening Menu...</span>
             </div>
           )}
         </div>
 
         {/* Fallback & Manual Input Section */}
-        <div className="w-full mt-4 space-y-3">
+        <div className="w-full mt-4 space-y-2.5">
           <button
             type="button"
             onClick={() => setShowManualFallback(!showManualFallback)}
             className="text-xs text-[#C85A3F] hover:text-[#A94332] font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
           >
             <Keyboard className="w-3.5 h-3.5" />
-            <span>{showManualFallback ? 'Hide manual entry' : 'Trouble scanning? Enter code manually'}</span>
+            <span>{showManualFallback ? 'Hide manual entry' : 'Trouble scanning? Enter table code manually'}</span>
           </button>
 
           {showManualFallback && (
             <form onSubmit={handleManualSubmit} className="space-y-2 text-left pt-1 w-full animate-in fade-in duration-150">
               <label htmlFor="manual-table-code" className="text-[11px] font-bold text-[#756B64] block">
-                Restaurant & Table (e.g., bawarchi-restaurant/12 or URL)
+                Restaurant & Table Code (e.g. bawarchi-restaurant/12 or table URL)
               </label>
               <div className="flex gap-2">
                 <input
@@ -478,7 +576,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
                   type="text"
                   value={manualInput}
                   onChange={(e) => setManualInput(e.target.value)}
-                  placeholder="bawarchi-restaurant/12"
+                  placeholder="restaurant-id/table-number"
                   className="flex-1 px-3 py-2 text-xs bg-white border border-[#E5DCD5] rounded-xl text-[#202124] focus:outline-none focus:ring-2 focus:ring-[#C85A3F]/50 font-mono"
                 />
                 <button
@@ -492,27 +590,11 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
             </form>
           )}
 
-          {/* Quick verified demo tables for instant testing */}
-          <div className="pt-2 border-t border-[#F3E8DF] w-full text-left">
-            <span className="text-[10px] text-[#756B64] font-extrabold uppercase tracking-wider block mb-1.5">
-              Available Demo Tables
+          <div className="pt-2 text-center">
+            <span className="text-[10px] text-[#756B64] font-medium flex items-center justify-center gap-1">
+              <Info className="w-3 h-3 text-[#756B64]/70" />
+              <span>Table QR codes are located on your dining table stand.</span>
             </span>
-            <div className="grid grid-cols-2 gap-1.5">
-              <button
-                type="button"
-                onClick={() => processRawPayload('/r/gourmet-palace-saas/table/TBL-3')}
-                className="p-2 bg-white hover:bg-[#F3E8DF] border border-[#E5DCD5] rounded-xl text-[11px] text-[#202124] hover:text-[#C85A3F] font-bold transition-all text-left truncate cursor-pointer shadow-2xs"
-              >
-                Gourmet Palace (T-3)
-              </button>
-              <button
-                type="button"
-                onClick={() => processRawPayload('/r/bawarchi-restaurant/table/TBL-12')}
-                className="p-2 bg-white hover:bg-[#F3E8DF] border border-[#E5DCD5] rounded-xl text-[11px] text-[#202124] hover:text-[#C85A3F] font-bold transition-all text-left truncate cursor-pointer shadow-2xs"
-              >
-                Bawarchi (T-12)
-              </button>
-            </div>
           </div>
         </div>
       </div>
