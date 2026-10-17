@@ -18,6 +18,7 @@ import { useCart } from '../../../context/CartContext';
 import { formatPrice } from '../../../utils/format';
 import { useAuth } from '../../../context/AuthContext';
 import { customerService } from '../../../shared/services/customerService';
+import { orderService } from '../../../shared/services/orderService';
 import { kotService } from '../../../shared/services/kotService';
 import { generateUniqueOrderId } from '../../../shared/utils/orderUtils';
 import { 
@@ -58,7 +59,13 @@ import {
 export const CustomerPortal: React.FC = () => {
   const { tenantId, tableId } = useParams<{ tenantId: string; tableId: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, ensureGuestAuth } = useAuth();
+
+  useEffect(() => {
+    ensureGuestAuth().catch(err => {
+      console.warn('[CustomerPortal] Background guest auth init warning:', err);
+    });
+  }, []);
 
   const { 
     cartItems, 
@@ -371,66 +378,112 @@ export const CustomerPortal: React.FC = () => {
 
     setIsPlacingOrder(true);
     try {
-      console.log('[STEP 2] Validation passed');
+      // Validate menu items availability, publish state, and canonical pricing
+      let verifiedSubtotal = 0;
+      const verifiedItems: any[] = [];
 
+      for (const cartItem of cartItems) {
+        if (!cartItem.count || cartItem.count <= 0) {
+          toast.error(`Invalid quantity for item "${cartItem.name}".`);
+          setIsPlacingOrder(false);
+          return;
+        }
+
+        const matchedItem = menuItems.find(m => m.id === cartItem.itemId);
+        if (matchedItem) {
+          if (matchedItem.isPublished === false || matchedItem.published === false || (matchedItem as any).status === 'unpublished') {
+            toast.error(`"${matchedItem.name || cartItem.name}" is currently unavailable. Please remove it from your basket.`);
+            setIsPlacingOrder(false);
+            return;
+          }
+          if (matchedItem.isAvailable === false || matchedItem.available === false || matchedItem.availability === false) {
+            toast.error(`"${matchedItem.name || cartItem.name}" is currently sold out. Please remove it from your basket.`);
+            setIsPlacingOrder(false);
+            return;
+          }
+        }
+
+        const canonicalUnitPrice = matchedItem && Number(matchedItem.discountPrice || matchedItem.price) > 0
+          ? Number(matchedItem.discountPrice || matchedItem.price)
+          : cartItem.pricePerUnit;
+
+        verifiedSubtotal += canonicalUnitPrice * cartItem.count;
+        verifiedItems.push({
+          itemId: cartItem.itemId,
+          name: matchedItem?.name || cartItem.name,
+          count: cartItem.count,
+          notes: cartItem.notes || '',
+          pricePerUnit: canonicalUnitPrice,
+          image: matchedItem?.image || matchedItem?.imageUrl || cartItem.image || '',
+          isVeg: matchedItem?.isVeg ?? (matchedItem as any)?.veg ?? cartItem.isVeg
+        });
+      }
+
+      const verifiedGst = Math.round(verifiedSubtotal * 0.05);
+      const verifiedServiceCharge = Math.round(verifiedSubtotal * 0.05);
+      const verifiedTotal = verifiedSubtotal + verifiedGst + verifiedServiceCharge;
+
+      // Ensure authentic guest authentication UID before order submission
+      const authUser = await ensureGuestAuth();
+      const authenticUid = authUser?.uid || user?.uid || 'guest-uid';
+
+      // Reconcile active dining session
+      let currentSession = getActiveDiningSession(tenantId, tableNumber);
+      if (!currentSession || !currentSession.sessionId) {
+        currentSession = {
+          sessionId: generateSessionId(),
+          restaurantId: tenantId,
+          tenantId,
+          branchId: verifiedBranchId || 'main',
+          tableId: orderTableId,
+          tableNumber,
+          tableName: `Table ${tableNumber}`,
+          customerId: authenticUid,
+          orderSource: 'qr',
+          status: 'active',
+          startedAt: new Date().toISOString()
+        };
+      }
+
+      const existingActiveOrderIds = currentSession.activeOrderIds || [];
+      const isAdditional = existingActiveOrderIds.length > 0 || Boolean(lastPlacedOrderId);
+      const orderSequence = (currentSession.activeOrderIds?.length || 0) + 1;
       const orderId = generateUniqueOrderId();
-      const docRef = doc(db, 'restaurants', tenantId, 'orders', orderId);
+      const primaryOrderId = currentSession.primaryOrderId || orderId;
 
-      const itemsList = cartItems.map(item => ({
-        itemId: item.itemId,
-        name: item.name,
-        count: item.count,
-        notes: item.notes,
-        pricePerUnit: item.pricePerUnit
-      }));
-
-      const orderPayload = {
-        id: orderId,
-        orderId,
-        customerId: user?.uid || 'guest-uid',
+      console.log('[STEP 3] Authoritatively validating and creating order via trusted boundary...');
+      const validatedResult = await orderService.createValidatedOrder({
+        tenantId,
+        tableNumber,
+        tableId: orderTableId,
+        tableName: `Table ${tableNumber}`,
+        branchId: verifiedBranchId || 'main',
+        sessionId: currentSession.sessionId,
+        primaryOrderId,
+        orderSequence,
+        isAdditionalOrder: isAdditional,
+        customerId: authenticUid,
         customerName,
         phone: phoneNumber,
-        restaurantId: tenantId,
-        tenantId,
-        branchId: verifiedBranchId || 'main',
-        tableId: orderTableId,
-        tableNumber,
-        tableName: `Table ${tableNumber}`,
         orderType: 'dine_in',
         orderSource: 'qr',
-        items: itemsList,
-        subtotal: cartSubtotal,
-        tax: gstCharge + serviceCharge,
-        discount: 0,
-        totalAmount: cartTotalVal,
-        total: cartTotalVal,
-        status: 'NEW',
-        paymentStatus: 'pending',
         specialInstructions,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
+        orderId,
+        items: cartItems.map(c => ({
+          itemId: c.itemId,
+          count: c.count,
+          notes: c.notes || ''
+        }))
+      }, { dbInstance: db });
 
-      console.log('[STEP 3] Order object created', { orderId, tenantId, tableId: orderTableId, itemCount: cartItems.length, total: cartTotalVal });
-      console.log('[STEP 4] Writing to Firestore', `restaurants/${tenantId}/orders/${orderId}`);
+      const orderPayload = validatedResult.order;
+      console.log('[STEP 4] Order validated and written to Firestore', { orderId, total: orderPayload.total });
 
-      await setDoc(docRef, orderPayload);
-
-      console.log('[STEP 5] Firestore write successful');
-
-      // Primary Kitchen Workflow: Create persistent canonical KOT record
-      try {
-        await kotService.createKotForOrder(tenantId, orderPayload as any, {
-          source: 'customer_qr',
-          customerName,
-          round: 1,
-          isSupplementary: Boolean(lastPlacedOrderId)
-        });
-      } catch (kotErr: any) {
-        console.error('[CustomerPortal] Critical: KOT generation failed for order:', orderId, kotErr);
-        toast.error('Order recorded, but kitchen ticket dispatch failed. Please notify restaurant staff.');
-        throw new Error(`Kitchen ticket creation failed: ${kotErr?.message || 'Unknown error'}`);
-      }
+      // Update and persist dining session
+      currentSession.primaryOrderId = primaryOrderId;
+      currentSession.activeOrderIds = Array.from(new Set([...(currentSession.activeOrderIds || []), orderId]));
+      saveActiveDiningSession(currentSession);
+      syncDiningSessionToFirestore(currentSession).catch(() => {});
 
       // Persist order reference to customer profile if authenticated
       if (user?.uid) {

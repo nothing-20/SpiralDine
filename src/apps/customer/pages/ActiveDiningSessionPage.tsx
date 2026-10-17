@@ -17,6 +17,7 @@ import {
 } from '../../../shared/utils/diningSession';
 import { isOrderActive } from '../../../shared/utils/orderUtils';
 import { formatPrice } from '../../../utils/format';
+import { useAuth } from '../../../context/AuthContext';
 import CustomerHeader from '../../../shared/ui/navigation/CustomerHeader';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner/LoadingSpinner';
 import Modal from '../../../components/ui/Modal/Modal';
@@ -58,6 +59,13 @@ const STATUS_BADGES: Record<string, { label: string; bg: string; text: string; d
 export const ActiveDiningSessionPage: React.FC = () => {
   const { tenantId: routeTenantId } = useParams<{ tenantId: string }>();
   const navigate = useNavigate();
+  const { ensureGuestAuth } = useAuth();
+
+  useEffect(() => {
+    ensureGuestAuth().catch(err => {
+      console.warn('[ActiveDiningSessionPage] Background guest auth init warning:', err);
+    });
+  }, []);
 
   const [activeSession, setActiveSession] = useState<IDiningSession | null>(null);
   const [resolvedTenantId, setResolvedTenantId] = useState<string>(routeTenantId || '');
@@ -154,18 +162,25 @@ export const ActiveDiningSessionPage: React.FC = () => {
   }, [resolvedTenantId, activeSession?.tableNumber, activeSession?.sessionId]);
 
   // Financial aggregates across all orders in session
-  const { combinedSubtotal, combinedTax, combinedServiceCharge, grandTotal, totalItemsCount } = useMemo(() => {
+  const { combinedSubtotal, combinedTax, combinedServiceCharge, grandTotal, totalItemsCount, totalPaidAmount, outstandingAmount } = useMemo(() => {
     let sub = 0;
     let tax = 0;
     let sc = 0;
     let total = 0;
     let itemsCount = 0;
+    let paid = 0;
 
     orders.forEach((o) => {
+      const orderTot = Number(o.total || o.totalAmount) || 0;
       sub += Number(o.subtotal) || 0;
       tax += Number(o.tax) || 0;
       sc += Number(o.serviceCharge) || 0;
-      total += Number(o.total || o.totalAmount) || 0;
+      total += orderTot;
+
+      const pStatus = (o.paymentStatus || '').toLowerCase();
+      if (pStatus === 'paid' || o.isPaid === true) {
+        paid += orderTot;
+      }
 
       if (Array.isArray(o.items)) {
         o.items.forEach((item: any) => {
@@ -174,12 +189,16 @@ export const ActiveDiningSessionPage: React.FC = () => {
       }
     });
 
+    const outstanding = Math.max(0, total - paid);
+
     return {
       combinedSubtotal: sub,
       combinedTax: tax,
       combinedServiceCharge: sc,
       grandTotal: total,
-      totalItemsCount: itemsCount
+      totalItemsCount: itemsCount,
+      totalPaidAmount: paid,
+      outstandingAmount: outstanding
     };
   }, [orders]);
 
@@ -257,24 +276,25 @@ export const ActiveDiningSessionPage: React.FC = () => {
   const currentTable = activeSession?.tableNumber || 'Your Table';
 
   return (
-    <div className="min-h-screen bg-[#FCFAF7] text-[#202124] antialiased selection:bg-[#F3E8DF] pb-24">
+    <div className="min-h-screen bg-[#FCFAF7] text-[#202124] antialiased selection:bg-[#F3E8DF] pb-32 sm:pb-24 pb-[calc(6rem+env(safe-area-inset-bottom,0px))]">
       {/* Header */}
       <CustomerHeader tableNumber={currentTable} restaurantName={restaurantName} />
 
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-5 sm:py-6 space-y-5 sm:space-y-6">
         
         {/* Navigation & Title */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+          <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => navigate(`/customer/restaurant/${resolvedTenantId}/menu`)}
-              className="w-10 h-10 bg-white border border-[#E5DCD5] hover:border-[#C85A3F] rounded-2xl flex items-center justify-center text-[#202124] hover:text-[#C85A3F] transition-all cursor-pointer shadow-xs"
+              className="w-11 h-11 sm:w-10 sm:h-10 bg-white border border-[#E5DCD5] hover:border-[#C85A3F] rounded-2xl flex items-center justify-center text-[#202124] hover:text-[#C85A3F] transition-all active:scale-95 cursor-pointer shadow-xs shrink-0"
               title="Back to Menu"
+              aria-label="Back to Menu"
             >
               <ArrowLeft className="w-4 h-4" />
             </button>
-            <div>
-              <div className="flex items-center gap-2">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                   Active Dining Session
@@ -283,7 +303,7 @@ export const ActiveDiningSessionPage: React.FC = () => {
                   Table {currentTable}
                 </span>
               </div>
-              <h1 className="text-2xl sm:text-3xl font-display font-extrabold text-[#202124] tracking-tight mt-0.5">
+              <h1 className="text-2xl sm:text-3xl font-display font-extrabold text-[#202124] tracking-tight mt-0.5 truncate">
                 Current Table Session
               </h1>
             </div>
@@ -292,7 +312,7 @@ export const ActiveDiningSessionPage: React.FC = () => {
           {/* Quick Action: Add More Food */}
           <button
             onClick={() => navigate(`/customer/restaurant/${resolvedTenantId}/menu`)}
-            className="px-4 py-2.5 bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer shrink-0"
+            className="w-full sm:w-auto min-h-[44px] px-5 py-2.5 bg-[#C85A3F] hover:bg-[#A94332] active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer shrink-0"
           >
             <Plus className="w-4 h-4" />
             <span>Add More Food</span>
@@ -303,54 +323,55 @@ export const ActiveDiningSessionPage: React.FC = () => {
         <div className="bg-white border border-[#E5DCD5] rounded-3xl p-5 sm:p-6 shadow-xs relative overflow-hidden">
           <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-bl from-[#C85A3F]/5 to-transparent rounded-bl-full pointer-events-none" />
           
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-left">
-            <div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5 sm:gap-4 text-left">
+            <div className="min-w-0">
               <span className="text-[10px] text-[#756B64] font-extrabold uppercase tracking-wider block">
                 Table Context
               </span>
-              <span className="text-lg font-extrabold text-[#202124]">
+              <span className="text-base sm:text-lg font-extrabold text-[#202124] truncate block">
                 Table {currentTable}
               </span>
-              <span className="text-[11px] text-[#756B64] block">
+              <span className="text-[11px] text-[#756B64] block truncate">
                 {activeSession?.tableName || `Dine-In Table ${currentTable}`}
               </span>
             </div>
 
-            <div>
+            <div className="min-w-0">
               <span className="text-[10px] text-[#756B64] font-extrabold uppercase tracking-wider block">
-                Total Orders
+                Orders Placed
               </span>
-              <span className="text-lg font-extrabold text-[#202124]">
+              <span className="text-base sm:text-lg font-extrabold text-[#202124] truncate block">
                 {orders.length} {orders.length === 1 ? 'Order' : 'Orders'}
               </span>
-              <span className="text-[11px] text-[#756B64] block">
+              <span className="text-[11px] text-[#756B64] block truncate">
                 {totalItemsCount} total items
               </span>
             </div>
 
-            <div>
+            <div className="min-w-0">
               <span className="text-[10px] text-[#756B64] font-extrabold uppercase tracking-wider block">
                 Session Started
               </span>
-              <span className="text-lg font-extrabold text-[#202124]">
+              <span className="text-base sm:text-lg font-extrabold text-[#202124] truncate block">
                 {activeSession?.startedAt 
                   ? new Date(activeSession.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                   : 'Active Now'}
               </span>
-              <span className="text-[11px] text-[#756B64] block">
+              <span className="text-[11px] text-emerald-700 font-bold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 Live Visit
               </span>
             </div>
 
-            <div>
+            <div className="min-w-0">
               <span className="text-[10px] text-[#756B64] font-extrabold uppercase tracking-wider block">
-                Current Total
+                {totalPaidAmount > 0 && outstandingAmount > 0 ? 'Remaining Due' : totalPaidAmount > 0 ? 'Payment Status' : 'Current Total'}
               </span>
-              <span className="text-xl font-extrabold text-[#C85A3F]">
-                {formatPrice(grandTotal)}
+              <span className="text-lg sm:text-xl font-extrabold text-[#C85A3F] truncate block">
+                {totalPaidAmount > 0 && outstandingAmount === 0 ? 'Paid in Full' : formatPrice(outstandingAmount > 0 ? outstandingAmount : grandTotal)}
               </span>
-              <span className="text-[10px] text-emerald-700 font-bold block">
-                Incl. taxes & fees
+              <span className="text-[10px] text-emerald-700 font-bold block truncate">
+                {totalPaidAmount > 0 ? `Paid: ${formatPrice(totalPaidAmount)}` : 'Incl. taxes & fees'}
               </span>
             </div>
           </div>
@@ -358,28 +379,28 @@ export const ActiveDiningSessionPage: React.FC = () => {
 
         {/* 2. Chronological Orders Breakdown */}
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <h2 className="text-base font-extrabold text-[#202124] flex items-center gap-2">
               <Utensils className="w-4 h-4 text-[#C85A3F]" />
               <span>Orders Placed in this Visit</span>
             </h2>
-            <span className="text-xs text-[#756B64] font-semibold">
+            <span className="text-[11px] sm:text-xs text-[#756B64] font-semibold">
               Updated live from kitchen & waitstaff
             </span>
           </div>
 
           {orders.length === 0 ? (
-            <div className="bg-white border border-[#E5DCD5] rounded-3xl p-10 text-center space-y-3">
+            <div className="bg-white border border-[#E5DCD5] rounded-3xl p-8 sm:p-10 text-center space-y-3">
               <div className="w-14 h-14 mx-auto rounded-2xl bg-[#FCFAF7] border border-[#E5DCD5] flex items-center justify-center text-[#756B64]">
                 <Utensils className="w-6 h-6 opacity-40" />
               </div>
               <h3 className="text-sm font-extrabold text-[#202124]">No Orders Placed Yet</h3>
-              <p className="text-xs text-[#756B64] max-w-sm mx-auto">
+              <p className="text-xs text-[#756B64] max-w-sm mx-auto leading-relaxed">
                 You are currently seated at Table {currentTable}. Browse the menu and submit your first order.
               </p>
               <button
                 onClick={() => navigate(`/customer/restaurant/${resolvedTenantId}/menu`)}
-                className="px-5 py-2.5 bg-[#C85A3F] text-white font-extrabold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+                className="min-h-[44px] px-5 py-2.5 bg-[#C85A3F] hover:bg-[#A94332] active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
               >
                 Browse Menu
               </button>
@@ -392,26 +413,41 @@ export const ActiveDiningSessionPage: React.FC = () => {
                 const orderTime = order.createdAt 
                   ? new Date(order.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                   : '';
+                const isPreparing = order.status === 'PREPARING' || order.status === 'CHEF_ASSIGNED' || order.status === 'COOKING';
+                const isReady = order.status === 'READY' || order.status === 'PICKED_UP';
+                const isServed = order.status === 'SERVED' || order.status === 'DELIVERED';
+                const isOrderPaid = (order.paymentStatus || '').toLowerCase() === 'paid' || order.isPaid === true;
 
                 return (
                   <div
                     key={order.id || order.orderId}
-                    className="bg-white border border-[#E5DCD5] rounded-3xl p-5 sm:p-6 shadow-xs space-y-4 text-left transition-all hover:border-[#C85A3F]/40"
+                    className={`bg-white border rounded-3xl p-4 sm:p-6 shadow-xs space-y-3.5 text-left transition-all ${
+                      isPreparing 
+                        ? 'border-orange-300 ring-1 ring-orange-200' 
+                        : isReady 
+                        ? 'border-emerald-300 ring-1 ring-emerald-200'
+                        : 'border-[#E5DCD5] hover:border-[#C85A3F]/40'
+                    }`}
                   >
                     {/* Order Ticket Header */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#F3E8DF]">
-                      <div className="flex items-center gap-2.5">
-                        <span className="w-8 h-8 rounded-xl bg-[#FCFAF7] border border-[#E5DCD5] text-xs font-black text-[#202124] flex items-center justify-center font-mono">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-[#F3E8DF]">
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <span className="w-8 h-8 rounded-xl bg-[#FCFAF7] border border-[#E5DCD5] text-xs font-black text-[#202124] flex items-center justify-center font-mono shrink-0">
                           #{String(seqNumber).padStart(2, '0')}
                         </span>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="text-sm font-extrabold text-[#202124]">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="text-sm font-extrabold text-[#202124] font-mono break-all sm:break-normal">
                               Order #{order.orderId || order.id}
                             </h3>
                             {seqNumber > 1 && (
                               <span className="text-[10px] bg-amber-50 border border-amber-200 text-amber-800 font-extrabold px-2 py-0.5 rounded-md">
                                 Add-on Order
+                              </span>
+                            )}
+                            {isOrderPaid && (
+                              <span className="text-[10px] bg-emerald-50 border border-emerald-200 text-emerald-800 font-extrabold px-2 py-0.5 rounded-md">
+                                Paid
                               </span>
                             )}
                           </div>
@@ -425,14 +461,14 @@ export const ActiveDiningSessionPage: React.FC = () => {
                       </div>
 
                       {/* Status + Individual Tracker Link */}
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-[#F3E8DF]/60 shrink-0">
                         <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-bold ${statusInfo.bg} ${statusInfo.text}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dot}`} />
                           <span>{statusInfo.label}</span>
                         </span>
                         <button
                           onClick={() => navigate(`/customer/restaurant/${resolvedTenantId}/order/${order.orderId || order.id}`)}
-                          className="px-3 py-1.5 bg-[#FCFAF7] hover:bg-[#F3E8DF] border border-[#E5DCD5] text-[#202124] hover:text-[#C85A3F] text-xs font-bold rounded-xl transition-all flex items-center gap-1 cursor-pointer"
+                          className="min-h-[38px] px-3.5 py-1.5 bg-[#FCFAF7] hover:bg-[#F3E8DF] active:scale-95 border border-[#E5DCD5] text-[#202124] hover:text-[#C85A3F] text-xs font-bold rounded-xl transition-all flex items-center gap-1 cursor-pointer"
                         >
                           <span>Track</span>
                           <ChevronRight className="w-3.5 h-3.5" />
@@ -440,28 +476,50 @@ export const ActiveDiningSessionPage: React.FC = () => {
                       </div>
                     </div>
 
+                    {/* Live Course Preparation / Serving Indicator */}
+                    {isPreparing && (
+                      <div className="flex items-center gap-2 px-3 py-2 bg-orange-50 border border-orange-200/80 rounded-xl text-orange-900 text-xs font-bold">
+                        <ChefHat className="w-4 h-4 text-orange-600 animate-pulse shrink-0" />
+                        <span>Kitchen is actively preparing this course</span>
+                      </div>
+                    )}
+                    {isReady && (
+                      <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 border border-emerald-200/80 rounded-xl text-emerald-900 text-xs font-bold">
+                        <Sparkles className="w-4 h-4 text-emerald-600 animate-bounce shrink-0" />
+                        <span>Food is ready and being brought to your table</span>
+                      </div>
+                    )}
+                    {isServed && (
+                      <div className="flex items-center gap-2 px-3 py-2 bg-teal-50 border border-teal-200/80 rounded-xl text-teal-900 text-xs font-bold">
+                        <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" />
+                        <span>Served at your table</span>
+                      </div>
+                    )}
+
                     {/* Order Items Table / List */}
-                    <div className="space-y-2">
+                    <div className="space-y-1.5 divide-y divide-[#F3E8DF]/50">
                       {Array.isArray(order.items) && order.items.map((item: any, iIdx: number) => {
                         const qty = Number(item.count || item.quantity || 1);
                         const price = Number(item.pricePerUnit || item.price || 0);
 
                         return (
-                          <div key={iIdx} className="flex items-start justify-between text-xs py-1">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="w-5 h-5 rounded-md bg-[#F3E8DF] text-[#C85A3F] font-black text-[11px] flex items-center justify-center shrink-0">
+                          <div key={iIdx} className="flex items-start justify-between text-xs pt-1.5 first:pt-0 gap-2">
+                            <div className="flex items-start gap-2 min-w-0 flex-1">
+                              <span className="w-5 h-5 rounded-md bg-[#F3E8DF] text-[#C85A3F] font-black text-[11px] flex items-center justify-center shrink-0 mt-0.5">
                                 {qty}×
                               </span>
-                              <span className="font-bold text-[#202124] truncate">
-                                {item.name || 'Dish'}
-                              </span>
-                              {item.notes && (
-                                <span className="text-[10px] text-[#756B64] italic truncate max-w-[150px]">
-                                  ({item.notes})
+                              <div className="min-w-0 flex-1">
+                                <span className="font-bold text-[#202124] block break-words">
+                                  {item.name || 'Dish'}
                                 </span>
-                              )}
+                                {item.notes && (
+                                  <span className="text-[10.5px] text-[#756B64] italic block break-words mt-0.5">
+                                    Note: {item.notes}
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                            <span className="font-extrabold text-[#202124] shrink-0 ml-2">
+                            <span className="font-extrabold text-[#202124] shrink-0 ml-2 font-mono text-xs">
                               {formatPrice(price * qty)}
                             </span>
                           </div>
@@ -474,7 +532,7 @@ export const ActiveDiningSessionPage: React.FC = () => {
                       <span className="text-[#756B64] font-semibold">
                         Order #{seqNumber} Total
                       </span>
-                      <span className="font-extrabold text-[#202124] text-sm">
+                      <span className="font-extrabold text-[#202124] text-sm font-mono">
                         {formatPrice(order.total || order.totalAmount || 0)}
                       </span>
                     </div>
@@ -496,27 +554,33 @@ export const ActiveDiningSessionPage: React.FC = () => {
             <div className="space-y-2 text-xs font-semibold text-[#756B64]">
               <div className="flex justify-between">
                 <span>Items Subtotal ({totalItemsCount} items)</span>
-                <span className="text-[#202124] font-bold">{formatPrice(combinedSubtotal)}</span>
+                <span className="text-[#202124] font-bold font-mono">{formatPrice(combinedSubtotal)}</span>
               </div>
               <div className="flex justify-between">
                 <span>Taxes & GST</span>
-                <span className="text-[#202124] font-bold">{formatPrice(combinedTax)}</span>
+                <span className="text-[#202124] font-bold font-mono">{formatPrice(combinedTax)}</span>
               </div>
               <div className="flex justify-between">
                 <span>Service Fee</span>
-                <span className="text-[#202124] font-bold">{formatPrice(combinedServiceCharge)}</span>
+                <span className="text-[#202124] font-bold font-mono">{formatPrice(combinedServiceCharge)}</span>
               </div>
+              {totalPaidAmount > 0 && (
+                <div className="flex justify-between text-emerald-700 font-bold">
+                  <span>Amount Paid</span>
+                  <span className="font-mono">-{formatPrice(totalPaidAmount)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-base font-extrabold text-[#202124] pt-3 border-t border-[#F3E8DF]">
-                <span>Current Dining Total</span>
-                <span className="text-[#C85A3F] font-black">{formatPrice(grandTotal)}</span>
+                <span>{totalPaidAmount > 0 ? 'Remaining Due' : 'Current Dining Total'}</span>
+                <span className="text-[#C85A3F] font-black font-mono">{formatPrice(totalPaidAmount > 0 ? outstandingAmount : grandTotal)}</span>
               </div>
             </div>
 
             {/* Action Buttons Row */}
-            <div className="pt-2 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="pt-2 grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
               <button
                 onClick={() => navigate(`/customer/restaurant/${resolvedTenantId}/menu`)}
-                className="py-3 px-4 bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="py-3.5 px-4 bg-[#C85A3F] hover:bg-[#A94332] active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[44px]"
               >
                 <Plus className="w-4 h-4" />
                 <span>Add More Food</span>
@@ -525,7 +589,7 @@ export const ActiveDiningSessionPage: React.FC = () => {
               <button
                 onClick={handleCallWaiter}
                 disabled={isCallingWaiter}
-                className="py-3 px-4 bg-white hover:bg-[#FCFAF7] border border-[#E5DCD5] text-[#202124] font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="py-3.5 px-4 bg-white hover:bg-[#FCFAF7] active:scale-95 border border-[#E5DCD5] text-[#202124] font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[44px] disabled:opacity-50"
               >
                 <Bell className="w-4 h-4 text-amber-500" />
                 <span>{isCallingWaiter ? 'Calling Server...' : 'Call Waiter'}</span>
@@ -534,7 +598,7 @@ export const ActiveDiningSessionPage: React.FC = () => {
               <button
                 onClick={handleRequestBill}
                 disabled={isRequestingBill}
-                className="py-3 px-4 bg-[#202124] hover:bg-[#333] text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="py-3.5 px-4 bg-[#202124] hover:bg-[#333] active:scale-95 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-2 cursor-pointer min-h-[44px] disabled:opacity-50"
               >
                 <FileText className="w-4 h-4 text-emerald-400" />
                 <span>{isRequestingBill ? 'Requesting Bill...' : 'Request Bill'}</span>

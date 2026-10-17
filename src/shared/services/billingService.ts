@@ -541,6 +541,14 @@ export const billingService = {
     const actorName = params.actor?.displayName || params.actor?.email || params.processedByName || 'Staff';
     const actorRole = params.actor?.role || params.processedByRole || 'staff';
 
+    // 3.5. Authoritative Role Verification
+    // Direct client settlement can only be executed by authorized staff (cashier, waiter, manager, owner) or server-side system.
+    // Ordinary customers or unverified clients are strictly prohibited from settling bills directly.
+    const validStaffRoles = ['super_admin', 'super-admin', 'owner', 'admin', 'manager', 'cashier', 'waiter', 'staff', 'system'];
+    if (actorRole === 'customer' || (params.actor && !validStaffRoles.includes(params.actor.role || ''))) {
+      throw new Error(`Unauthorized settlement attempt: Role '${actorRole}' is not permitted to settle canonical bills directly. Settlement requires authorized staff confirmation.`);
+    }
+
     // 4. Prepare payment breakdown
     let paymentBreakdown: IPaymentBreakdown = { cash: 0, upi: 0, card: 0, wallet: 0 };
     if (params.method === 'mixed' && params.breakdown) {
@@ -556,10 +564,11 @@ export const billingService = {
     }
 
     // 5. Generate transparent manual/demo transaction reference (no fake gateway IDs)
+    const isExplicitDemo = params.transactionRef?.startsWith('DEMO-') || params.notes?.toLowerCase().includes('demo') || params.notes?.toLowerCase().includes('simulat');
     const generatedTxRef = params.transactionRef || (
       params.method === 'upi' 
         ? `DEMO-MANUAL-UPI-${Date.now().toString(36).toUpperCase()}` 
-        : `MANUAL-${params.method.toUpperCase()}-${Date.now().toString(36).toUpperCase()}`
+        : `COUNTER-MANUAL-${params.method.toUpperCase()}-${Date.now().toString(36).toUpperCase()}`
     );
 
     // 6. Update canonical bill
@@ -572,6 +581,7 @@ export const billingService = {
       processedBy: actorUid,
       processedByName: actorName,
       processedByRole: actorRole,
+      notes: params.notes || (isExplicitDemo ? `Demonstration settlement confirmed by ${actorName}` : `Counter ${params.method.toUpperCase()} settlement verified by ${actorName}`),
       ...(params.invoiceNumber ? { invoiceNumber: params.invoiceNumber } : {})
     };
     await updateDoc(billRef, updatedBill);

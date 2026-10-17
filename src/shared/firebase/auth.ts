@@ -1,6 +1,7 @@
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
+  signInAnonymously,
   signOut as firebaseSignOut, 
   sendPasswordResetEmail,
   sendEmailVerification,
@@ -38,6 +39,15 @@ export const signIn = async (email: string, password: string, _rememberMe?: bool
     console.warn('[AUTH signIn] Note setting session persistence:', persistErr);
   }
   return signInWithEmailAndPassword(auth, email, password);
+};
+
+export const signInAnonymousUser = async (): Promise<UserCredential> => {
+  try {
+    await setPersistence(auth, browserSessionPersistence);
+  } catch (persistErr) {
+    console.warn('[AUTH signInAnonymousUser] Note setting session persistence:', persistErr);
+  }
+  return signInAnonymously(auth);
 };
 
 export const signUpOwner = async (

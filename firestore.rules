@@ -69,12 +69,12 @@ service cloud.firestore {
     // Helper to verify if customer bill creation matches the authentic order in Firestore
     function isValidCustomerBillCreation(tenantId, billId, billData) {
       let orderDocPath = /databases/$(database)/documents/restaurants/$(tenantId)/orders/$(billData.get('orderId', ''));
-      return isAuth() &&
-        billId == ('BILL-' + billData.get('orderId', '')) &&
+      return billId == ('BILL-' + billData.get('orderId', '')) &&
         exists(orderDocPath) &&
-        get(orderDocPath).data.get('customerId', '') == request.auth.uid &&
+        (
+          isAuth() && get(orderDocPath).data.get('customerId', '') == request.auth.uid && billData.get('customerId', '') == request.auth.uid
+        ) &&
         get(orderDocPath).data.get('status', '') in ['DINING_COMPLETED', 'COMPLETED'] &&
-        billData.get('customerId', '') == request.auth.uid &&
         billData.get('tenantId', '') == tenantId &&
         billData.get('paymentStatus', 'pending') == 'pending' &&
         !('paidAt' in billData) &&
@@ -177,13 +177,21 @@ service cloud.firestore {
 
     // Root-level User accounts (restaurant staff and owners)
     // A user can read user profiles when authenticated.
-    // Avoid calling getUserData() or helper functions here to prevent recursive rule evaluation.
+    // Ordinary users can update their profile but cannot grant themselves privileged roles or change tenantId.
     match /users/{userId} {
       allow read: if isAuth();
-      allow write: if isAuth() && (
-        request.auth.uid == userId ||
-        isSuperAdmin()
+      allow create: if isAuth() && (
+        isSuperAdmin() ||
+        (request.auth.uid == userId && 
+         !('role' in request.resource.data && request.resource.data.role in ['super_admin', 'super-admin', 'owner', 'admin']))
       );
+      allow update: if isAuth() && (
+        isSuperAdmin() ||
+        (request.auth.uid == userId && 
+         request.resource.data.get('role', '') == resource.data.get('role', '') &&
+         request.resource.data.get('tenantId', '') == resource.data.get('tenantId', ''))
+      );
+      allow delete: if isSuperAdmin();
 
       match /{subcollection}/{docId} {
         allow read, write: if isAuth() && (request.auth.uid == userId || isSuperAdmin());
@@ -258,7 +266,16 @@ service cloud.firestore {
 
       match /tables/{tableId} {
         allow read: if true;
-        allow write: if isAuth();
+        // Tenant managers have table configuration control
+        allow create, delete: if isTenantManager(tenantId);
+        // Tenant staff have full operational control; Diners (including guest QR diners) can only update occupancy during dining
+        allow update: if isTenantStaff(tenantId) || (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status', 'activeOrderId', 'activeOrder', 'currentOrderTotal',
+            'customerName', 'seatingTime', 'guestsCount', 'updatedAt'
+          ]) &&
+          request.resource.data.get('status', '') in ['Occupied', 'Browsing', 'Cleaning']
+        );
       }
 
       // Customer Orders - customer/staff creation, customer cannot modify financials, paymentStatus, or paidAt
@@ -269,14 +286,29 @@ service cloud.firestore {
           (request.resource.data.get('paymentStatus', 'pending') == 'pending' ||
            request.resource.data.get('paymentStatus', 'pending') == 'PENDING') &&
           !('paidAt' in request.resource.data) &&
-          (isTenantStaff(tenantId) || 
-           !isAuth() || 
-           request.resource.data.get('customerId', '') == request.auth.uid ||
-           request.resource.data.get('customerId', '') == 'guest-uid')
+          (
+            isTenantStaff(tenantId) || 
+            (
+              // Customers/guests must create orders with initial status
+              request.resource.data.get('status', 'NEW') in ['NEW', 'PLACED'] &&
+              (
+                (isAuth() && (request.resource.data.get('customerId', '') == request.auth.uid || request.resource.data.get('customerId', '') in ['', 'guest-uid'])) ||
+                (!isAuth() && request.resource.data.get('customerId', '') in ['', 'guest-uid'])
+              ) &&
+              // Baseline order integrity: non-negative financials
+              request.resource.data.get('total', 0) >= 0 &&
+              request.resource.data.get('subtotal', 0) >= 0 &&
+              request.resource.data.get('tax', 0) >= 0 &&
+              request.resource.data.get('discount', 0) >= 0
+            )
+          )
         );
         allow update: if isTenantStaff(tenantId) || (
           // Authenticated diner or table session diner modifying only allowed customer fields
-          (!isAuth() || resource.data.get('customerId', '') in ['', 'guest-uid'] || resource.data.get('customerId', '') == request.auth.uid) &&
+          (
+            resource.data.get('customerId', '') in ['', 'guest-uid'] || 
+            (isAuth() && resource.data.get('customerId', '') == request.auth.uid)
+          ) &&
           isValidCustomerOrderUpdate()
         );
         allow delete: if isTenantManager(tenantId);
@@ -287,13 +319,19 @@ service cloud.firestore {
       // Historical tickets must be preserved for operational and tax audit (deletion forbidden).
       match /kitchenTickets/{ticketId} {
         allow read: if true;
+        // Staff can create any ticket; Customer/Guest ordering can only create an initial ticket linked to an order
         allow create: if (
           request.resource.data.get('tenantId', '') == tenantId &&
-          (isTenantStaff(tenantId) || !isAuth() || isAuth())
+          (
+            isTenantStaff(tenantId) ||
+            (
+              request.resource.data.get('orderId', '') != '' &&
+              request.resource.data.get('status', 'NEW') in ['NEW', 'QUEUED', 'PLACED', 'WAITING']
+            )
+          )
         );
-        allow update: if isTenantStaff(tenantId) || (
-          request.resource.data.get('tenantId', '') == tenantId
-        );
+        // Only authorized kitchen & restaurant staff can update ticket status or progress
+        allow update: if isTenantStaff(tenantId);
         allow delete: if false; // Strict audit preservation: KOTs can never be deleted
       }
 
@@ -302,13 +340,15 @@ service cloud.firestore {
         allow read: if true;
         allow create: if (
           request.resource.data.get('restaurantId', '') == tenantId &&
-          (isTenantStaff(tenantId) || 
-           !isAuth() || 
-           request.resource.data.get('customerId', '') == request.auth.uid ||
-           request.resource.data.get('customerId', '') == 'guest-uid')
+          (
+            isTenantStaff(tenantId) || 
+            (isAuth() && (request.resource.data.get('customerId', '') == request.auth.uid || request.resource.data.get('customerId', '') in ['', 'guest-uid'])) ||
+            (!isAuth() && request.resource.data.get('customerId', '') in ['', 'guest-uid'])
+          )
         );
         allow update: if isTenantStaff(tenantId) || (
-          (!isAuth() || resource.data.get('customerId', '') in ['', 'guest-uid'] || resource.data.get('customerId', '') == request.auth.uid)
+          resource.data.get('customerId', '') in ['', 'guest-uid'] || 
+          (isAuth() && resource.data.get('customerId', '') == request.auth.uid)
         );
         allow delete: if isTenantStaff(tenantId) || (
           isAuth() && resource.data.get('customerId', '') == request.auth.uid
@@ -324,10 +364,10 @@ service cloud.firestore {
 
       // Canonical Bills - strictly isolated by tenant, branch, staff role and authentic order verification
       match /bills/{billId} {
-        // Diner can only get their own order's bill; Staff can get bills in their tenant/branch; listing strictly restricted to authorized tenant staff
-        allow get: if isAuth() && (
+        // Staff can get bills in their tenant/branch; Authentic owner (customer or authenticated guest) can get their own bill
+        allow get: if (
           (isTenantStaff(tenantId) && isBranchAllowed(resource.data.get('branchId', ''))) ||
-          (resource.data.get('customerId', '') != '' && resource.data.get('customerId', '') == request.auth.uid)
+          (isAuth() && resource.data.get('customerId', '') != '' && resource.data.get('customerId', '') == request.auth.uid)
         );
         allow list: if isTenantStaff(tenantId);
         // Creation allowed by authorized tenant staff, or authenticated customer whose bill strictly matches their authentic order
@@ -384,7 +424,24 @@ service cloud.firestore {
     }
 
     match /diningSessions/{sessionId} {
-      allow read, create, update: if true;
+      allow read: if true;
+      allow create: if (
+        request.resource.data.get('tenantId', '') == tenantId ||
+        request.resource.data.get('restaurantId', '') == tenantId
+      ) && (
+        isTenantStaff(tenantId) ||
+        request.resource.data.get('billingStatus', 'pending') in ['pending', 'requested']
+      );
+      allow update: if (
+        request.resource.data.get('tenantId', '') == tenantId ||
+        request.resource.data.get('restaurantId', '') == tenantId
+      ) && (
+        isTenantStaff(tenantId) ||
+        // Customer can only update active orders, table browsing, or request bill; cannot mark paid directly
+        (!('billingStatus' in request.resource.data.diff(resource.data).affectedKeys()) ||
+         request.resource.data.get('billingStatus', '') == 'requested')
+      );
+      allow delete: if false; // Sessions are permanent dining records
     }
 
     // Customer Satisfaction Ratings & Dining Reviews
@@ -437,9 +494,15 @@ service cloud.firestore {
       }
 
       // Universal rule for other management subcollections inside tenant workspace
+      // Strictly excludes specific collections that have custom security and immutability invariants
       match /{subcollection}/{docId} {
-        allow read: if isAuth() && (isTenant(tenantId) || isSuperAdmin());
-        allow write: if isTenantStaff(tenantId);
+        allow read: if isAuth() && (isTenant(tenantId) || isSuperAdmin()) &&
+          !(subcollection in ['bills', 'transactions']);
+        allow write: if isTenantStaff(tenantId) &&
+          !(subcollection in [
+            'bills', 'transactions', 'orders', 'kitchenTickets', 'tables', 
+            'diningSessions', 'stockMovements', 'menu', 'inventory', 'waste', 'recipes'
+          ]);
       }
     }
   }

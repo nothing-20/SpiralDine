@@ -229,3 +229,129 @@ export const sendPasswordResetEmail = functions.https.onCall(async (data, contex
     throw new functions.https.HttpsError('internal', err.message || 'Failed to send reset password email.');
   }
 });
+
+// 7. createValidatedOrder
+export const createValidatedOrder = functions.https.onCall(async (data, context) => {
+  const { tenantId, tableNumber, items, customerId, sessionId, tableId, orderId } = data || {};
+  if (!tenantId || !tableNumber || !items || !Array.isArray(items) || items.length === 0) {
+    throw new functions.https.HttpsError('invalid-argument', 'Missing required order arguments.');
+  }
+
+  const effectiveCustomerId = customerId || context.auth?.uid || 'guest-uid';
+
+  try {
+    // 1. Restaurant check
+    const restDoc = await db.collection('restaurants').doc(tenantId).get();
+    if (!restDoc.exists) {
+      const tDoc = await db.collection('tenants').doc(tenantId).get();
+      if (!tDoc.exists) {
+        throw new functions.https.HttpsError('not-found', `Restaurant ${tenantId} not found.`);
+      }
+    }
+
+    // 2. Target Order ID & idempotency check
+    const targetOrderId = (orderId || data.idempotencyKey || '').trim() ||
+      `ORD-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+    const existingOrder = await db.collection('restaurants').doc(tenantId).collection('orders').doc(targetOrderId).get();
+    if (existingOrder.exists) {
+      return { success: true, isDuplicate: true, orderId: targetOrderId, order: existingOrder.data() };
+    }
+
+    // 3. Retrieve canonical menu items and validate
+    let authoritativeSubtotal = 0;
+    const verifiedItems: any[] = [];
+
+    for (const item of items) {
+      const count = Number(item.count);
+      if (!count || !Number.isInteger(count) || count <= 0) {
+        throw new functions.https.HttpsError('invalid-argument', `Invalid quantity for item ${item.itemId}`);
+      }
+
+      const itemDoc = await db.collection('restaurants').doc(tenantId).collection('menu').doc('default').collection('items').doc(item.itemId).get();
+      if (!itemDoc.exists) {
+        throw new functions.https.HttpsError('not-found', `Menu item ${item.itemId} does not exist in restaurant menu.`);
+      }
+
+      const itemData = itemDoc.data() || {};
+      if (itemData.isAvailable === false || itemData.available === false || itemData.availability === false) {
+        throw new functions.https.HttpsError('failed-precondition', `Item "${itemData.name || item.itemId}" is currently sold out.`);
+      }
+      if (itemData.isPublished === false || itemData.published === false || itemData.status === 'unpublished') {
+        throw new functions.https.HttpsError('failed-precondition', `Item "${itemData.name || item.itemId}" is unpublished.`);
+      }
+
+      const unitPrice = Number(itemData.discountPrice || itemData.price || 0);
+      if (unitPrice <= 0) {
+        throw new functions.https.HttpsError('failed-precondition', `Item "${itemData.name || item.itemId}" has invalid canonical price.`);
+      }
+
+      authoritativeSubtotal += unitPrice * count;
+      verifiedItems.push({
+        itemId: item.itemId,
+        name: itemData.name || item.itemId,
+        count,
+        notes: (item.notes || '').slice(0, 200),
+        pricePerUnit: unitPrice,
+        image: itemData.image || itemData.imageUrl || '',
+        isVeg: itemData.isVeg ?? itemData.veg ?? false
+      });
+    }
+
+    const authoritativeTax = Math.round(authoritativeSubtotal * 0.05);
+    const authoritativeServiceCharge = Math.round(authoritativeSubtotal * 0.05);
+    const authoritativeTotal = authoritativeSubtotal + authoritativeTax + authoritativeServiceCharge;
+    const nowIso = new Date().toISOString();
+
+    const cleanTableNum = String(tableNumber).replace(/^TBL-/i, '').trim();
+    const resolvedTableId = tableId || `TBL-${cleanTableNum}`;
+    const cleanSessionId = sessionId || `SES-${nowIso.slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+
+    const orderPayload = {
+      id: targetOrderId,
+      orderId: targetOrderId,
+      primaryOrderId: data.primaryOrderId || targetOrderId,
+      sessionId: cleanSessionId,
+      orderSequence: data.orderSequence || 1,
+      isAdditionalOrder: Boolean(data.isAdditionalOrder),
+      customerId: effectiveCustomerId,
+      customerName: (data.customerName || 'Guest Diner').trim(),
+      phone: (data.phone || '+91 98765 43210').trim(),
+      tenantId,
+      restaurantId: tenantId,
+      branchId: data.branchId || 'main',
+      tableId: resolvedTableId,
+      tableNumber: cleanTableNum,
+      tableName: data.tableName || `Table ${cleanTableNum}`,
+      orderType: data.orderType || 'dine_in',
+      orderSource: data.orderSource || 'qr',
+      items: verifiedItems,
+      subtotal: authoritativeSubtotal,
+      tax: authoritativeTax,
+      serviceCharge: authoritativeServiceCharge,
+      discount: 0,
+      total: authoritativeTotal,
+      totalAmount: authoritativeTotal,
+      status: 'NEW',
+      paymentStatus: 'pending',
+      specialInstructions: (data.specialInstructions || '').slice(0, 300),
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+
+    await db.collection('restaurants').doc(tenantId).collection('orders').doc(targetOrderId).set(orderPayload);
+
+    return {
+      success: true,
+      orderId: targetOrderId,
+      order: orderPayload,
+      primaryOrderId: orderPayload.primaryOrderId,
+      sessionId: cleanSessionId
+    };
+  } catch (err: any) {
+    console.error('[createValidatedOrder] Error:', err);
+    if (err instanceof functions.https.HttpsError) throw err;
+    throw new functions.https.HttpsError('internal', err.message || 'Failed to validate order.');
+  }
+});
+

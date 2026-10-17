@@ -16,9 +16,13 @@ export interface IAuthContextType {
   profileError: string | null;
   logout: () => Promise<void>;
   firebaseUser: User | null;
+  ensureGuestAuth: () => Promise<User | null>;
 }
 
 const AuthContext = createContext<IAuthContextType | undefined>(undefined);
+
+// Module-level concurrency and StrictMode singleton lock
+let guestAuthPromise: Promise<User | null> | null = null;
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
@@ -45,6 +49,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setIsLoading(true);
         setAuthStatus('PROFILE_LOADING');
         setProfileError(null);
+
+        // Firebase Anonymous Guest Authentication: instantly authorize without querying user docs
+        if (fUser.isAnonymous) {
+          const guestUser: IUser = {
+            uid: fUser.uid,
+            email: '',
+            displayName: 'Guest Diner',
+            tenantId: '',
+            role: 'customer',
+            status: 'active',
+            phoneNumber: '',
+            isAnonymous: true,
+            createdAt: fUser.metadata.creationTime || new Date().toISOString()
+          };
+          console.log('[AUTH Context] Anonymous guest diner authorized:', { uid: guestUser.uid });
+          setUser(guestUser);
+          setRole('customer');
+          setTenantId('');
+          setProfileError(null);
+          setIsLoading(false);
+          setAuthStatus('AUTHORIZED');
+          return;
+        }
 
         try {
           // Check if customer profile exists at customers/{uid}
@@ -211,8 +238,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const ensureGuestAuth = async (): Promise<User | null> => {
+    // 1. Wait for Firebase initial auth resolution if still starting up
+    try {
+      if (typeof (auth as any).authStateReady === 'function') {
+        await (auth as any).authStateReady();
+      }
+    } catch (_) {}
+
+    // 2. If already authenticated (returning guest, registered customer, or staff), reuse it
+    if (auth.currentUser) {
+      return auth.currentUser;
+    }
+
+    // 3. Concurrency & StrictMode lock: reuse in-flight anonymous sign-in promise
+    if (guestAuthPromise) {
+      return guestAuthPromise;
+    }
+
+    guestAuthPromise = (async () => {
+      try {
+        console.log('[AUTH Context] Triggering anonymous guest sign-in...');
+        const cred = await authService.signInAnonymous();
+        return cred.user;
+      } catch (err) {
+        console.error('[AUTH Context] Failed to ensure anonymous guest auth:', err);
+        return null;
+      } finally {
+        guestAuthPromise = null;
+      }
+    })();
+
+    return guestAuthPromise;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, role, tenantId, isLoading, authStatus, profileError, logout, firebaseUser }}>
+    <AuthContext.Provider value={{ user, role, tenantId, isLoading, authStatus, profileError, logout, firebaseUser, ensureGuestAuth }}>
       {children}
     </AuthContext.Provider>
   );

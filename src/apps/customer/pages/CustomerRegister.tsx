@@ -65,21 +65,19 @@ export const CustomerRegister: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 text-left relative overflow-hidden select-none">
-      <div className="absolute top-[-10%] w-[500px] h-[500px] rounded-full bg-primary/10 blur-[130px] pointer-events-none" />
-
-      <Card className="max-w-md w-full p-8 border-slate-850 bg-slate-900/40 relative z-10">
+    <div className="min-h-screen bg-[#FCFAF7] flex items-center justify-center p-4 sm:p-6 text-left relative overflow-hidden select-none">
+      <Card className="max-w-md w-full p-6 sm:p-8 md:p-10 bg-white border border-[#E9DED6] rounded-[24px] shadow-md relative z-10">
         <div className="space-y-2 text-center mb-6">
-          <div className="w-12 h-12 bg-primary/10 border border-primary/20 rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-primary/5">
-            <UserPlus className="w-6 h-6 text-primary" />
+          <div className="w-14 h-14 bg-[#FCEDE7] rounded-2xl flex items-center justify-center mx-auto shadow-2xs">
+            <UserPlus className="w-7 h-7 text-[#D65336]" />
           </div>
-          <h1 className="text-xl font-display font-extrabold text-textPearl">Diner Registration</h1>
-          <p className="text-xs text-mutedAsh font-semibold">Join Spiral Dine to start ordering table-side dishes.</p>
+          <h1 className="text-2xl font-display font-extrabold text-[#17202A] tracking-tight">Diner Registration</h1>
+          <p className="text-xs text-[#667085] font-normal leading-relaxed">Join Spiral Dine to start ordering table-side dishes and save your dining history.</p>
         </div>
 
         {errorText && (
-          <div className="p-3 bg-red-950/20 border border-red-900/40 rounded-xl flex items-start space-x-2 text-xs text-red-400 font-semibold mb-4">
-            <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
+          <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-2 text-xs text-red-600 font-semibold mb-4">
+            <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
             <span>{errorText}</span>
           </div>
         )}
@@ -130,24 +128,31 @@ export const CustomerRegister: React.FC = () => {
             {...register('confirmPassword')}
           />
 
-          <Button
+          <button
             type="submit"
-            className="w-full mt-4"
-            isLoading={isSubmitting}
+            disabled={isSubmitting}
+            className="w-full h-12 mt-4 bg-[#D65336] hover:bg-[#B9432D] active:bg-[#A83C27] text-white font-bold text-sm rounded-xl flex items-center justify-center space-x-2 shadow-xs hover:shadow transition-all cursor-pointer disabled:opacity-60"
           >
-            Create Customer Account
-          </Button>
+            {isSubmitting ? (
+              <div className="flex items-center space-x-2">
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>Creating Account...</span>
+              </div>
+            ) : (
+              <span>Create Customer Account</span>
+            )}
+          </button>
         </form>
 
-        <div className="text-center mt-6 pt-4 border-t border-slate-850 text-xs text-slate-400 font-semibold space-y-2">
+        <div className="text-center mt-6 pt-4 border-t border-[#E9DED6] text-xs text-[#667085] font-semibold space-y-2">
           <p>
             Already have a customer account?{' '}
-            <Link to="/customer/login" className="text-primary hover:underline font-bold">
+            <Link to="/customer/login" className="text-[#D65336] hover:underline font-bold">
               Sign In
             </Link>
           </p>
           <p>
-            <Link to="/" className="text-slate-500 hover:text-slate-350 transition-colors">
+            <Link to="/" className="text-[#8A817A] hover:text-[#17202A] transition-colors">
               ← Back to choosing experience
             </Link>
           </p>

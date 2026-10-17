@@ -53,10 +53,16 @@ interface CustomerOrder {
 }
 
 export const CustomerOrdersPage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, ensureGuestAuth } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { formatPrice } = useCurrency();
+
+  useEffect(() => {
+    ensureGuestAuth().catch(err => {
+      console.warn('[CustomerOrdersPage] Background guest auth init warning:', err);
+    });
+  }, []);
 
   // Unified orders storage map keyed by orderId/id
   const [ordersMap, setOrdersMap] = useState<Record<string, CustomerOrder>>({});
@@ -843,19 +849,19 @@ export const CustomerOrdersPage: React.FC = () => {
                   </div>
 
                   {/* Right: Price and Action Buttons */}
-                  <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-[#E5DCD5]">
+                  <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2.5 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-[#E5DCD5]">
                     <span className="text-sm sm:text-base font-extrabold text-[#202124]">
                       {formatPrice(order.total || order.totalAmount || 0)}
                     </span>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-1.5 sm:gap-2">
                       {orderIsActive ? (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             navigate(`/customer/restaurant/${targetTenant}/order/${targetOrderId}`);
                           }}
-                          className="px-3 py-1.5 bg-[#C85A3F] hover:bg-[#A94332] text-white text-[11px] font-extrabold rounded-xl transition-all shadow-xs cursor-pointer flex items-center gap-1"
+                          className="min-h-[36px] px-3.5 py-1.5 bg-[#C85A3F] hover:bg-[#A94332] active:scale-95 text-white text-[11px] font-extrabold rounded-xl transition-all shadow-xs cursor-pointer flex items-center gap-1"
                         >
                           <span>{((order.paymentStatus || '').toLowerCase() !== 'paid' && ['SERVED', 'DELIVERED', 'DINING_COMPLETED', 'BILL_REQUESTED', 'COMPLETED'].includes((order.status || '').toUpperCase())) ? 'Pay Now' : ['SERVED', 'DINING_COMPLETED'].includes((order.status || '').toUpperCase()) ? 'View Bill' : 'Track Live'}</span>
                           <ChevronRight className="w-3.5 h-3.5" />
@@ -867,7 +873,7 @@ export const CustomerOrdersPage: React.FC = () => {
                               e.stopPropagation();
                               navigate(`/customer/restaurant/${targetTenant}/order/${targetOrderId}`);
                             }}
-                            className="px-3 py-1.5 bg-[#FFF8F2] border border-[#C85A3F]/30 hover:border-[#C85A3F] text-[#C85A3F] text-[11px] font-extrabold rounded-xl transition-all cursor-pointer flex items-center gap-1"
+                            className="min-h-[36px] px-3 py-1.5 bg-[#FFF8F2] border border-[#C85A3F]/30 hover:border-[#C85A3F] active:scale-95 text-[#C85A3F] text-[11px] font-extrabold rounded-xl transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
                           >
                             <Star className="w-3 h-3 fill-[#C85A3F]" />
                             <span>Rate</span>
@@ -877,7 +883,7 @@ export const CustomerOrdersPage: React.FC = () => {
                               e.stopPropagation();
                               navigate(`/customer/restaurant/${targetTenant}/order/${targetOrderId}?view=receipt`);
                             }}
-                            className="px-3 py-1.5 bg-[#FCFAF7] border border-[#E5DCD5] hover:border-[#C85A3F]/50 text-[#202124] text-[11px] font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1"
+                            className="min-h-[36px] px-3 py-1.5 bg-[#FCFAF7] border border-[#E5DCD5] hover:border-[#C85A3F]/50 active:scale-95 text-[#202124] text-[11px] font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
                           >
                             <Receipt className="w-3 h-3 text-[#756B64]" />
                             <span>Receipt</span>
@@ -887,7 +893,7 @@ export const CustomerOrdersPage: React.FC = () => {
                               e.stopPropagation();
                               navigate(`/customer/restaurant/${targetTenant}/menu`);
                             }}
-                            className="px-3 py-1.5 bg-[#FFF8F2] border border-[#E5DCD5] hover:border-[#C85A3F]/40 text-[#C85A3F] text-[11px] font-extrabold rounded-xl transition-all cursor-pointer flex items-center gap-1"
+                            className="min-h-[36px] px-3 py-1.5 bg-[#FFF8F2] border border-[#E5DCD5] hover:border-[#C85A3F]/40 active:scale-95 text-[#C85A3F] text-[11px] font-extrabold rounded-xl transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
                           >
                             <RotateCcw className="w-3 h-3 text-[#C85A3F]" />
                             <span>Order Again</span>
@@ -899,7 +905,7 @@ export const CustomerOrdersPage: React.FC = () => {
                             e.stopPropagation();
                             navigate(`/customer/restaurant/${targetTenant}/menu`);
                           }}
-                          className="px-3 py-1.5 bg-[#FFF8F2] border border-[#E5DCD5] hover:border-[#C85A3F]/40 text-[#C85A3F] text-[11px] font-extrabold rounded-xl transition-all cursor-pointer flex items-center gap-1"
+                          className="min-h-[36px] px-3.5 py-1.5 bg-[#FFF8F2] border border-[#E5DCD5] hover:border-[#C85A3F]/40 active:scale-95 text-[#C85A3F] text-[11px] font-extrabold rounded-xl transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
                         >
                           <RotateCcw className="w-3 h-3 text-[#C85A3F]" />
                           <span>Order Again</span>

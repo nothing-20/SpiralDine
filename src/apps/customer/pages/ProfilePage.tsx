@@ -427,7 +427,14 @@ export const ProfilePage: React.FC = () => {
             {reservations.some(r => r.status === 'Confirmed' || r.status === 'Pending') && (
               <button 
                 type="button"
-                onClick={() => navigate('/customer/portal')}
+                onClick={() => {
+                  const activeRes = reservations.find(r => r.status === 'Confirmed' || r.status === 'Pending');
+                  if (activeRes?.restaurantId) {
+                    navigate(`/customer/restaurant/${activeRes.restaurantId}/active-order`);
+                  } else {
+                    navigate('/customer/active-order');
+                  }
+                }}
                 className="w-full p-4 bg-[#FFF8F2] border border-[#E85D3F]/40 hover:border-[#E85D3F] rounded-2xl flex items-center justify-between transition-all select-none shadow-xs cursor-pointer"
               >
                 <div className="flex items-center space-x-3.5">

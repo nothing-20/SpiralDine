@@ -15,6 +15,7 @@ export interface IDiningSession {
   startedAt: string;
   updatedAt?: string;
   closedAt?: string | null;
+  customerId?: string;
   customerName?: string;
   customerPhone?: string;
   primaryOrderId?: string;

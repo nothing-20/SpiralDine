@@ -58,8 +58,14 @@ export interface IOrder {
   items: IOrderItem[];
   subtotal: number; // in cents
   tax: number; // in cents
+  taxPercent?: number; // raw % (e.g. 5)
   total: number; // in cents
+  totalAmount?: number; // for backward compatibility
   status: TOrderStatus;
+  primaryOrderId?: string;
+  sessionId?: string;
+  orderSequence?: number;
+  isAdditionalOrder?: boolean;
   createdAt: string;
   updatedAt?: string;
   timeline?: ITimelineEvent[];
@@ -90,6 +96,7 @@ export interface IOrder {
   kitchenNotes?: string;
   chefNotes?: string;
   notes?: string;
+  specialInstructions?: string;
   allergyNotes?: string;
 
   // Queue and priority

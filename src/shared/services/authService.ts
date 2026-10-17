@@ -20,6 +20,16 @@ export const authService = {
   },
 
   /**
+   * Signs in a guest diner anonymously in the background.
+   * Generates a unique, non-colliding Firebase Auth UID without requiring credentials.
+   * 
+   * @returns A promise resolving to the user credential.
+   */
+  async signInAnonymous(): Promise<UserCredential> {
+    return firebaseAuth.signInAnonymousUser();
+  },
+
+  /**
    * Registers a new restaurant owner with an empty, production-ready tenant.
    * Does NOT seed mock data.
    * 

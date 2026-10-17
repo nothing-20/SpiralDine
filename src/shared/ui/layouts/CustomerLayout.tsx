@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
+import { useCart } from '../../../context/CartContext';
 import { Coffee, Calendar, User, Bell, Check, QrCode, X, Camera, ShieldAlert, ShoppingBag, Utensils, Compass, MapPin, Search, ChevronDown } from 'lucide-react';
 import { collection, query, onSnapshot, getDoc, doc } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
@@ -17,8 +18,12 @@ interface INotification {
 
 export const CustomerLayout: React.FC = () => {
   const { user } = useAuth();
+  const { cartItems } = useCart();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Compute live cart quantity adhering to existing cart semantics
+  const totalCartCount = cartItems.reduce((acc, item) => acc + (item.count || 0), 0);
 
   // Notification and QR states
   const [isNotificationOpen, setIsNotificationOpen] = useState(false);
@@ -247,11 +252,12 @@ export const CustomerLayout: React.FC = () => {
           </nav>
         </div>
 
-        {/* RIGHT: Notifications bell, Profile Avatar, and Desktop QR trigger */}
-        <div className="flex items-center space-x-3 shrink-0">
+        {/* RIGHT: Cart access, Notifications bell, Profile Avatar, and Desktop QR trigger */}
+        <div className="flex items-center space-x-2 md:space-x-3 shrink-0">
           
           {/* Desktop QR Scan button */}
           <button
+            type="button"
             onClick={() => setIsQrScannerOpen(true)}
             className="hidden md:flex px-4 py-2 bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold text-xs rounded-full transition-all shadow-md shadow-[#C85A3F]/20 items-center gap-1.5 cursor-pointer"
           >
@@ -259,11 +265,33 @@ export const CustomerLayout: React.FC = () => {
             <span>QR Scan</span>
           </button>
 
+          {/* Cart Access Button (Mobile & Desktop with Live Item Count Badge) */}
+          <button
+            type="button"
+            onClick={() => navigate('/customer/cart')}
+            aria-label={`Shopping Cart, ${totalCartCount} ${totalCartCount === 1 ? 'item' : 'items'}`}
+            className={`p-2.5 rounded-full text-[#756B64] hover:text-[#202124] transition-all border relative cursor-pointer ${
+              location.pathname === '/customer/cart'
+                ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F]'
+                : 'bg-white border-[#E5DCD5] hover:border-[#C85A3F]/40'
+            }`}
+            title="View Cart"
+          >
+            <ShoppingBag className="w-4 h-4" />
+            {totalCartCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-[#C85A3F] text-white text-[10px] font-black rounded-full flex items-center justify-center shadow-xs">
+                {totalCartCount > 99 ? '99+' : totalCartCount}
+              </span>
+            )}
+          </button>
+
           {/* Notification Bell */}
           <div className="relative" ref={notificationRef}>
             <button 
+              type="button"
               onClick={() => setIsNotificationOpen(!isNotificationOpen)}
-              className={`p-2.5 rounded-full text-[#756B64] hover:text-[#202124] transition-all border ${
+              aria-label={`Notifications, ${unreadCount} unread`}
+              className={`p-2.5 rounded-full text-[#756B64] hover:text-[#202124] transition-all border cursor-pointer ${
                 isNotificationOpen 
                   ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F]' 
                   : 'bg-white border-[#E5DCD5] hover:border-[#C85A3F]/40'
@@ -285,8 +313,9 @@ export const CustomerLayout: React.FC = () => {
                   </div>
                   {notifications.length > 0 && (
                     <button 
+                      type="button"
                       onClick={markAllRead}
-                      className="text-[9px] text-[#C85A3F] font-bold hover:underline"
+                      className="text-[9px] text-[#C85A3F] font-bold hover:underline cursor-pointer"
                     >
                       Clear All
                     </button>
@@ -316,8 +345,10 @@ export const CustomerLayout: React.FC = () => {
 
           {/* Profile Avatar Trigger */}
           <button
+            type="button"
             onClick={() => navigate('/customer/profile')}
-            className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-extrabold transition-all border ${
+            aria-label="Customer Profile"
+            className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-extrabold transition-all border cursor-pointer ${
               location.pathname === '/customer/profile'
                 ? 'bg-[#C85A3F] text-white border-[#C85A3F]'
                 : 'bg-[#F3E8DF] text-[#C85A3F] border-[#E5DCD5] hover:border-[#C85A3F]/40'
@@ -329,17 +360,21 @@ export const CustomerLayout: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-6 md:px-8 relative bg-[#FCFAF7] w-full max-w-7xl mx-auto z-10">
+      <main className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-6 pb-24 md:pb-8 md:px-8 relative bg-[#FCFAF7] w-full max-w-7xl mx-auto z-10">
         <Outlet />
       </main>
 
-      {/* MOBILE BOTTOM NAVIGATION BAR (md:hidden) */}
-      <div className="md:hidden h-16 bg-[#FCFAF7]/95 border-t border-[#F3E8DF] backdrop-blur-md flex items-center justify-between px-4 z-40 shrink-0 relative">
+      {/* MOBILE BOTTOM NAVIGATION BAR (md:hidden) WITH SAFE-AREA INSET SUPPORT */}
+      <nav 
+        aria-label="Mobile Navigation"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+        className="md:hidden bg-[#FCFAF7]/95 border-t border-[#F3E8DF] backdrop-blur-md flex items-center justify-around px-1 z-40 shrink-0 relative"
+      >
         
         {/* HOME */}
         <NavLink
           to="/customer/home"
-          className={({ isActive }) => `flex flex-col items-center justify-center w-11 h-12 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
+          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 h-14 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
         >
           <Coffee className="w-4.5 h-4.5 mb-0.5" />
           <span className="text-[8.5px] font-extrabold font-sans">Home</span>
@@ -348,27 +383,46 @@ export const CustomerLayout: React.FC = () => {
         {/* EXPLORE */}
         <NavLink
           to="/customer/explore"
-          className={({ isActive }) => `flex flex-col items-center justify-center w-11 h-12 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
+          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 h-14 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
         >
           <Compass className="w-4.5 h-4.5 mb-0.5" />
           <span className="text-[8.5px] font-extrabold font-sans">Explore</span>
         </NavLink>
 
-        {/* FLOATING CENTER QR SCAN BUTTON */}
-        <div className="relative -mt-5">
-          <button
-            onClick={() => setIsQrScannerOpen(true)}
-            className="w-12 h-12 bg-[#C85A3F] hover:bg-[#A94332] text-white rounded-full shadow-lg shadow-[#C85A3F]/30 flex items-center justify-center border-4 border-[#FCFAF7] transition-transform active:scale-95 duration-200 z-50 relative cursor-pointer"
-          >
-            <QrCode className="w-5 h-5" />
-          </button>
-          <span className="text-[8px] font-extrabold text-[#C85A3F] block text-center mt-0.5">QR Scan</span>
-        </div>
+        {/* QR SCAN BUTTON */}
+        <button
+          type="button"
+          onClick={() => setIsQrScannerOpen(true)}
+          aria-label="Scan Table QR Code"
+          className="flex flex-col items-center justify-center flex-1 h-14 text-[#C85A3F] hover:text-[#A94332] transition-transform active:scale-95 cursor-pointer"
+        >
+          <div className="w-8 h-8 bg-[#C85A3F] text-white rounded-full flex items-center justify-center shadow-md shadow-[#C85A3F]/30 border border-[#C85A3F]">
+            <QrCode className="w-4.5 h-4.5" />
+          </div>
+          <span className="text-[8px] font-extrabold font-sans mt-0.5">Scan</span>
+        </button>
+
+        {/* CART WITH LIVE COUNT BADGE */}
+        <NavLink
+          to="/customer/cart"
+          aria-label={`Shopping Cart, ${totalCartCount} ${totalCartCount === 1 ? 'item' : 'items'}`}
+          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 h-14 transition-all relative ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
+        >
+          <div className="relative">
+            <ShoppingBag className="w-4.5 h-4.5 mb-0.5" />
+            {totalCartCount > 0 && (
+              <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 bg-[#C85A3F] text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-xs">
+                {totalCartCount > 99 ? '99+' : totalCartCount}
+              </span>
+            )}
+          </div>
+          <span className="text-[8.5px] font-extrabold font-sans">Cart</span>
+        </NavLink>
 
         {/* ORDERS */}
         <NavLink
           to="/customer/orders"
-          className={({ isActive }) => `flex flex-col items-center justify-center w-11 h-12 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
+          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 h-14 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
         >
           <Utensils className="w-4.5 h-4.5 mb-0.5" />
           <span className="text-[8.5px] font-extrabold font-sans">Orders</span>
@@ -377,62 +431,67 @@ export const CustomerLayout: React.FC = () => {
         {/* PROFILE */}
         <NavLink
           to="/customer/profile"
-          className={({ isActive }) => `flex flex-col items-center justify-center w-11 h-12 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
+          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 h-14 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
         >
           <User className="w-4.5 h-4.5 mb-0.5" />
           <span className="text-[8.5px] font-extrabold font-sans">Profile</span>
         </NavLink>
         
-      </div>
+      </nav>
 
-      {/* FULL SCREEN CAMERA VIEWFINDER OVERLAY */}
+      {/* FULL SCREEN CAMERA VIEWFINDER OVERLAY - ACCESSIBLE HIGH CONTRAST */}
       {isQrScannerOpen && (
-        <div className="fixed inset-0 bg-[#FFFCF9]/95 backdrop-blur-md flex items-center justify-center p-6 z-50 overflow-hidden shadow-2xl">
+        <div className="fixed inset-0 bg-[#FCFAF7]/95 backdrop-blur-md flex items-center justify-center p-6 z-50 overflow-hidden shadow-2xl">
           
           <button 
+            type="button"
             onClick={() => setIsQrScannerOpen(false)}
-            className="absolute top-6 right-6 p-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-400 hover:text-white"
+            aria-label="Close QR scanner"
+            className="absolute top-6 right-6 p-2.5 bg-white border border-[#E5DCD5] rounded-xl text-[#756B64] hover:text-[#202124] hover:bg-[#F3E8DF] transition-colors cursor-pointer shadow-xs"
           >
-            <X className="w-4 h-4" />
+            <X className="w-5 h-5" />
           </button>
 
           <div className="w-full flex flex-col items-center space-y-6 max-w-xs text-center">
             <div className="space-y-1">
-              <h3 className="text-sm font-extrabold text-white">Scan Table QR Code</h3>
-              <p className="text-[10px] text-slate-500 font-medium">Position the table card QR inside the scanner viewfinder.</p>
+              <h3 className="text-base font-extrabold text-[#202124]">Scan Table QR Code</h3>
+              <p className="text-xs text-[#756B64] font-medium">Position the table card QR inside the scanner viewfinder.</p>
             </div>
 
             {/* Viewfinder chassis */}
-            <div className="w-48 h-48 border-2 border-primary/60 rounded-3xl relative overflow-hidden flex items-center justify-center bg-slate-900/20">
+            <div className="w-48 h-48 border-2 border-[#C85A3F]/70 rounded-3xl relative overflow-hidden flex items-center justify-center bg-white shadow-inner">
               {/* Laser animation */}
-              <div className="absolute left-0 right-0 h-0.5 bg-primary shadow-lg shadow-primary/80 animate-bounce" />
-              <Camera className="w-10 h-10 text-slate-700 animate-pulse" />
+              <div className="absolute left-0 right-0 h-0.5 bg-[#C85A3F] shadow-lg shadow-[#C85A3F]/80 animate-bounce" />
+              <Camera className="w-10 h-10 text-[#756B64]/40 animate-pulse" />
             </div>
 
             {/* Simulated QR Triggers */}
             <div className="w-full space-y-2">
-              <span className="text-[9px] text-slate-500 font-extrabold uppercase tracking-wider block">Verify Onboarded Tables</span>
+              <span className="text-[10px] text-[#756B64] font-extrabold uppercase tracking-wider block">Verify Onboarded Tables</span>
               <div className="grid grid-cols-1 gap-1.5">
                 <button
+                  type="button"
                   onClick={() => handleScanSimulation('l-ambroisie', 'TBL-4', 'QR-TOKEN-LA-4')}
-                  className="py-2.5 bg-slate-900 border border-slate-850 rounded-xl text-[10px] text-slate-300 hover:text-primary font-bold transition-all text-left px-3.5 flex justify-between"
+                  className="py-2.5 bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 hover:bg-[#F3E8DF]/40 rounded-xl text-xs text-[#202124] hover:text-[#C85A3F] font-bold transition-all text-left px-3.5 flex justify-between items-center shadow-xs cursor-pointer"
                 >
                   <span>L'Ambroisie (Table 4)</span>
-                  <span className="text-primary font-extrabold">Simulate Scan</span>
+                  <span className="text-[#C85A3F] font-extrabold text-[11px]">Simulate Scan</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => handleScanSimulation('shuko', 'TBL-2', 'QR-TOKEN-SK-2')}
-                  className="py-2.5 bg-slate-900 border border-slate-850 rounded-xl text-[10px] text-slate-300 hover:text-primary font-bold transition-all text-left px-3.5 flex justify-between"
+                  className="py-2.5 bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 hover:bg-[#F3E8DF]/40 rounded-xl text-xs text-[#202124] hover:text-[#C85A3F] font-bold transition-all text-left px-3.5 flex justify-between items-center shadow-xs cursor-pointer"
                 >
                   <span>Shuko Sushi (Table 2)</span>
-                  <span className="text-primary font-extrabold">Simulate Scan</span>
+                  <span className="text-[#C85A3F] font-extrabold text-[11px]">Simulate Scan</span>
                 </button>
                 <button
+                  type="button"
                   onClick={() => handleScanSimulation('osteria', 'TBL-5', 'QR-TOKEN-OS-5')}
-                  className="py-2.5 bg-slate-900 border border-slate-855 rounded-xl text-[10px] text-slate-300 hover:text-primary font-bold transition-all text-left px-3.5 flex justify-between"
+                  className="py-2.5 bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 hover:bg-[#F3E8DF]/40 rounded-xl text-xs text-[#202124] hover:text-[#C85A3F] font-bold transition-all text-left px-3.5 flex justify-between items-center shadow-xs cursor-pointer"
                 >
                   <span>Osteria Francescana (Table 5)</span>
-                  <span className="text-primary font-extrabold">Simulate Scan</span>
+                  <span className="text-[#C85A3F] font-extrabold text-[11px]">Simulate Scan</span>
                 </button>
               </div>
             </div>

@@ -1276,7 +1276,7 @@ export const TableBooking: React.FC = () => {
                     type="button" 
                     onClick={() => setGuestsCount(g => Math.max(1, g - 1))}
                     disabled={guestsCount <= 1}
-                    className="w-8 h-8 bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 rounded-lg flex items-center justify-center text-[#202124] disabled:opacity-40 font-bold transition-colors cursor-pointer disabled:cursor-not-allowed"
+                    className="w-9 h-9 sm:w-8 sm:h-8 bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 rounded-lg flex items-center justify-center text-[#202124] disabled:opacity-40 font-bold transition-all active:scale-95 cursor-pointer disabled:cursor-not-allowed"
                     aria-label="Decrease party size"
                   >
                     -
@@ -1288,7 +1288,7 @@ export const TableBooking: React.FC = () => {
                     type="button" 
                     onClick={() => setGuestsCount(g => Math.min(selectedRest.maxGuests || 12, g + 1))}
                     disabled={guestsCount >= (selectedRest.maxGuests || 12)}
-                    className="w-8 h-8 bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 rounded-lg flex items-center justify-center text-[#202124] disabled:opacity-40 font-bold transition-colors cursor-pointer disabled:cursor-not-allowed"
+                    className="w-9 h-9 sm:w-8 sm:h-8 bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 rounded-lg flex items-center justify-center text-[#202124] disabled:opacity-40 font-bold transition-all active:scale-95 cursor-pointer disabled:cursor-not-allowed"
                     aria-label="Increase party size"
                   >
                     +

@@ -1,10 +1,10 @@
-import React from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getDashboardRoute } from '../utils/navigation';
 
 export const CustomerGuard: React.FC = () => {
   const { user, role, authStatus } = useAuth();
+  const location = useLocation();
 
   if (authStatus === 'AUTH_LOADING' || authStatus === 'PROFILE_LOADING') {
     return (
@@ -15,8 +15,8 @@ export const CustomerGuard: React.FC = () => {
     );
   }
 
-  if (authStatus === 'UNAUTHORIZED' || !user) {
-    return <Navigate to="/customer/login" replace />;
+  if (authStatus === 'UNAUTHORIZED' || !user || user.isAnonymous) {
+    return <Navigate to="/customer/login" state={{ from: location }} replace />;
   }
 
   if (authStatus === 'PROFILE_MISSING' || !role) {
