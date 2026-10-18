@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { isOrderActive } from '../../../shared/utils/orderUtils';
+import { PromotionsCarousel } from '../components/promotions/PromotionsCarousel';
 
 
 const POPULAR_CITIES = [
@@ -1169,6 +1170,9 @@ export const CustomerHome: React.FC = () => {
           <Filter className="w-4.5 h-4.5" />
         </button>
       </div>
+
+      {/* PROMOTIONS & OFFERS CAROUSEL */}
+      <PromotionsCarousel restaurants={restaurantsList} currentCity={currentCity} />
 
       {/* 4. DINING CATEGORY CHIPS */}
       <div className="space-y-2 select-none">

@@ -55,6 +55,7 @@ const OwnerAlerts = React.lazy(() => import('../apps/owner/pages/OwnerAlerts'));
 const OwnerReports = React.lazy(() => import('../apps/owner/pages/OwnerReports'));
 const OwnerBranchTransfers = React.lazy(() => import('../apps/owner/pages/OwnerBranchTransfers'));
 const OwnerAuditLogs = React.lazy(() => import('../apps/owner/pages/OwnerAuditLogs'));
+const OwnerPromotions = React.lazy(() => import('../apps/owner/pages/OwnerPromotions'));
 
 // Kitchen
 const KitchenQueue = React.lazy(() => import('../apps/owner/kitchen/KitchenQueue'));
@@ -341,6 +342,7 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/owner/reports" element={<OwnerReports />} />
                 <Route path="/owner/branch-transfers" element={<OwnerBranchTransfers />} />
                 <Route path="/owner/audit-logs" element={<OwnerAuditLogs />} />
+                <Route path="/owner/promotions" element={<OwnerPromotions />} />
 
                 <Route path="/dashboard/owner" element={<OwnerOverview />} />
                 <Route path="/dashboard/owner/menu" element={<MenuManagement />} />
@@ -364,6 +366,7 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/dashboard/owner/reports" element={<OwnerReports />} />
                 <Route path="/dashboard/owner/branch-transfers" element={<OwnerBranchTransfers />} />
                 <Route path="/dashboard/owner/audit-logs" element={<OwnerAuditLogs />} />
+                <Route path="/dashboard/owner/promotions" element={<OwnerPromotions />} />
               </Route>
               
               {/* Branch Manager Dashboard */}

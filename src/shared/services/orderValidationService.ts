@@ -7,6 +7,8 @@ import {
   where, 
   getDocs, 
   limit,
+  updateDoc,
+  increment,
   Firestore
 } from 'firebase/firestore';
 import { db as defaultDb } from '../firebase/config';
@@ -310,23 +312,84 @@ export const orderValidationService = {
 
     // 7. Authoritative Tax, Service Charge, Discount, and Total Calculation
     let authoritativeDiscount = 0;
-    if (request.discount && request.discount > 0) {
+    let matchedPromotionId: string | null = null;
+
+    if ((request.discount && request.discount > 0) || request.couponCode) {
       if (!request.couponCode) {
         throw new Error('Order creation rejected: Custom discount without a valid coupon code is not allowed.');
       }
-      const couponRef = doc(firestoreDb, 'restaurants', tenantId, 'coupons', request.couponCode);
-      const couponSnap = await getDoc(couponRef);
-      if (!couponSnap.exists()) {
-        throw new Error(`Order creation rejected: Coupon code "${request.couponCode}" is invalid or expired.`);
+      const rawCode = String(request.couponCode).trim().toUpperCase();
+      
+      // 7a. Look up in canonical promotions collection first
+      const promoCol = collection(firestoreDb, 'restaurants', tenantId, 'promotions');
+      const qPromo = query(promoCol, where('code', '==', rawCode));
+      const promoSnap = await getDocs(qPromo);
+
+      let promoData: any = null;
+      if (!promoSnap.empty) {
+        promoData = promoSnap.docs[0].data();
+        matchedPromotionId = promoSnap.docs[0].id;
+      } else {
+        // Fallback to legacy coupons collection: restaurants/{tenantId}/coupons/{code}
+        const couponRef = doc(firestoreDb, 'restaurants', tenantId, 'coupons', rawCode);
+        const couponSnap = await getDoc(couponRef);
+        if (couponSnap.exists()) {
+          promoData = couponSnap.data() || {};
+        }
       }
-      const couponData = couponSnap.data() || {};
-      if (couponData.isActive === false || couponData.status === 'expired') {
-        throw new Error(`Order creation rejected: Coupon code "${request.couponCode}" is invalid or expired.`);
+
+      if (!promoData) {
+        throw new Error(`Order creation rejected: Coupon code "${rawCode}" is invalid or expired.`);
       }
-      if (couponData.percentage) {
-        authoritativeDiscount = Math.round(authoritativeSubtotal * (Number(couponData.percentage) / 100));
-      } else if (couponData.amount) {
-        authoritativeDiscount = Number(couponData.amount);
+
+      // Check status and validity dates
+      const nowMs = Date.now();
+      const isStatusActive = promoData.status === 'active' || promoData.isActive === true;
+      if (!isStatusActive) {
+        throw new Error(`Order creation rejected: Coupon code "${rawCode}" is currently inactive or paused.`);
+      }
+
+      if (promoData.startDate) {
+        const startMs = new Date(promoData.startDate).getTime();
+        if (!isNaN(startMs) && nowMs < startMs) {
+          throw new Error(`Order creation rejected: Coupon code "${rawCode}" is not yet active.`);
+        }
+      }
+
+      if (promoData.endDate) {
+        const endMs = new Date(promoData.endDate).getTime();
+        if (!isNaN(endMs) && nowMs > endMs) {
+          throw new Error(`Order creation rejected: Coupon code "${rawCode}" has expired.`);
+        }
+      }
+
+      // Check global usage limit
+      if (typeof promoData.globalUsageLimit === 'number' && promoData.globalUsageLimit > 0) {
+        if ((promoData.redemptionCount || 0) >= promoData.globalUsageLimit) {
+          throw new Error(`Order creation rejected: Coupon code "${rawCode}" has reached its maximum global redemptions.`);
+        }
+      }
+
+      // Check minimum order value
+      const minOrder = Number(promoData.minOrderValue || promoData.minOrder || 0);
+      if (minOrder > 0 && authoritativeSubtotal < minOrder) {
+        throw new Error(`Order creation rejected: Minimum order subtotal of ₹${minOrder} is required to apply coupon "${rawCode}".`);
+      }
+
+      // Calculate authoritative discount
+      if (promoData.percentage || (promoData.type === 'percentage' && promoData.value)) {
+        const pct = Number(promoData.percentage || promoData.value);
+        authoritativeDiscount = Math.round(authoritativeSubtotal * (pct / 100));
+      } else if (promoData.amount || (promoData.type === 'fixed_amount' && promoData.value)) {
+        authoritativeDiscount = Math.min(authoritativeSubtotal, Number(promoData.amount || promoData.value));
+      } else if (promoData.value) {
+        authoritativeDiscount = Math.round(authoritativeSubtotal * (Number(promoData.value) / 100));
+      }
+
+      // Apply maximum discount cap
+      const maxDiscount = Number(promoData.maxDiscountAmount || promoData.maxDiscount || 0);
+      if (maxDiscount > 0) {
+        authoritativeDiscount = Math.min(authoritativeDiscount, maxDiscount);
       }
     }
 
@@ -392,6 +455,22 @@ export const orderValidationService = {
 
     // 10. Persist Authoritative Order to Firestore
     await setDoc(existingOrderRef, validatedOrder);
+
+    // 10b. Atomically record promotion redemption metric if applied
+    if (matchedPromotionId) {
+      try {
+        const promoRef = doc(firestoreDb, 'restaurants', tenantId, 'promotions', matchedPromotionId);
+        await updateDoc(promoRef, {
+          redemptionCount: increment(1),
+          'metrics.redemptions': increment(1),
+          'metrics.totalDiscountGiven': increment(authoritativeDiscount),
+          'metrics.totalRevenueGenerated': increment(authoritativeTotal),
+          updatedAt: nowIso
+        });
+      } catch (promoRedeemErr) {
+        console.warn('[orderValidationService] Promotion redemption metric update notice:', promoRedeemErr);
+      }
+    }
 
     // 11. Create Persistent KOT Record
     let createdKotId = '';

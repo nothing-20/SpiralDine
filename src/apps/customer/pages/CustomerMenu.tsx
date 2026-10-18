@@ -61,9 +61,14 @@ import {
   ChevronDown,
   Info,
   Eye,
-  Receipt
+  Receipt,
+  Tag,
+  Gift
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { IPromotion } from '../../../shared/domain/promotions/types';
+import { promotionService, calculateItemDiscount, isPromotionActive } from '../../../shared/services/promotionEngine';
+
 
 export const CustomerMenu: React.FC = () => {
   const { tenantId } = useParams<{ tenantId: string }>();
@@ -108,6 +113,7 @@ export const CustomerMenu: React.FC = () => {
   const [variantsList, setVariantsList] = useState<any[]>([]);
   const [addonsList, setAddonsList] = useState<any[]>([]);
   const [combosList, setCombosList] = useState<any[]>([]);
+  const [promotions, setPromotions] = useState<IPromotion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [coverImageFailed, setCoverImageFailed] = useState(false);
@@ -382,12 +388,18 @@ export const CustomerMenu: React.FC = () => {
       }
     }, 45000);
 
+    // Fetch active promotions for this restaurant in real-time
+    const unsubPromos = promotionService.subscribeToRestaurantPromotions(tenantId, (promos) => {
+      setPromotions(promos);
+    });
+
     return () => {
       unsubCats();
       unsubItems();
       unsubVariants();
       unsubAddons();
       unsubCombos();
+      unsubPromos();
       clearInterval(heartbeatTimer);
 
       // If diner leaves the menu without placing an order, release the browsing table
@@ -650,7 +662,11 @@ export const CustomerMenu: React.FC = () => {
       localStorage.setItem('restaurantos_cart_tenantId', tenantId);
       setCartTenantId(tenantId);
     }
-    addItem(item, 1);
+    const itemDiscount = calculateItemDiscount(item, promotions);
+    const itemToAdd = itemDiscount.discountAmount > 0 
+      ? { ...item, discountPrice: itemDiscount.discountedPrice } 
+      : item;
+    addItem(itemToAdd, 1);
   };
 
   const handleCustomizedAdd = () => {
@@ -669,7 +685,11 @@ export const CustomerMenu: React.FC = () => {
     }
 
     const addonPrice = selectedAddons.reduce((sum, a) => sum + (a.price || 0), 0);
-    const finalItemPrice = (customizingItem.discountPrice || customizingItem.price) + priceOffset + addonPrice;
+    const itemDiscount = calculateItemDiscount(customizingItem, promotions, (customizingItem.discountPrice || customizingItem.price) + priceOffset);
+    const baseEffectivePrice = itemDiscount.discountAmount > 0 
+      ? itemDiscount.discountedPrice 
+      : ((customizingItem.discountPrice || customizingItem.price) + priceOffset);
+    const finalItemPrice = baseEffectivePrice + addonPrice;
 
     const notesParts: string[] = [];
     if (selectedVariant) {
@@ -1337,6 +1357,54 @@ export const CustomerMenu: React.FC = () => {
           </div>
         </div>
 
+        {/* 2.c. Compact Restaurant Promotional Banner */}
+        {promotions.filter(p => isPromotionActive(p)).length > 0 && (
+          <div className="bg-gradient-to-r from-[#FFF8F5] via-[#FFFDFB] to-[#FFF8F5] border border-[#C85A3F]/30 rounded-2xl p-3 sm:p-3.5 shadow-xs text-left relative overflow-hidden animate-in fade-in">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-[#C85A3F]/10 border border-[#C85A3F]/20 flex items-center justify-center text-[#C85A3F] shrink-0">
+                  <Sparkles className="w-4 h-4 animate-pulse" />
+                </div>
+                <div className="space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                    <span className="text-[9px] sm:text-[10px] uppercase tracking-wider bg-[#C85A3F] text-white font-extrabold px-2 py-0.5 rounded-md shadow-xs">
+                      {promotions.filter(p => isPromotionActive(p))[0].badgeText || 'SPECIAL OFFER'}
+                    </span>
+                    <span className="text-xs sm:text-sm font-extrabold text-[#202124]">
+                      {promotions.filter(p => isPromotionActive(p))[0].name}
+                    </span>
+                    {promotions.filter(p => isPromotionActive(p))[0].couponCode && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(promotions.filter(p => isPromotionActive(p))[0].couponCode || '');
+                          toast.success(`Coupon ${promotions.filter(p => isPromotionActive(p))[0].couponCode} copied!`);
+                        }}
+                        className="inline-flex items-center gap-1 text-[10px] font-extrabold text-[#C85A3F] bg-[#F3E8DF] hover:bg-[#E5DCD5] px-2 py-0.5 rounded-md border border-[#C85A3F]/30 transition-all cursor-pointer active:scale-95"
+                        title="Click to copy coupon code"
+                      >
+                        <Tag className="w-2.5 h-2.5" />
+                        <span>Use Code: {promotions.filter(p => isPromotionActive(p))[0].couponCode}</span>
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[11px] sm:text-xs text-[#756B64] line-clamp-1">
+                    {promotions.filter(p => isPromotionActive(p))[0].description}
+                    {promotions.filter(p => isPromotionActive(p))[0].minOrderValue ? ` • Min Order: ₹${promotions.filter(p => isPromotionActive(p))[0].minOrderValue}` : ''}
+                    {promotions.filter(p => isPromotionActive(p))[0].maxDiscountAmount ? ` • Max Discount: ₹${promotions.filter(p => isPromotionActive(p))[0].maxDiscountAmount}` : ''}
+                  </p>
+                </div>
+              </div>
+
+              {promotions.filter(p => isPromotionActive(p)).length > 1 && (
+                <span className="text-[10px] font-bold text-[#756B64] bg-white border border-[#E5DCD5] px-2 py-1 rounded-lg shrink-0 self-start sm:self-auto">
+                  +{promotions.filter(p => isPromotionActive(p)).length - 1} more offers
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* 2.b. Persistent Active Dining Session Component */}
         {activeOrders.length > 0 && (
           <div className="bg-white border-2 border-emerald-500/25 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left animate-in fade-in">
@@ -1595,7 +1663,13 @@ export const CustomerMenu: React.FC = () => {
                     {items.map((item) => {
                       const isVeg = item.isVeg || item.veg || item.vegetarian;
                       const isAvailable = item.isAvailable !== false && item.available !== false;
-                      const promoBadge = getItemPromoBadge(item);
+                      const itemDiscount = calculateItemDiscount(item, promotions);
+                      const hasPromoDiscount = itemDiscount.discountAmount > 0;
+                      const promoBadge = hasPromoDiscount 
+                        ? (itemDiscount.badge || (itemDiscount.promotion?.type === 'PERCENTAGE' ? `${itemDiscount.promotion.discountValue}% OFF` : `₹${itemDiscount.promotion?.discountValue} OFF`))
+                        : getItemPromoBadge(item);
+                      const displayPrice = hasPromoDiscount ? itemDiscount.discountedPrice : (item.discountPrice || item.price);
+                      const strikethroughPrice = hasPromoDiscount ? itemDiscount.originalPrice : (item.discountPrice && item.discountPrice < item.price ? item.price : null);
                       const prepTime = item.preparationTime || item.prepTime;
                       const cartCount = getItemCartQuantity(item.id);
                       const hasVariantsOrAddons = getItemVariants(item).length > 0 || getItemAddons(item).length > 0;
@@ -1692,11 +1766,11 @@ export const CustomerMenu: React.FC = () => {
                             {/* Price */}
                             <div className="flex items-baseline gap-1 sm:gap-1.5 flex-wrap">
                               <span className="text-xs sm:text-sm font-extrabold text-[#202124]">
-                                {formatPrice(item.discountPrice || item.price)}
+                                {formatPrice(displayPrice)}
                               </span>
-                              {item.discountPrice && item.discountPrice < item.price && (
+                              {strikethroughPrice && strikethroughPrice > displayPrice && (
                                 <span className="text-[10px] text-[#756B64] line-through">
-                                  {formatPrice(item.price)}
+                                  {formatPrice(strikethroughPrice)}
                                 </span>
                               )}
                             </div>

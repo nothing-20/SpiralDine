@@ -24,6 +24,9 @@ import {
   Lock
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { IPromotion } from '../../../shared/domain/promotions/types';
+import { promotionService, validateCoupon, isPromotionActive } from '../../../shared/services/promotionEngine';
+
 
 // Safe Food Thumbnail with Graceful Fallback
 const CartItemThumbnail: React.FC<{ src?: string; alt: string }> = ({ src, alt }) => {
@@ -97,11 +100,14 @@ export const CartPage: React.FC = () => {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
 
-  // Form states
+  // Coupon & Promotions states
   const [couponCode, setCouponCode] = useState('');
   const [appliedCouponCode, setAppliedCouponCode] = useState('');
-  const [discountPercent, setDiscountPercent] = useState(0);
+  const [appliedPromotion, setAppliedPromotion] = useState<IPromotion | null>(null);
+  const [couponDiscountVal, setCouponDiscountVal] = useState(0);
   const [couponError, setCouponError] = useState('');
+  const [availableCoupons, setAvailableCoupons] = useState<IPromotion[]>([]);
+  const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [waiterTip, setWaiterTip] = useState<number>(0);
 
@@ -225,13 +231,39 @@ export const CartPage: React.FC = () => {
     loadRestaurantAndMenu();
   }, [searchParams]);
 
+  // Subscribe to active restaurant promotions and coupons
+  useEffect(() => {
+    if (!activeTenantId) return;
+    const unsub = promotionService.subscribeToRestaurantPromotions(activeTenantId, (promos) => {
+      const activeCoupons = promos.filter(p => isPromotionActive(p) && (p.type === 'COUPON' || Boolean(p.couponCode) || p.placement === 'CART_CHECKOUT'));
+      setAvailableCoupons(activeCoupons);
+    });
+    return () => unsub();
+  }, [activeTenantId]);
+
+  // Auto re-validate coupon if cart items or cart subtotal changes
+  useEffect(() => {
+    if (appliedPromotion) {
+      const val = validateCoupon(appliedPromotion, cartSubtotal, cartItems, user?.uid);
+      if (!val.valid) {
+        setCouponError(`Coupon "${appliedPromotion.couponCode || appliedPromotion.name}" removed: ${val.message}`);
+        setAppliedPromotion(null);
+        setAppliedCouponCode('');
+        setCouponDiscountVal(0);
+        toast.error(`Coupon removed: ${val.message}`);
+      } else {
+        setCouponDiscountVal(val.discountAmount || 0);
+      }
+    }
+  }, [cartSubtotal, cartItems, appliedPromotion, user?.uid]);
+
   // 2. Pricing & Calculation Engine
-  const subtotal = cartSubtotal; // in cents
-  const discountVal = Math.round(subtotal * (discountPercent / 100)); // in cents
+  const subtotal = cartSubtotal; // in cents / minor currency
+  const discountVal = couponDiscountVal; // in cents / minor currency
   const taxedSubtotal = Math.max(0, subtotal - discountVal);
 
-  // Configured tax & fee rates (fallback: tax 8%, service fee 5%)
-  const taxRatePercent = restaurantData?.taxRate ?? restaurantData?.taxPercent ?? 8;
+  // Configured tax & fee rates (fallback: tax 5%, service fee 5%)
+  const taxRatePercent = restaurantData?.taxRate ?? restaurantData?.taxPercent ?? 5;
   const serviceFeePercent = restaurantData?.serviceChargePercent ?? restaurantData?.serviceFeeRate ?? 5;
 
   const vatTax = taxRatePercent > 0 ? Math.round(taxedSubtotal * (taxRatePercent / 100)) : 0;
@@ -251,26 +283,59 @@ export const CartPage: React.FC = () => {
   }, [currency, currencySymbol]);
 
   // 3. Coupon Application Handler
-  const handleApplyCoupon = (e?: React.FormEvent) => {
+  const handleApplyCoupon = async (e?: React.FormEvent, codeOverride?: string) => {
     if (e) e.preventDefault();
-    setCouponError('');
-    const code = couponCode.trim().toUpperCase();
-    if (!code) {
+    const rawCode = (codeOverride || couponCode).trim().toUpperCase();
+    if (!rawCode) {
       setCouponError('Please enter a coupon code.');
       return;
     }
-    if (code === 'LAUNCH20' || code === 'SPRING20') {
-      setDiscountPercent(20);
-      setAppliedCouponCode(code);
-      toast.success(`${code} applied! 20% discount added.`);
-    } else {
-      setCouponError('Invalid coupon code. Try "LAUNCH20" or "SPRING20"');
+    setCouponError('');
+    setIsApplyingCoupon(true);
+    try {
+      let promo = availableCoupons.find(p => p.couponCode?.toUpperCase() === rawCode);
+      if (!promo && activeTenantId) {
+        const onlineRes = await promotionService.validateCouponOnline(activeTenantId, rawCode, subtotal, cartItems, user?.uid);
+        if (onlineRes.valid && onlineRes.promotion) {
+          promo = onlineRes.promotion;
+        } else {
+          setCouponError(onlineRes.message || 'Invalid or expired coupon code.');
+          setIsApplyingCoupon(false);
+          return;
+        }
+      }
+
+      if (!promo) {
+        setCouponError(`Coupon code "${rawCode}" not found.`);
+        setIsApplyingCoupon(false);
+        return;
+      }
+
+      const val = validateCoupon(promo, subtotal, cartItems, user?.uid);
+      if (!val.valid) {
+        setCouponError(val.message || 'Coupon is not applicable to this order.');
+        setIsApplyingCoupon(false);
+        return;
+      }
+
+      setAppliedPromotion(promo);
+      setAppliedCouponCode(rawCode);
+      setCouponDiscountVal(val.discountAmount || 0);
+      setCouponCode('');
+      setCouponError('');
+      toast.success(`${rawCode} applied! Savings: ${formatPrice(val.discountAmount || 0)}`);
+    } catch (err: any) {
+      console.error('Error applying coupon:', err);
+      setCouponError('Unable to apply coupon. Please try again.');
+    } finally {
+      setIsApplyingCoupon(false);
     }
   };
 
   const handleRemoveCoupon = () => {
-    setDiscountPercent(0);
+    setAppliedPromotion(null);
     setAppliedCouponCode('');
+    setCouponDiscountVal(0);
     setCouponCode('');
     setCouponError('');
     toast.success('Coupon removed.');
@@ -387,7 +452,7 @@ export const CartPage: React.FC = () => {
         });
       }
 
-      const verifiedDiscountVal = Math.round(verifiedSubtotal * (discountPercent / 100));
+      const verifiedDiscountVal = couponDiscountVal;
       const verifiedTaxable = Math.max(0, verifiedSubtotal - verifiedDiscountVal);
       const verifiedVatTax = taxRatePercent > 0 ? Math.round(verifiedTaxable * (taxRatePercent / 100)) : 0;
       const verifiedServiceCharge = serviceFeePercent > 0 ? Math.round(verifiedTaxable * (serviceFeePercent / 100)) : 0;
@@ -467,6 +532,7 @@ export const CartPage: React.FC = () => {
         orderSource: currentSession?.orderSource || 'app',
         specialInstructions: specialInstructions.trim(),
         orderId,
+        couponCode: appliedCouponCode || undefined,
         items: cartItems.map(item => ({
           itemId: item.itemId,
           count: item.count,
@@ -475,6 +541,19 @@ export const CartPage: React.FC = () => {
       }, { dbInstance: db });
 
       const orderPayload = validatedResult.order;
+
+      // Record atomic redemption on the promotion
+      if (appliedPromotion?.id && tenantId) {
+        promotionService.recordRedemption(
+          tenantId,
+          appliedPromotion.id,
+          orderId,
+          authenticUid,
+          discountVal
+        ).catch(err => {
+          console.warn('[CartPage] Non-blocking promo redemption record warning:', err);
+        });
+      }
 
       // Update dining session metadata with primaryOrderId and activeOrderIds
       currentSession.primaryOrderId = primaryOrderId;
@@ -904,34 +983,48 @@ export const CartPage: React.FC = () => {
               </div>
 
               {/* Coupon / Voucher Input */}
-              <div className="space-y-2">
-                <label className="text-[11px] font-extrabold uppercase tracking-wider text-[#756B64] block">
-                  Apply Coupon Code
-                </label>
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-extrabold uppercase tracking-wider text-[#756B64] block">
+                    Offers & Coupons
+                  </label>
+                  {availableCoupons.length > 0 && !appliedPromotion && (
+                    <span className="text-[10px] font-bold text-[#C85A3F] bg-[#F3E8DF] px-2 py-0.5 rounded-full">
+                      {availableCoupons.length} available
+                    </span>
+                  )}
+                </div>
 
-                {discountPercent > 0 ? (
-                  <div className="flex items-center justify-between p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
-                    <div className="flex items-center space-x-2">
-                      <CheckCircle2 className="w-4 h-4 text-[#2E8B57]" />
-                      <div>
-                        <span className="text-xs font-extrabold text-[#2E8B57] block">
-                          {appliedCouponCode} (20% OFF)
-                        </span>
-                        <span className="text-[10px] text-[#2E8B57]/80">
-                          Discount added to order
-                        </span>
+                {appliedPromotion ? (
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-1">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <CheckCircle2 className="w-4 h-4 text-[#2E8B57] shrink-0" />
+                        <div>
+                          <span className="text-xs font-extrabold text-[#2E8B57] block">
+                            {appliedCouponCode} APPLIED
+                          </span>
+                          <span className="text-[11px] text-[#2E8B57]/90 font-bold">
+                            You save {formatPrice(discountVal)}
+                          </span>
+                        </div>
                       </div>
+                      <button
+                        type="button"
+                        onClick={handleRemoveCoupon}
+                        className="text-xs font-bold text-[#C85A3F] hover:underline cursor-pointer"
+                      >
+                        Remove
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleRemoveCoupon}
-                      className="text-xs font-bold text-[#C85A3F] hover:underline cursor-pointer"
-                    >
-                      Remove
-                    </button>
+                    {appliedPromotion.description && (
+                      <p className="text-[10px] text-[#756B64] pt-0.5">
+                        {appliedPromotion.description}
+                      </p>
+                    )}
                   </div>
                 ) : (
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     <div className="flex items-center space-x-2">
                       <input 
                         type="text" 
@@ -940,21 +1033,70 @@ export const CartPage: React.FC = () => {
                           setCouponCode(e.target.value);
                           setCouponError('');
                         }}
-                        placeholder="Coupon code (e.g. LAUNCH20)" 
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleApplyCoupon();
+                          }
+                        }}
+                        placeholder="Enter coupon code" 
                         className="flex-1 px-3.5 py-2.5 min-h-[42px] bg-white border border-[#E5DCD5] focus:border-[#C85A3F] focus:ring-1 focus:ring-[#C85A3F] rounded-xl text-xs text-[#202124] focus:outline-none placeholder-[#756B64]/60 uppercase font-semibold"
                       />
                       <button 
                         type="button"
-                        onClick={handleApplyCoupon}
-                        className="px-4 py-2.5 min-h-[42px] bg-[#FCFAF7] hover:bg-[#F3E8DF] active:scale-95 border border-[#C85A3F] text-xs font-bold text-[#C85A3F] rounded-xl transition-all cursor-pointer shrink-0"
+                        onClick={() => handleApplyCoupon()}
+                        disabled={isApplyingCoupon || !couponCode.trim()}
+                        className="px-4 py-2.5 min-h-[42px] bg-[#FCFAF7] hover:bg-[#F3E8DF] active:scale-95 border border-[#C85A3F] text-xs font-bold text-[#C85A3F] rounded-xl transition-all cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        Apply
+                        {isApplyingCoupon ? 'Verifying...' : 'Apply'}
                       </button>
                     </div>
                     {couponError && (
                       <p className="text-[11px] text-[#A94332] font-semibold pt-0.5">
                         {couponError}
                       </p>
+                    )}
+
+                    {/* Available Coupons Suggestions Tray */}
+                    {availableCoupons.length > 0 && (
+                      <div className="pt-2 space-y-1.5 border-t border-[#E5DCD5]/60">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#756B64] block">
+                          Available Coupons
+                        </span>
+                        <div className="space-y-1.5 max-h-36 overflow-y-auto pr-0.5">
+                          {availableCoupons.map((c) => (
+                            <div 
+                              key={c.id} 
+                              className="p-2 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl flex items-center justify-between text-left hover:border-[#C85A3F]/40 transition-colors"
+                            >
+                              <div className="space-y-0.5 min-w-0 pr-2">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-white border border-[#C85A3F]/30 text-[#C85A3F]">
+                                    {c.couponCode || c.name}
+                                  </span>
+                                  {c.badgeText && (
+                                    <span className="text-[9px] font-bold text-[#756B64]">
+                                      {c.badgeText}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[10px] text-[#756B64] truncate">
+                                  {c.description || `${c.discountValue}% OFF`}
+                                  {c.minOrderValue ? ` • Min ₹${c.minOrderValue}` : ''}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleApplyCoupon(undefined, c.couponCode || '')}
+                                disabled={isApplyingCoupon}
+                                className="px-2.5 py-1 text-[11px] font-extrabold text-[#C85A3F] bg-white hover:bg-[#F3E8DF] border border-[#C85A3F]/40 rounded-lg shrink-0 transition-all cursor-pointer active:scale-95"
+                              >
+                                Apply
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     )}
                   </div>
                 )}
@@ -998,7 +1140,7 @@ export const CartPage: React.FC = () => {
                 
                 {discountVal > 0 && (
                   <div className="flex justify-between text-[#2E8B57] font-semibold">
-                    <span>Discount ({discountPercent}%)</span>
+                    <span>Coupon Savings ({appliedCouponCode})</span>
                     <span>-{formatPrice(discountVal)}</span>
                   </div>
                 )}

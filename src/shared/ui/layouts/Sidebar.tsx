@@ -39,7 +39,8 @@ import {
   ArrowLeftRight,
   ShieldCheck,
   UtensilsCrossed,
-  Star
+  Star,
+  Gift
 } from 'lucide-react';
 
 interface ISidebarLink {
@@ -220,6 +221,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
         { to: '/owner/customers', label: 'Customers', icon: Contact2 },
         { to: '/owner/feedback', label: 'Feedback', icon: MessageSquareQuote },
         { to: '/owner/reviews', label: 'Reviews', icon: Star },
+        { to: '/owner/promotions', label: 'Offers & Promotions', icon: Gift },
         { to: '/owner/marketing', label: 'Marketing', icon: Megaphone },
         { to: '/owner/alerts', label: 'Alerts', icon: Bell, badge: unreadAlertsCount > 0 ? unreadAlertsCount : undefined },
         { to: '/owner/reports', label: 'Reports', icon: FileSpreadsheet },

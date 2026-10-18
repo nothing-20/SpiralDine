@@ -9,3 +9,4 @@ export * from '../domain/notifications/types';
 export * from '../domain/customer/types';
 export * from '../domain/tasks/types';
 export * from '../domain/billing/types';
+export * from '../domain/promotions/types';

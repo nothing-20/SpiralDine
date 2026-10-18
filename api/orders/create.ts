@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db, doc, getDoc, setDoc, ensureServerAuth } from '../_lib/firebaseServer.js';
+import { db, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, ensureServerAuth } from '../_lib/firebaseServer.js';
 
 interface ITokenUser {
   uid: string;
@@ -261,23 +261,78 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 7. Authoritative Tax, Service Charge, and Total
     let authoritativeDiscount = 0;
-    if (req.body.discount && req.body.discount > 0) {
+    let matchedPromotionId: string | null = null;
+
+    if ((req.body.discount && req.body.discount > 0) || req.body.couponCode) {
       if (!req.body.couponCode) {
         return res.status(400).json({ error: 'Order creation rejected: Custom discount without a valid coupon code is not allowed.' });
       }
-      const couponRef = doc(db, 'restaurants', tenantId, 'coupons', req.body.couponCode);
-      const couponSnap = await getDoc(couponRef);
-      if (!couponSnap.exists()) {
-        return res.status(400).json({ error: `Order creation rejected: Coupon code "${req.body.couponCode}" is invalid or expired.` });
+      const rawCode = String(req.body.couponCode).trim().toUpperCase();
+
+      // Look up in canonical promotions collection first
+      const promoCol = collection(db, 'restaurants', tenantId, 'promotions');
+      const qPromo = query(promoCol, where('code', '==', rawCode));
+      const promoSnap = await getDocs(qPromo);
+
+      let promoData: any = null;
+      if (!promoSnap.empty) {
+        promoData = promoSnap.docs[0].data();
+        matchedPromotionId = promoSnap.docs[0].id;
+      } else {
+        const couponRef = doc(db, 'restaurants', tenantId, 'coupons', rawCode);
+        const couponSnap = await getDoc(couponRef);
+        if (couponSnap.exists()) {
+          promoData = couponSnap.data() || {};
+        }
       }
-      const couponData = couponSnap.data() || {};
-      if (couponData.isActive === false || couponData.status === 'expired') {
-        return res.status(400).json({ error: `Order creation rejected: Coupon code "${req.body.couponCode}" is invalid or expired.` });
+
+      if (!promoData) {
+        return res.status(400).json({ error: `Order creation rejected: Coupon code "${rawCode}" is invalid or expired.` });
       }
-      if (couponData.percentage) {
-        authoritativeDiscount = Math.round(authoritativeSubtotal * (Number(couponData.percentage) / 100));
-      } else if (couponData.amount) {
-        authoritativeDiscount = Number(couponData.amount);
+
+      const nowMs = Date.now();
+      const isStatusActive = promoData.status === 'active' || promoData.isActive === true;
+      if (!isStatusActive) {
+        return res.status(400).json({ error: `Order creation rejected: Coupon code "${rawCode}" is currently inactive or paused.` });
+      }
+
+      if (promoData.startDate) {
+        const startMs = new Date(promoData.startDate).getTime();
+        if (!isNaN(startMs) && nowMs < startMs) {
+          return res.status(400).json({ error: `Order creation rejected: Coupon code "${rawCode}" is not yet active.` });
+        }
+      }
+
+      if (promoData.endDate) {
+        const endMs = new Date(promoData.endDate).getTime();
+        if (!isNaN(endMs) && nowMs > endMs) {
+          return res.status(400).json({ error: `Order creation rejected: Coupon code "${rawCode}" has expired.` });
+        }
+      }
+
+      if (typeof promoData.globalUsageLimit === 'number' && promoData.globalUsageLimit > 0) {
+        if ((promoData.redemptionCount || 0) >= promoData.globalUsageLimit) {
+          return res.status(400).json({ error: `Order creation rejected: Coupon code "${rawCode}" has reached its maximum global redemptions.` });
+        }
+      }
+
+      const minOrder = Number(promoData.minOrderValue || promoData.minOrder || 0);
+      if (minOrder > 0 && authoritativeSubtotal < minOrder) {
+        return res.status(400).json({ error: `Order creation rejected: Minimum order subtotal of ₹${minOrder} is required for coupon "${rawCode}".` });
+      }
+
+      if (promoData.percentage || (promoData.type === 'percentage' && promoData.value)) {
+        const pct = Number(promoData.percentage || promoData.value);
+        authoritativeDiscount = Math.round(authoritativeSubtotal * (pct / 100));
+      } else if (promoData.amount || (promoData.type === 'fixed_amount' && promoData.value)) {
+        authoritativeDiscount = Math.min(authoritativeSubtotal, Number(promoData.amount || promoData.value));
+      } else if (promoData.value) {
+        authoritativeDiscount = Math.round(authoritativeSubtotal * (Number(promoData.value) / 100));
+      }
+
+      const maxDiscount = Number(promoData.maxDiscountAmount || promoData.maxDiscount || 0);
+      if (maxDiscount > 0) {
+        authoritativeDiscount = Math.min(authoritativeDiscount, maxDiscount);
       }
     }
 
@@ -340,6 +395,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 8. Persist Order to Firestore
     await setDoc(existingOrderRef, validatedOrder);
+
+    // 8b. Record promotion redemption metric
+    if (matchedPromotionId) {
+      try {
+        const promoRef = doc(db, 'restaurants', tenantId, 'promotions', matchedPromotionId);
+        const promoDoc = await getDoc(promoRef);
+        if (promoDoc.exists()) {
+          const pData = promoDoc.data() || {};
+          const currentCount = Number(pData.redemptionCount || 0);
+          await updateDoc(promoRef, {
+            redemptionCount: currentCount + 1,
+            'metrics.redemptions': (pData.metrics?.redemptions || 0) + 1,
+            'metrics.totalDiscountGiven': (pData.metrics?.totalDiscountGiven || 0) + authoritativeDiscount,
+            'metrics.totalRevenueGenerated': (pData.metrics?.totalRevenueGenerated || 0) + authoritativeTotal,
+            updatedAt: nowIso
+          });
+        }
+      } catch (promoRedeemErr) {
+        console.warn('[api/orders/create] Promotion redemption metric update notice:', promoRedeemErr);
+      }
+    }
 
     // 9. Persist KOT Ticket
     const kotRef = doc(db, 'restaurants', tenantId, 'kitchenTickets', `KOT-${targetOrderId}`);
