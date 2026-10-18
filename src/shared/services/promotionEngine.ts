@@ -82,21 +82,38 @@ export function calculateItemDiscount(
   // Evaluate active promotions applicable to dishes
   for (const promo of activePromotions) {
     if (!isPromotionActive(promo)) continue;
-    // Skip coupon codes for automatic item-level pricing
+
+    // Check food card placement requirement:
+    // Only apply if 'food_card' or 'FOOD_CARD' or 'ALL' is explicitly enabled in placements.
+    const placements = Array.isArray(promo.placements) 
+      ? promo.placements 
+      : (promo.placement ? [promo.placement] : []);
+    const hasFoodCardPlacement = placements.length > 0 && (
+      placements.includes('food_card') || 
+      placements.includes('FOOD_CARD' as any) || 
+      placements.includes('ALL' as any)
+    );
+    if (!hasFoodCardPlacement) continue;
+
+    // Skip promo codes that require coupon code entry at checkout
     const pType = String(promo.type).toLowerCase();
     if (pType === 'coupon_code' || pType === 'coupon') continue;
+    if (promo.code || promo.couponCode) continue;
 
     let isApplicable = false;
-    if ((pType === 'item_specific' || pType === 'item_discount') && Array.isArray(promo.applicableItemIds) && promo.applicableItemIds.includes(item.id)) {
+    const itemIds = promo.applicableItemIds || [];
+    const catIds = promo.applicableCategoryIds || [];
+    const hasItemScope = itemIds.length > 0;
+    const hasCategoryScope = catIds.length > 0;
+
+    if (hasItemScope && itemIds.includes(item.id)) {
       isApplicable = true;
-    } else if ((pType === 'category_specific' || pType === 'category_discount') && item.category && Array.isArray(promo.applicableCategoryIds) && promo.applicableCategoryIds.includes(item.category)) {
+    } else if (hasCategoryScope && item.category && catIds.some(c => c.toLowerCase() === item.category?.toLowerCase())) {
       isApplicable = true;
-    } else if (pType === 'restaurant_wide') {
-      isApplicable = true;
-    } else if (pType === 'bogo' && Array.isArray(promo.applicableItemIds) && promo.applicableItemIds.includes(item.id)) {
-      isApplicable = true;
-    } else if (pType === 'percentage' && !promo.code && !promo.couponCode) {
-      isApplicable = true;
+    } else if (!hasItemScope && !hasCategoryScope) {
+      if (pType === 'restaurant_wide' || pType === 'percentage' || pType === 'fixed_amount') {
+        isApplicable = true;
+      }
     }
 
     if (isApplicable) {
@@ -108,7 +125,6 @@ export function calculateItemDiscount(
       } else if (pType === 'fixed_amount') {
         currentPrice = Math.max(0, originalPrice - promoVal);
       } else if (pType === 'bogo') {
-        // BOGO badge representation on food cards
         bestBadge = promo.badgeText || 'BUY 1 GET 1';
         bestPromo = promo;
         continue;
@@ -149,6 +165,7 @@ export function validateCoupon(
   let promo: IPromotion | undefined;
   let code = '';
   let subtotal = 0;
+  let cartItemsList = items || [];
 
   if (
     requestOrPromo &&
@@ -160,6 +177,7 @@ export function validateCoupon(
     const req = requestOrPromo as ICouponValidationRequest;
     code = (req.code || '').trim().toUpperCase();
     subtotal = req.cartSubtotal || 0;
+    cartItemsList = req.items || cartItemsList;
     promo = promosOrSubtotal.find(p => (p.code || p.couponCode || '').trim().toUpperCase() === code);
   } else {
     // Called as validateCoupon(promo, subtotal, items, customerId)
@@ -198,7 +216,8 @@ export function validateCoupon(
   // Minimum Order Value check
   if (typeof promo.minOrderValue === 'number' && promo.minOrderValue > 0) {
     if (subtotal < promo.minOrderValue) {
-      const msg = `Minimum order of ₹${promo.minOrderValue} required for coupon "${code}". Add ₹${promo.minOrderValue - subtotal} more.`;
+      const diff = promo.minOrderValue - subtotal;
+      const msg = `Minimum order subtotal of ₹${promo.minOrderValue} required for coupon "${code}". Add ₹${diff} more.`;
       return {
         valid: false,
         promotion: promo,
@@ -208,15 +227,52 @@ export function validateCoupon(
     }
   }
 
+  // Item / Category eligibility check
+  const applicableItemIds: string[] = promo.applicableItemIds || [];
+  const applicableCategoryIds: string[] = promo.applicableCategoryIds || [];
+  const hasItemScope = applicableItemIds.length > 0;
+  const hasCategoryScope = applicableCategoryIds.length > 0;
+
+  let eligibleSubtotal = subtotal;
+  if (hasItemScope || hasCategoryScope) {
+    if (cartItemsList && cartItemsList.length > 0) {
+      let matchedTotal = 0;
+      for (const it of cartItemsList) {
+        const itId = it.itemId || it.id;
+        const itCat = it.category || '';
+        const itPrice = Number(it.pricePerUnit || it.price || 0);
+        const itCount = Number(it.count || it.quantity || 1);
+
+        const matchItem = hasItemScope && applicableItemIds.includes(itId);
+        const matchCat = hasCategoryScope && itCat && applicableCategoryIds.some(c => c.toLowerCase() === itCat.toLowerCase());
+
+        if (matchItem || matchCat) {
+          matchedTotal += itPrice * itCount;
+        }
+      }
+
+      if (matchedTotal <= 0) {
+        const msg = `Coupon "${code}" is only applicable to selected items or categories.`;
+        return {
+          valid: false,
+          promotion: promo,
+          errorMessage: msg,
+          message: msg
+        };
+      }
+      eligibleSubtotal = matchedTotal;
+    }
+  }
+
   // Calculate discount amount
   const promoVal = Number(promo.value ?? promo.discountValue ?? 0);
   let discountAmount = 0;
   const pType = String(promo.type).toLowerCase();
 
   if (pType === 'percentage' || pType === 'coupon' || pType === 'coupon_code') {
-    discountAmount = Math.round(subtotal * (promoVal / 100));
+    discountAmount = Math.round(eligibleSubtotal * (promoVal / 100));
   } else if (pType === 'fixed_amount' || pType === 'fixed') {
-    discountAmount = Math.min(subtotal, promoVal);
+    discountAmount = Math.min(eligibleSubtotal, promoVal);
   }
 
   // Maximum discount cap
@@ -314,6 +370,12 @@ export const promotionService = {
       const list: IPromotion[] = [];
       snap.forEach(d => {
         const data = d.data();
+        const codeVal = (data.code || data.couponCode) ? String(data.code || data.couponCode).toUpperCase() : undefined;
+        const placementsArr: PromotionPlacement[] = Array.isArray(data.placements) 
+          ? data.placements 
+          : (data.placement ? [data.placement as PromotionPlacement] : ['restaurant_menu', 'cart_suggestion', 'home_carousel']);
+        const promoVal = Number(data.value ?? data.discountValue ?? 0);
+
         list.push({
           id: d.id,
           tenantId: data.tenantId || tenantId,
@@ -322,8 +384,10 @@ export const promotionService = {
           name: data.name || 'Special Offer',
           description: data.description || '',
           type: data.type || 'percentage',
-          value: Number(data.value || 0),
-          code: data.code ? String(data.code).toUpperCase() : undefined,
+          value: promoVal,
+          discountValue: promoVal,
+          code: codeVal,
+          couponCode: codeVal,
           badgeText: data.badgeText || '',
           imageUrl: data.imageUrl || null,
           applicableItemIds: data.applicableItemIds || [],
@@ -338,7 +402,8 @@ export const promotionService = {
           globalUsageLimit: typeof data.globalUsageLimit === 'number' ? data.globalUsageLimit : undefined,
           perCustomerLimit: typeof data.perCustomerLimit === 'number' ? data.perCustomerLimit : undefined,
           redemptionCount: Number(data.redemptionCount || 0),
-          placements: Array.isArray(data.placements) ? data.placements : ['restaurant_menu', 'cart_suggestion'],
+          placements: placementsArr,
+          placement: placementsArr[0] || 'restaurant_menu',
           allowStacking: Boolean(data.allowStacking),
           metrics: data.metrics || { impressions: 0, clicks: 0, redemptions: 0, totalDiscountGiven: 0, totalRevenueGenerated: 0 },
           createdAt: data.createdAt || new Date().toISOString(),
@@ -361,7 +426,25 @@ export const promotionService = {
       const snap = await getDocs(colRef);
       const list: IPromotion[] = [];
       snap.forEach(d => {
-        list.push({ id: d.id, ...d.data() } as IPromotion);
+        const data = d.data();
+        const codeVal = (data.code || data.couponCode) ? String(data.code || data.couponCode).toUpperCase() : undefined;
+        const placementsArr: PromotionPlacement[] = Array.isArray(data.placements) 
+          ? data.placements 
+          : (data.placement ? [data.placement as PromotionPlacement] : ['restaurant_menu', 'cart_suggestion', 'home_carousel']);
+        const promoVal = Number(data.value ?? data.discountValue ?? 0);
+
+        list.push({
+          id: d.id,
+          ...data,
+          tenantId: data.tenantId || tenantId,
+          restaurantId: data.restaurantId || tenantId,
+          value: promoVal,
+          discountValue: promoVal,
+          code: codeVal,
+          couponCode: codeVal,
+          placements: placementsArr,
+          placement: placementsArr[0] || 'restaurant_menu'
+        } as IPromotion);
       });
       return list;
     } catch (err) {

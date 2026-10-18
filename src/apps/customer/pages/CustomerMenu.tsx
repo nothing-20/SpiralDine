@@ -115,6 +115,17 @@ export const CustomerMenu: React.FC = () => {
   const [combosList, setCombosList] = useState<any[]>([]);
   const [promotions, setPromotions] = useState<IPromotion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Eligible active promotions for restaurant menu banner
+  const menuPromotions = useMemo(() => {
+    return promotions.filter(p => {
+      if (!isPromotionActive(p)) return false;
+      const placements = Array.isArray(p.placements) 
+        ? p.placements 
+        : (p.placement ? [p.placement as any] : ['restaurant_menu']);
+      return placements.includes('restaurant_menu') || placements.includes('MENU_BANNER' as any) || placements.includes('ALL' as any);
+    });
+  }, [promotions]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [coverImageFailed, setCoverImageFailed] = useState(false);
   const [failedImageIds, setFailedImageIds] = useState<Record<string, boolean>>({});
@@ -1358,47 +1369,48 @@ export const CustomerMenu: React.FC = () => {
         </div>
 
         {/* 2.c. Compact Restaurant Promotional Banner */}
-        {promotions.filter(p => isPromotionActive(p)).length > 0 && (
-          <div className="bg-gradient-to-r from-[#FFF8F5] via-[#FFFDFB] to-[#FFF8F5] border border-[#C85A3F]/30 rounded-2xl p-3 sm:p-3.5 shadow-xs text-left relative overflow-hidden animate-in fade-in">
+        {menuPromotions.length > 0 && (
+          <div className="bg-gradient-to-r from-[#FFF8F5] via-[#FFFDFB] to-[#FFF8F5] border border-[#D94F2B]/30 rounded-2xl p-3 sm:p-3.5 shadow-xs text-left relative overflow-hidden animate-in fade-in">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               <div className="flex items-start sm:items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-[#C85A3F]/10 border border-[#C85A3F]/20 flex items-center justify-center text-[#C85A3F] shrink-0">
+                <div className="w-9 h-9 rounded-xl bg-[#FAF8F4] border border-[#D8DDD6] flex items-center justify-center text-[#D94F2B] shrink-0">
                   <Sparkles className="w-4 h-4 animate-pulse" />
                 </div>
                 <div className="space-y-0.5">
                   <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                    <span className="text-[9px] sm:text-[10px] uppercase tracking-wider bg-[#C85A3F] text-white font-extrabold px-2 py-0.5 rounded-md shadow-xs">
-                      {promotions.filter(p => isPromotionActive(p))[0].badgeText || 'SPECIAL OFFER'}
+                    <span className="text-[9px] sm:text-[10px] uppercase tracking-wider bg-[#D94F2B] text-white font-extrabold px-2 py-0.5 rounded-md shadow-xs">
+                      {menuPromotions[0].badgeText || (menuPromotions[0].type === 'bogo' ? 'BUY 1 GET 1' : `${menuPromotions[0].value}% OFF`)}
                     </span>
-                    <span className="text-xs sm:text-sm font-extrabold text-[#202124]">
-                      {promotions.filter(p => isPromotionActive(p))[0].name}
+                    <span className="text-xs sm:text-sm font-extrabold text-[#202820]">
+                      {menuPromotions[0].name}
                     </span>
-                    {promotions.filter(p => isPromotionActive(p))[0].couponCode && (
+                    {(menuPromotions[0].code || menuPromotions[0].couponCode) && (
                       <button
                         type="button"
                         onClick={() => {
-                          navigator.clipboard.writeText(promotions.filter(p => isPromotionActive(p))[0].couponCode || '');
-                          toast.success(`Coupon ${promotions.filter(p => isPromotionActive(p))[0].couponCode} copied!`);
+                          const codeToCopy = menuPromotions[0].code || menuPromotions[0].couponCode || '';
+                          navigator.clipboard.writeText(codeToCopy);
+                          toast.success(`Coupon ${codeToCopy} copied!`);
                         }}
-                        className="inline-flex items-center gap-1 text-[10px] font-extrabold text-[#C85A3F] bg-[#F3E8DF] hover:bg-[#E5DCD5] px-2 py-0.5 rounded-md border border-[#C85A3F]/30 transition-all cursor-pointer active:scale-95"
+                        className="inline-flex items-center gap-1 text-[10px] font-extrabold text-[#D94F2B] bg-[#FAF8F4] hover:bg-[#F3E8DF] px-2 py-0.5 rounded-md border border-[#D8DDD6] transition-all cursor-pointer active:scale-95"
                         title="Click to copy coupon code"
                       >
                         <Tag className="w-2.5 h-2.5" />
-                        <span>Use Code: {promotions.filter(p => isPromotionActive(p))[0].couponCode}</span>
+                        <span>Use Code: {menuPromotions[0].code || menuPromotions[0].couponCode}</span>
                       </button>
                     )}
                   </div>
-                  <p className="text-[11px] sm:text-xs text-[#756B64] line-clamp-1">
-                    {promotions.filter(p => isPromotionActive(p))[0].description}
-                    {promotions.filter(p => isPromotionActive(p))[0].minOrderValue ? ` • Min Order: ₹${promotions.filter(p => isPromotionActive(p))[0].minOrderValue}` : ''}
-                    {promotions.filter(p => isPromotionActive(p))[0].maxDiscountAmount ? ` • Max Discount: ₹${promotions.filter(p => isPromotionActive(p))[0].maxDiscountAmount}` : ''}
+                  <p className="text-[11px] sm:text-xs text-[#5F675F] line-clamp-1">
+                    {menuPromotions[0].description}
+                    {menuPromotions[0].minOrderValue ? ` • Min Order: ₹${menuPromotions[0].minOrderValue}` : ''}
+                    {menuPromotions[0].maxDiscountAmount ? ` • Max Discount: ₹${menuPromotions[0].maxDiscountAmount}` : ''}
                   </p>
                 </div>
               </div>
 
-              {promotions.filter(p => isPromotionActive(p)).length > 1 && (
-                <span className="text-[10px] font-bold text-[#756B64] bg-white border border-[#E5DCD5] px-2 py-1 rounded-lg shrink-0 self-start sm:self-auto">
-                  +{promotions.filter(p => isPromotionActive(p)).length - 1} more offers
+              {menuPromotions.length > 1 && (
+                <span className="text-[10px] font-bold text-[#5F675F] bg-white border border-[#D8DDD6] px-2 py-1 rounded-lg shrink-0 self-start sm:self-auto">
+                  +{menuPromotions.length - 1} more offers
                 </span>
               )}
             </div>

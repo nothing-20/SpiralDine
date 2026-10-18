@@ -55,6 +55,8 @@ export interface IOrder {
   customerName: string;
   phone: string;
   customerPhone?: string;
+  couponCode?: string;
+  appliedPromotionId?: string;
   items: IOrderItem[];
   subtotal: number; // in cents
   tax: number; // in cents

@@ -72,6 +72,7 @@ export interface IPromotion {
 
   // Financial constraints
   minOrderValue?: number; // Minimum cart subtotal in INR required
+  minOrderSubtotal?: number; // alias for minOrderValue
   maxDiscountAmount?: number; // Cap on percentage discounts in INR
 
   // Time validity

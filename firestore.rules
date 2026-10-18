@@ -464,6 +464,19 @@ service cloud.firestore {
       allow update: if isTenantManager(tenantId) || isKitchenAvailabilityUpdate(tenantId);
     }
 
+    // Canonical Promotions & Coupon Deals
+    // Read: public for diner offer discovery, menu banner, cart trays, and coupon application
+    // Write: restricted to tenant management (Owner, Admin, Manager)
+    match /promotions/{promoId} {
+      allow read: if true;
+      allow write: if isTenantManager(tenantId) || isSuperAdmin();
+    }
+
+    match /coupons/{couponId} {
+      allow read: if true;
+      allow write: if isTenantManager(tenantId) || isSuperAdmin();
+    }
+
       // Canonical Inventory & Ingredients - accessible by authorized tenant staff (Owner, Admin, Manager, Kitchen)
       match /inventory/{ingredientId} {
         allow read: if isTenantStaff(tenantId);

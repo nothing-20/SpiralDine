@@ -447,7 +447,14 @@ export const CustomerReceiptView: React.FC<CustomerReceiptViewProps> = ({
 
               {discount > 0 && (
                 <div className="flex justify-between text-[#2E8B57]">
-                  <span>Discount</span>
+                  <span className="flex items-center gap-1.5">
+                    <span>Discount</span>
+                    {(order.couponCode || order.discountLabel) && (
+                      <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                        {order.couponCode || order.discountLabel}
+                      </span>
+                    )}
+                  </span>
                   <span className="font-semibold font-mono">-{formatPrice(discount)}</span>
                 </div>
               )}

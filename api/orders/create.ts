@@ -272,17 +272,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Look up in canonical promotions collection first
       const promoCol = collection(db, 'restaurants', tenantId, 'promotions');
       const qPromo = query(promoCol, where('code', '==', rawCode));
-      const promoSnap = await getDocs(qPromo);
+      let promoSnap = await getDocs(qPromo);
 
       let promoData: any = null;
       if (!promoSnap.empty) {
         promoData = promoSnap.docs[0].data();
         matchedPromotionId = promoSnap.docs[0].id;
       } else {
-        const couponRef = doc(db, 'restaurants', tenantId, 'coupons', rawCode);
-        const couponSnap = await getDoc(couponRef);
-        if (couponSnap.exists()) {
-          promoData = couponSnap.data() || {};
+        const qPromoAlt = query(promoCol, where('couponCode', '==', rawCode));
+        const promoSnapAlt = await getDocs(qPromoAlt);
+        if (!promoSnapAlt.empty) {
+          promoData = promoSnapAlt.docs[0].data();
+          matchedPromotionId = promoSnapAlt.docs[0].id;
+        } else {
+          const couponRef = doc(db, 'restaurants', tenantId, 'coupons', rawCode);
+          const couponSnap = await getDoc(couponRef);
+          if (couponSnap.exists()) {
+            promoData = couponSnap.data() || {};
+          }
         }
       }
 
@@ -316,18 +323,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      const minOrder = Number(promoData.minOrderValue || promoData.minOrder || 0);
+      const minOrder = Number(promoData.minOrderSubtotal || promoData.minOrderValue || promoData.minOrder || 0);
       if (minOrder > 0 && authoritativeSubtotal < minOrder) {
         return res.status(400).json({ error: `Order creation rejected: Minimum order subtotal of ₹${minOrder} is required for coupon "${rawCode}".` });
       }
 
-      if (promoData.percentage || (promoData.type === 'percentage' && promoData.value)) {
-        const pct = Number(promoData.percentage || promoData.value);
-        authoritativeDiscount = Math.round(authoritativeSubtotal * (pct / 100));
-      } else if (promoData.amount || (promoData.type === 'fixed_amount' && promoData.value)) {
-        authoritativeDiscount = Math.min(authoritativeSubtotal, Number(promoData.amount || promoData.value));
-      } else if (promoData.value) {
-        authoritativeDiscount = Math.round(authoritativeSubtotal * (Number(promoData.value) / 100));
+      // Calculate authoritative discount scoped to eligible items if specified
+      let eligibleSubtotal = authoritativeSubtotal;
+      const hasItemScope = Array.isArray(promoData.applicableItemIds) && promoData.applicableItemIds.length > 0;
+      const hasCategoryScope = Array.isArray(promoData.applicableCategoryIds) && promoData.applicableCategoryIds.length > 0;
+
+      if (hasItemScope || hasCategoryScope) {
+        eligibleSubtotal = verifiedItems.reduce((acc, item) => {
+          const itemMatch = hasItemScope && promoData.applicableItemIds.includes(item.itemId);
+          const catMatch = hasCategoryScope && (
+            (item.category && promoData.applicableCategoryIds.includes(item.category)) ||
+            (item.categoryId && promoData.applicableCategoryIds.includes(item.categoryId))
+          );
+          if (itemMatch || catMatch) {
+            return acc + (item.pricePerUnit * item.count);
+          }
+          return acc;
+        }, 0);
+
+        if (eligibleSubtotal <= 0) {
+          return res.status(400).json({ error: `Order creation rejected: Coupon code "${rawCode}" is only applicable to selected items or categories.` });
+        }
+      }
+
+      const isPercent = promoData.discountType === 'percentage' || promoData.type === 'percentage' || Boolean(promoData.percentage);
+      const discountVal = Number(promoData.discountValue || promoData.value || promoData.percentage || promoData.amount || 0);
+
+      if (isPercent) {
+        authoritativeDiscount = Math.round(eligibleSubtotal * (discountVal / 100));
+      } else {
+        authoritativeDiscount = Math.min(eligibleSubtotal, discountVal);
       }
 
       const maxDiscount = Number(promoData.maxDiscountAmount || promoData.maxDiscount || 0);
@@ -384,6 +414,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       serviceCharge: authoritativeServiceCharge,
       serviceChargePercent: configuredServiceChargePercent,
       discount: authoritativeDiscount,
+      discountLabel: req.body.couponCode ? `Coupon ${String(req.body.couponCode).trim().toUpperCase()}` : undefined,
+      couponCode: req.body.couponCode ? String(req.body.couponCode).trim().toUpperCase() : undefined,
+      appliedPromotionId: matchedPromotionId || undefined,
       total: authoritativeTotal,
       totalAmount: authoritativeTotal,
       status: 'NEW',

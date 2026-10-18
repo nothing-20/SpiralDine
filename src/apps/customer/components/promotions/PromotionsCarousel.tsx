@@ -35,18 +35,29 @@ export const PromotionsCarousel: React.FC<PromotionsCarouselProps> = ({
           targetRestaurants.map(async (r) => {
             try {
               const promoCol = collection(db, 'restaurants', r.id, 'promotions');
-              const q = query(promoCol, where('status', '==', 'active'), limit(3));
+              const q = query(promoCol, where('status', '==', 'active'), limit(6));
               const snap = await getDocs(q);
               snap.forEach(d => {
                 const data = d.data() as IPromotion;
-                if (isPromotionActive(data)) {
+                const placements = Array.isArray(data.placements) 
+                  ? data.placements 
+                  : (data.placement ? [data.placement as any] : ['home_carousel']);
+                const isHomePlacement = placements.includes('home_carousel') || placements.includes('HOME_CAROUSEL' as any) || placements.includes('ALL' as any);
+                if (isPromotionActive(data) && isHomePlacement) {
+                  const codeVal = (data.code || data.couponCode) ? String(data.code || data.couponCode).toUpperCase() : undefined;
+                  const promoVal = Number(data.value ?? data.discountValue ?? 0);
                   promos.push({
                     ...data,
                     id: d.id,
                     tenantId: data.tenantId || r.id,
                     restaurantId: data.restaurantId || r.id,
                     restaurantName: r.name || data.restaurantName || 'Restaurant',
-                    restaurantCity: r.city || currentCity
+                    restaurantCity: r.city || currentCity,
+                    code: codeVal,
+                    couponCode: codeVal,
+                    value: promoVal,
+                    discountValue: promoVal,
+                    placements
                   });
                 }
               });

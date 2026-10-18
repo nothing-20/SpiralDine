@@ -235,7 +235,13 @@ export const CartPage: React.FC = () => {
   useEffect(() => {
     if (!activeTenantId) return;
     const unsub = promotionService.subscribeToRestaurantPromotions(activeTenantId, (promos) => {
-      const activeCoupons = promos.filter(p => isPromotionActive(p) && (p.type === 'COUPON' || Boolean(p.couponCode) || p.placement === 'CART_CHECKOUT'));
+      const activeCoupons = promos.filter(p => isPromotionActive(p) && (
+        p.type === 'COUPON' || 
+        Boolean(p.code) || 
+        Boolean(p.couponCode) || 
+        p.placement === 'CART_CHECKOUT' ||
+        (Array.isArray(p.placements) && p.placements.includes('cart_suggestion'))
+      ));
       setAvailableCoupons(activeCoupons);
     });
     return () => unsub();
@@ -246,7 +252,7 @@ export const CartPage: React.FC = () => {
     if (appliedPromotion) {
       const val = validateCoupon(appliedPromotion, cartSubtotal, cartItems, user?.uid);
       if (!val.valid) {
-        setCouponError(`Coupon "${appliedPromotion.couponCode || appliedPromotion.name}" removed: ${val.message}`);
+        setCouponError(`Coupon "${appliedPromotion.code || appliedPromotion.couponCode || appliedPromotion.name}" removed: ${val.message}`);
         setAppliedPromotion(null);
         setAppliedCouponCode('');
         setCouponDiscountVal(0);
@@ -293,7 +299,7 @@ export const CartPage: React.FC = () => {
     setCouponError('');
     setIsApplyingCoupon(true);
     try {
-      let promo = availableCoupons.find(p => p.couponCode?.toUpperCase() === rawCode);
+      let promo = availableCoupons.find(p => (p.code || p.couponCode)?.toUpperCase() === rawCode);
       if (!promo && activeTenantId) {
         const onlineRes = await promotionService.validateCouponOnline(activeTenantId, rawCode, subtotal, cartItems, user?.uid);
         if (onlineRes.valid && onlineRes.promotion) {
@@ -1072,7 +1078,7 @@ export const CartPage: React.FC = () => {
                               <div className="space-y-0.5 min-w-0 pr-2">
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-white border border-[#C85A3F]/30 text-[#C85A3F]">
-                                    {c.couponCode || c.name}
+                                    {c.code || c.couponCode || c.name}
                                   </span>
                                   {c.badgeText && (
                                     <span className="text-[9px] font-bold text-[#756B64]">
@@ -1081,13 +1087,14 @@ export const CartPage: React.FC = () => {
                                   )}
                                 </div>
                                 <p className="text-[10px] text-[#756B64] truncate">
-                                  {c.description || `${c.discountValue}% OFF`}
-                                  {c.minOrderValue ? ` • Min ₹${c.minOrderValue}` : ''}
+                                  {c.description || `${c.discountValue || c.value || ''}% OFF`}
+                                  {c.minOrderSubtotal ? ` • Min ₹${c.minOrderSubtotal}` : c.minOrderValue ? ` • Min ₹${c.minOrderValue}` : ''}
+                                  {c.maxDiscountAmount ? ` • Up to ₹${c.maxDiscountAmount}` : ''}
                                 </p>
                               </div>
                               <button
                                 type="button"
-                                onClick={() => handleApplyCoupon(undefined, c.couponCode || '')}
+                                onClick={() => handleApplyCoupon(undefined, c.code || c.couponCode || '')}
                                 disabled={isApplyingCoupon}
                                 className="px-2.5 py-1 text-[11px] font-extrabold text-[#C85A3F] bg-white hover:bg-[#F3E8DF] border border-[#C85A3F]/40 rounded-lg shrink-0 transition-all cursor-pointer active:scale-95"
                               >
