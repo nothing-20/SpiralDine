@@ -6,10 +6,26 @@ import Badge from '../../../components/ui/Badge/Badge';
 import { 
   Star, MapPin, Search, X, RotateCcw, 
   ExternalLink, Utensils, Compass, ArrowUpDown, 
-  ChevronDown, SlidersHorizontal, AlertCircle, Heart
+  ChevronDown, SlidersHorizontal, AlertCircle, Heart, Tag
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import ErrorBoundary from '../../../shared/ui/feedback/ErrorBoundary';
+import { 
+  RestaurantFilterState, 
+  INITIAL_FILTER_STATE, 
+  DEFAULT_COST_RANGE,
+  SortOption 
+} from '../types/restaurantFilters';
+import { 
+  FilterableRestaurant, 
+  evaluateRestaurantFilters, 
+  sortRestaurants, 
+  countActiveFilters, 
+  getActiveFilterTags,
+  calculateHaversineDistanceKm,
+  estimateCostForTwo
+} from '../utils/restaurantFilters';
+import { RestaurantFilterModal } from '../components/filters/RestaurantFilterModal';
 
 const HYDERABAD_AREAS = [
   'Jubilee Hills', 'Banjara Hills', 'Hitech City', 'Gachibowli', 'Madhapur', 
@@ -75,22 +91,20 @@ const DiscoverPageInner: React.FC = () => {
 
   // URL parameters
   const initialSearch = searchParams.get('search') || '';
-  const initialCategory = searchParams.get('category') || 'All';
+  const initialCategory = searchParams.get('category') || '';
   const initialArea = searchParams.get('area') || 'All Areas';
 
   // Location Hub State (Unified single source of truth from localStorage with safe fallback)
   const [currentLocation, setCurrentLocation] = useState(getSafeLocation);
 
   // Primary Data States
-  const [restaurantsList, setRestaurantsList] = useState<any[]>(() => {
+  const [restaurantsList, setRestaurantsList] = useState<FilterableRestaurant[]>(() => {
     try {
       const cached = (window as any)?.__cachedTenants;
       if (Array.isArray(cached) && cached.length > 0) {
-        console.log('[Explore] cache status: hit with', cached.length, 'restaurants');
         return cached;
       }
     } catch (_) {}
-    console.log('[Explore] cache status: empty');
     return [];
   });
 
@@ -105,18 +119,21 @@ const DiscoverPageInner: React.FC = () => {
 
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Search & Filter States
+  // Search & Area Filter States
   const [searchQuery, setSearchQuery] = useState(initialSearch);
-  const [selectedCuisine, setSelectedCuisine] = useState(initialCategory);
   const [selectedArea, setSelectedArea] = useState(initialArea);
-  const [selectedPrice, setSelectedPrice] = useState<string>('all');
-  const [showVegOnly, setShowVegOnly] = useState(false);
-  const [showOpenNow, setShowOpenNow] = useState(false);
-  const [showTopRated, setShowTopRated] = useState(false);
-  const [sortBy, setSortBy] = useState<'featured' | 'rating' | 'name' | 'reviews'>('featured');
 
-  // Filter Drawer State
-  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
+  // Comprehensive Filter State
+  const [filters, setFilters] = useState<RestaurantFilterState>(() => {
+    const base = { ...INITIAL_FILTER_STATE };
+    if (initialCategory && initialCategory !== 'All') {
+      base.cuisines = [initialCategory];
+    }
+    return base;
+  });
+
+  // Filter Drawer / Modal State
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
 
   // Favourites list stored in localStorage
   const [favourites, setFavourites] = useState<string[]>(() => {
@@ -130,17 +147,10 @@ const DiscoverPageInner: React.FC = () => {
     return [];
   });
 
-  // Diagnostic lifecycle log
-  useEffect(() => {
-    console.log('[Explore] component mounted');
-    console.log('[Explore] location loaded:', currentLocation.city, '|', currentLocation.area);
-  }, []);
-
   // Synchronize location changes from custom window events and storage
   useEffect(() => {
     const handleLocationChanged = () => {
       const loc = getSafeLocation();
-      console.log('[Explore] location updated from event:', loc.city, '|', loc.area);
       setCurrentLocation(loc);
     };
 
@@ -159,6 +169,10 @@ const DiscoverPageInner: React.FC = () => {
     if (s !== null && s !== searchQuery) {
       setSearchQuery(s);
     }
+    const c = searchParams.get('category');
+    if (c && c !== 'All' && !filters.cuisines.includes(c)) {
+      setFilters(prev => ({ ...prev, cuisines: [c] }));
+    }
   }, [searchParams]);
 
   // Stream real Firestore tenants in real-time
@@ -166,13 +180,10 @@ const DiscoverPageInner: React.FC = () => {
     setIsLoading(prev => restaurantsList.length === 0 ? true : prev);
     setLoadError(null);
 
-    console.log('[Explore] Firestore listener started');
-
     try {
       const qTenants = query(collection(db, 'tenants'), limit(50));
       const unsubscribe = onSnapshot(qTenants, (snap) => {
-        console.log('[Explore] snapshot received:', snap.docs.length, 'documents');
-        const list: any[] = [];
+        const list: FilterableRestaurant[] = [];
         
         snap.forEach(d => {
           try {
@@ -220,6 +231,16 @@ const DiscoverPageInner: React.FC = () => {
               if (!isNaN(p)) numReviews = p;
             }
 
+            // Safe cost for two parsing
+            let numCost: number | null = null;
+            if (typeof data.costForTwo === 'number' && !isNaN(data.costForTwo)) {
+              numCost = data.costForTwo;
+            } else if (typeof data.cost_for_two === 'number' && !isNaN(data.cost_for_two)) {
+              numCost = data.cost_for_two;
+            } else if (typeof data.averageCost === 'number' && !isNaN(data.averageCost)) {
+              numCost = data.averageCost;
+            }
+
             list.push({
               id: d.id,
               name: String(data.restaurantName || data.name || 'Restaurant').trim(),
@@ -227,13 +248,16 @@ const DiscoverPageInner: React.FC = () => {
               rating: numRating,
               reviewsCount: numReviews,
               priceRange: String(data.priceRange || '₹₹'),
+              costForTwo: numCost,
               vegOptions: data.vegOptions !== undefined ? Boolean(data.vegOptions) : true,
               nonVegOptions: data.nonVegOptions !== undefined ? Boolean(data.nonVegOptions) : true,
               openNow: status === 'active' || data.openNow !== false,
               isFeatured: Boolean(data.isFeatured),
               isTrending: Boolean(data.isTrending),
-              isNew: Boolean(data.isNew),
-              hasOffer: Boolean(data.hasOffer),
+              isNew: Boolean(data.isNew || data.newlyOpened),
+              hasOffer: Boolean(data.hasOffer || data.discountPercent || (Array.isArray(data.offers) && data.offers.length > 0)),
+              discountPercent: typeof data.discountPercent === 'number' ? data.discountPercent : null,
+              offers: Array.isArray(data.offers) ? data.offers : (data.offer ? [data.offer] : []),
               image: data.coverImageUrl || data.coverImage || null,
               logoUrl: data.logoUrl || data.logo || null,
               city,
@@ -248,14 +272,23 @@ const DiscoverPageInner: React.FC = () => {
               currencySymbol,
               latitude: typeof data.latitude === 'number' ? data.latitude : null,
               longitude: typeof data.longitude === 'number' ? data.longitude : null,
-              facilities: data.facilities || null
+              facilities: data.facilities || null,
+              accessibility: data.accessibility || null,
+              experience: data.experience || null,
+              dietary: data.dietary || null,
+              ambience: data.ambience || null,
+              businessHours: data.businessHours || null,
+              hours: data.hours || null,
+              isPureVeg: Boolean(data.isPureVeg || data.pureVeg),
+              newlyOpened: Boolean(data.newlyOpened),
+              partyFriendly: Boolean(data.partyFriendly),
+              newlyListed: Boolean(data.newlyListed)
             });
           } catch (itemErr) {
             console.error('[Explore] Error processing tenant document:', d.id, itemErr);
           }
         });
 
-        console.log('[Explore] tenant count:', list.length);
         setRestaurantsList(list);
         try {
           (window as any).__cachedTenants = list;
@@ -300,62 +333,55 @@ const DiscoverPageInner: React.FC = () => {
     window.dispatchEvent(new Event('open_location_modal'));
   };
 
+  // Base list of restaurants in current city
+  const cityRestaurants = useMemo(() => {
+    if (!currentLocation || !currentLocation.city || currentLocation.city === 'All Cities') {
+      return restaurantsList;
+    }
+    const curCity = String(currentLocation.city).toLowerCase().trim();
+    return restaurantsList.filter(r => {
+      const rCity = String(r.city || '').toLowerCase().trim();
+      return rCity === curCity || rCity.includes(curCity) || curCity.includes(rCity);
+    });
+  }, [restaurantsList, currentLocation]);
+
   // Dynamic list of cuisines extracted from current city's restaurants
-  // Supports both "/" and "," as delimiters (e.g. "Hyderabadi / Biryani / Mughlai")
   const availableCuisines = useMemo(() => {
     const set = new Set<string>();
-    const currentCity = String(currentLocation?.city || 'Hyderabad').toLowerCase().trim();
     
-    restaurantsList.forEach(r => {
-      const rCity = String(r.city || '').toLowerCase().trim();
-      if (rCity.includes(currentCity) || currentCity.includes(rCity)) {
-        if (typeof r.cuisine === 'string') {
-          // Split on both '/' and ',' to handle all delimiter formats cleanly
-          r.cuisine.split(/[/,]/).forEach((c: string) => {
-            const clean = c.trim();
-            if (clean.length > 2 && clean.length < 32) {
-              set.add(clean);
-            }
-          });
-        }
+    cityRestaurants.forEach(r => {
+      if (typeof r.cuisine === 'string') {
+        r.cuisine.split(/[/,]/).forEach((c: string) => {
+          const clean = c.trim();
+          if (clean.length > 2 && clean.length < 32) {
+            set.add(clean);
+          }
+        });
       }
     });
 
     return ['All', ...Array.from(set).sort()];
-  }, [restaurantsList, currentLocation]);
+  }, [cityRestaurants]);
 
   // Dynamic list of areas extracted from current city's restaurants
   const availableAreas = useMemo(() => {
     const set = new Set<string>();
     const currentCity = String(currentLocation?.city || 'Hyderabad').toLowerCase().trim();
 
-    restaurantsList.forEach(r => {
-      const rCity = String(r.city || '').toLowerCase().trim();
-      if (rCity.includes(currentCity) || currentCity.includes(rCity)) {
-        if (r.area && r.area !== 'All Areas' && String(r.area).toLowerCase().trim() !== currentCity) {
-          set.add(r.area);
-        }
+    cityRestaurants.forEach(r => {
+      if (r.area && r.area !== 'All Areas' && String(r.area).toLowerCase().trim() !== currentCity) {
+        set.add(r.area);
       }
     });
 
     return ['All Areas', ...Array.from(set).sort()];
-  }, [restaurantsList, currentLocation]);
+  }, [cityRestaurants, currentLocation]);
 
   // Universal Filtered & Sorted Restaurant Set
   const filteredRestaurants = useMemo(() => {
-    let result = [...restaurantsList];
+    let result = [...cityRestaurants];
 
-    // 1. City Filter (Matches selected location city)
-    if (currentLocation && currentLocation.city && currentLocation.city !== 'All Cities') {
-      const curCity = String(currentLocation.city).toLowerCase().trim();
-      result = result.filter(r => {
-        const rCity = String(r.city || '').toLowerCase().trim();
-        return rCity === curCity || rCity.includes(curCity) || curCity.includes(rCity);
-      });
-    }
-
-    // 2. Area Filter:
-    // Only filter by area if an actual specific sub-locality is active (not 'All Areas' and not the city name itself)
+    // 1. Area Filter:
     const curCity = String(currentLocation?.city || 'Hyderabad').toLowerCase().trim();
     const locArea = currentLocation?.area && currentLocation.area !== 'All Areas' && String(currentLocation.area).toLowerCase().trim() !== curCity
       ? currentLocation.area 
@@ -372,7 +398,7 @@ const DiscoverPageInner: React.FC = () => {
       });
     }
 
-    // 3. Search Query matching
+    // 2. Search Query matching
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       result = result.filter(r => {
@@ -386,74 +412,36 @@ const DiscoverPageInner: React.FC = () => {
       });
     }
 
-    // 4. Cuisine Filter
-    if (selectedCuisine !== 'All') {
-      const cLower = selectedCuisine.toLowerCase().trim();
-      result = result.filter(r => String(r.cuisine || '').toLowerCase().includes(cLower));
-    }
+    // 3. Multi-Category Advanced Filters Evaluation
+    result = result.filter(r => evaluateRestaurantFilters(r, filters, currentLocation));
 
-    // 5. Price Filter
-    if (selectedPrice !== 'all') {
-      result = result.filter(r => r.priceRange === selectedPrice);
-    }
-
-    // 6. Quick Toggles
-    if (showVegOnly) {
-      result = result.filter(r => r.vegOptions === true || String(r.cuisine || '').toLowerCase().includes('veg'));
-    }
-    if (showOpenNow) {
-      result = result.filter(r => r.openNow === true);
-    }
-    if (showTopRated) {
-      result = result.filter(r => typeof r.rating === 'number' && r.rating >= 4.0);
-    }
-
-    // 7. Sorting
-    if (sortBy === 'rating') {
-      result.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-    } else if (sortBy === 'name') {
-      result.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
-    } else if (sortBy === 'reviews') {
-      result.sort((a, b) => (b.reviewsCount || 0) - (a.reviewsCount || 0));
-    }
+    // 4. Sorting
+    result = sortRestaurants(result, filters.sortBy, currentLocation);
 
     return result;
   }, [
-    restaurantsList, 
+    cityRestaurants, 
     currentLocation, 
     selectedArea, 
     searchQuery, 
-    selectedCuisine, 
-    selectedPrice, 
-    showVegOnly, 
-    showOpenNow, 
-    showTopRated, 
-    sortBy
+    filters
   ]);
 
-  console.log('[Explore] rendering with', filteredRestaurants.length, 'filtered restaurants (total in state:', restaurantsList.length, ')');
-
   // Count of active filters for drawer badge
-  const activeFiltersCount = useMemo(() => {
-    let count = 0;
-    if (selectedCuisine !== 'All') count++;
+  const totalActiveFilterCount = useMemo(() => {
+    let count = countActiveFilters(filters);
     if (selectedArea !== 'All Areas') count++;
-    if (selectedPrice !== 'all') count++;
-    if (showVegOnly) count++;
-    if (showOpenNow) count++;
-    if (showTopRated) count++;
-    if (sortBy !== 'featured') count++;
     return count;
-  }, [selectedCuisine, selectedArea, selectedPrice, showVegOnly, showOpenNow, showTopRated, sortBy]);
+  }, [filters, selectedArea]);
+
+  // Active filter tags for quick 1-click removal pills
+  const activeTags = useMemo(() => {
+    return getActiveFilterTags(filters, setFilters);
+  }, [filters]);
 
   const clearAllFilters = () => {
-    setSelectedCuisine('All');
+    setFilters(INITIAL_FILTER_STATE);
     setSelectedArea('All Areas');
-    setSelectedPrice('all');
-    setShowVegOnly(false);
-    setShowOpenNow(false);
-    setShowTopRated(false);
-    setSortBy('featured');
     setSearchQuery('');
     setSearchParams({});
     toast.success('All filters reset');
@@ -462,7 +450,7 @@ const DiscoverPageInner: React.FC = () => {
   const currentCityName = currentLocation?.city || 'Hyderabad';
 
   return (
-    <div className="w-full min-h-[60vh] space-y-6 text-left max-w-6xl mx-auto pb-20 select-none">
+    <div className="w-full min-h-[60vh] space-y-6 text-left max-w-6xl mx-auto pb-24 select-none">
       
       {/* 1. Header Bar: Title, Contextual Location Badge & Search Bar */}
       <div className="bg-white border border-[#F3E8DF] rounded-3xl p-6 md:p-8 shadow-xs space-y-6">
@@ -549,17 +537,17 @@ const DiscoverPageInner: React.FC = () => {
               </div>
             )}
 
-            {/* Filter Drawer Button */}
+            {/* Advanced Filters Button */}
             <button
               type="button"
-              onClick={() => setIsFilterDrawerOpen(true)}
+              onClick={() => setIsFilterModalOpen(true)}
               className="px-4 py-3 bg-[#FCFAF7] border border-[#F3E8DF] hover:border-[#C85A3F]/50 text-xs font-bold text-[#202124] rounded-2xl transition-all flex items-center gap-2 shadow-2xs cursor-pointer relative shrink-0"
             >
               <SlidersHorizontal className="w-4 h-4 text-[#C85A3F]" />
-              <span className="hidden sm:inline">Filters</span>
-              {activeFiltersCount > 0 && (
+              <span>Filters</span>
+              {totalActiveFilterCount > 0 && (
                 <span className="w-5 h-5 bg-[#C85A3F] text-white text-[10px] font-extrabold rounded-full flex items-center justify-center">
-                  {activeFiltersCount}
+                  {totalActiveFilterCount}
                 </span>
               )}
             </button>
@@ -572,24 +560,39 @@ const DiscoverPageInner: React.FC = () => {
             <span className="font-extrabold uppercase tracking-wider text-[#756B64] text-[11px]">
               Cuisines
             </span>
-            {selectedCuisine !== 'All' && (
+            {filters.cuisines.length > 0 && (
               <button 
                 type="button"
-                onClick={() => setSelectedCuisine('All')}
+                onClick={() => setFilters(prev => ({ ...prev, cuisines: [] }))}
                 className="text-[#C85A3F] font-bold hover:underline cursor-pointer text-[11px]"
               >
-                Reset Cuisine
+                Clear Cuisines ({filters.cuisines.length})
               </button>
             )}
           </div>
           <div className="flex space-x-2 overflow-x-auto pb-1 scrollbar-none">
             {availableCuisines.map((c) => {
-              const isSelected = selectedCuisine.toLowerCase() === c.toLowerCase();
+              const isAll = c.toLowerCase() === 'all';
+              const isSelected = isAll 
+                ? filters.cuisines.length === 0 
+                : filters.cuisines.some(x => x.toLowerCase() === c.toLowerCase());
               return (
                 <button
                   type="button"
                   key={c}
-                  onClick={() => setSelectedCuisine(c)}
+                  onClick={() => {
+                    if (isAll) {
+                      setFilters(prev => ({ ...prev, cuisines: [] }));
+                    } else {
+                      setFilters(prev => {
+                        const exists = prev.cuisines.some(x => x.toLowerCase() === c.toLowerCase());
+                        const updated = exists 
+                          ? prev.cuisines.filter(x => x.toLowerCase() !== c.toLowerCase()) 
+                          : [...prev.cuisines, c];
+                        return { ...prev, cuisines: updated };
+                      });
+                    }
+                  }}
                   className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition-all border shrink-0 cursor-pointer ${
                     isSelected
                       ? 'bg-[#C85A3F] border-[#C85A3F] text-white shadow-xs'
@@ -605,37 +608,59 @@ const DiscoverPageInner: React.FC = () => {
 
         {/* 3. Quick Feature Toggles Bar */}
         <div className="flex flex-wrap items-center gap-2 pt-1">
+          {/* Open Now Toggle */}
           <button
             type="button"
-            onClick={() => setShowOpenNow(prev => !prev)}
+            onClick={() => {
+              const isCurrentlyActive = filters.operatingHours.includes('open_now');
+              setFilters(prev => ({
+                ...prev,
+                operatingHours: isCurrentlyActive 
+                  ? prev.operatingHours.filter(h => h !== 'open_now') 
+                  : [...prev.operatingHours, 'open_now']
+              }));
+            }}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
-              showOpenNow 
+              filters.operatingHours.includes('open_now')
                 ? 'bg-[#2E8B57]/10 border-[#2E8B57] text-[#2E8B57]' 
                 : 'bg-[#FCFAF7] border-[#F3E8DF] text-[#756B64] hover:border-[#C85A3F]/40 hover:text-[#202124]'
             }`}
           >
-            <span className={`w-2 h-2 rounded-full ${showOpenNow ? 'bg-[#2E8B57]' : 'bg-[#756B64]'}`} />
+            <span className={`w-2 h-2 rounded-full ${filters.operatingHours.includes('open_now') ? 'bg-[#2E8B57]' : 'bg-[#756B64]'}`} />
             Open Now
           </button>
 
+          {/* Top Rated (4.0+) Toggle */}
           <button
             type="button"
-            onClick={() => setShowTopRated(prev => !prev)}
+            onClick={() => {
+              setFilters(prev => ({
+                ...prev,
+                minRating: prev.minRating === 4.0 ? null : 4.0
+              }));
+            }}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
-              showTopRated 
+              filters.minRating === 4.0 
                 ? 'bg-[#C85A3F]/10 border-[#C85A3F] text-[#C85A3F]' 
                 : 'bg-[#FCFAF7] border-[#F3E8DF] text-[#756B64] hover:border-[#C85A3F]/40 hover:text-[#202124]'
             }`}
           >
-            <Star className={`w-3.5 h-3.5 ${showTopRated ? 'text-[#C85A3F] fill-current' : 'text-[#756B64]'}`} />
+            <Star className={`w-3.5 h-3.5 ${filters.minRating === 4.0 ? 'text-[#C85A3F] fill-current' : 'text-[#756B64]'}`} />
             Top Rated (4.0+)
           </button>
 
+          {/* Pure Vegetarian Toggle */}
           <button
             type="button"
-            onClick={() => setShowVegOnly(prev => !prev)}
+            onClick={() => {
+              const isVeg = filters.dietary.includes('pure_veg');
+              setFilters(prev => ({
+                ...prev,
+                dietary: isVeg ? prev.dietary.filter(d => d !== 'pure_veg') : [...prev.dietary, 'pure_veg']
+              }));
+            }}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
-              showVegOnly 
+              filters.dietary.includes('pure_veg')
                 ? 'bg-[#2E8B57]/10 border-[#2E8B57] text-[#2E8B57]' 
                 : 'bg-[#FCFAF7] border-[#F3E8DF] text-[#756B64] hover:border-[#C85A3F]/40 hover:text-[#202124]'
             }`}
@@ -643,7 +668,27 @@ const DiscoverPageInner: React.FC = () => {
             🌱 Vegetarian
           </button>
 
-          {activeFiltersCount > 0 && (
+          {/* Offers Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              const hasOfferFilter = filters.offers.length > 0;
+              setFilters(prev => ({
+                ...prev,
+                offers: hasOfferFilter ? [] : ['10_percent']
+              }));
+            }}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
+              filters.offers.length > 0
+                ? 'bg-[#C85A3F]/10 border-[#C85A3F] text-[#C85A3F]' 
+                : 'bg-[#FCFAF7] border-[#F3E8DF] text-[#756B64] hover:border-[#C85A3F]/40 hover:text-[#202124]'
+            }`}
+          >
+            <Tag className="w-3.5 h-3.5" />
+            Special Offers
+          </button>
+
+          {totalActiveFilterCount > 0 && (
             <button
               type="button"
               onClick={clearAllFilters}
@@ -653,9 +698,41 @@ const DiscoverPageInner: React.FC = () => {
             </button>
           )}
         </div>
+
+        {/* 4. Active Filter Tags Pill Bar (Clickable Removals) */}
+        {activeTags.length > 0 && (
+          <div className="pt-2 border-t border-[#F3E8DF] space-y-1.5">
+            <div className="flex items-center justify-between text-xs text-[#756B64]">
+              <span className="font-extrabold uppercase text-[10px] tracking-wider">
+                Applied Filters ({activeTags.length})
+              </span>
+              <button
+                type="button"
+                onClick={clearAllFilters}
+                className="text-[11px] font-bold text-[#C85A3F] hover:underline cursor-pointer"
+              >
+                Clear All
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {activeTags.map((tag) => (
+                <button
+                  type="button"
+                  key={tag.id}
+                  onClick={tag.onRemove}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#FCFAF7] border border-[#E5DCD5] hover:border-[#C85A3F] text-[#202124] text-xs font-bold transition-all group shadow-2xs cursor-pointer"
+                  title="Remove this filter"
+                >
+                  <span>{tag.label}</span>
+                  <X className="w-3 h-3 text-[#756B64] group-hover:text-[#C85A3F] transition-colors" />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* 4. Results Header: Count & Sort */}
+      {/* 5. Results Header: Count & Sort */}
       <div className="flex justify-between items-center px-1">
         <div>
           <h2 className="text-sm md:text-base font-extrabold text-[#202124] tracking-tight">
@@ -673,19 +750,23 @@ const DiscoverPageInner: React.FC = () => {
         <div className="flex items-center gap-1.5">
           <ArrowUpDown className="w-3.5 h-3.5 text-[#756B64]" />
           <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as any)}
+            value={filters.sortBy}
+            onChange={(e) => setFilters(prev => ({ ...prev, sortBy: e.target.value as SortOption }))}
             className="bg-white border border-[#F3E8DF] text-xs font-bold text-[#202124] rounded-xl px-2.5 py-1.5 outline-none cursor-pointer hover:border-[#C85A3F]/50 transition-colors shadow-2xs"
           >
-            <option value="featured">Featured First</option>
-            <option value="rating">Top Rated</option>
-            <option value="name">Name (A-Z)</option>
-            <option value="reviews">Most Reviewed</option>
+            <option value="relevance">Relevance / Featured</option>
+            <option value="rating_desc">Rating: High to Low</option>
+            <option value="rating_asc">Rating: Low to High</option>
+            <option value="cost_asc">Cost: Low to High</option>
+            <option value="cost_desc">Cost: High to Low</option>
+            {currentLocation?.latitude && (
+              <option value="distance">Distance: Near to Far</option>
+            )}
           </select>
         </div>
       </div>
 
-      {/* 5. Main Content: Loading, Error, Empty State, or Restaurant Grid */}
+      {/* 6. Main Content: Loading, Error, Empty State, or Restaurant Grid */}
       {isLoading && restaurantsList.length === 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[1, 2, 3, 4, 5, 6].map((n) => (
@@ -724,7 +805,7 @@ const DiscoverPageInner: React.FC = () => {
           <div className="space-y-1">
             <h3 className="text-base font-extrabold text-[#202124]">No restaurants found</h3>
             <p className="text-xs text-[#756B64] max-w-md mx-auto">
-              Try adjusting your search terms, switching to another cuisine, or clearing your active filters.
+              No dining venues match your current combination of filters. Try broadening your cuisine selection, adjusting your price range, or resetting filters.
             </p>
           </div>
           <div className="flex items-center justify-center gap-3 pt-2">
@@ -750,6 +831,20 @@ const DiscoverPageInner: React.FC = () => {
             const isFav = favourites.includes(r.id);
             const hasValidRating = typeof r.rating === 'number' && !isNaN(r.rating);
             const hasValidReviews = typeof r.reviewsCount === 'number' && !isNaN(r.reviewsCount) && r.reviewsCount > 0;
+            const costAmount = estimateCostForTwo(r);
+
+            // Distance calculation
+            let distanceFormatted: string | null = null;
+            if (currentLocation?.latitude && currentLocation?.longitude && r.latitude && r.longitude) {
+              const km = calculateHaversineDistanceKm(
+                currentLocation.latitude,
+                currentLocation.longitude,
+                r.latitude,
+                r.longitude
+              );
+              distanceFormatted = `${km} km`;
+            }
+
             return (
               <div
                 key={r.id}
@@ -764,7 +859,6 @@ const DiscoverPageInner: React.FC = () => {
                       alt={r.name} 
                       className="h-full w-full object-cover group-hover:scale-103 transition-transform duration-300"
                       onError={(e) => {
-                        // Safe fallback on broken image link
                         (e.target as HTMLElement).style.display = 'none';
                       }}
                     />
@@ -784,7 +878,7 @@ const DiscoverPageInner: React.FC = () => {
                     {hasValidRating ? (
                       <div className="bg-white/95 backdrop-blur-xs px-2.5 py-1 rounded-full border border-[#E5DCD5] text-[10.5px] text-[#202124] flex items-center gap-1 font-extrabold shadow-xs pointer-events-auto">
                         <Star className="w-3.5 h-3.5 text-[#F4B942] fill-current" />
-                        <span>{r.rating.toFixed(1)}</span>
+                        <span>{r.rating!.toFixed(1)}</span>
                         {hasValidReviews && (
                           <span className="text-[#756B64] font-medium text-[9.5px]">({r.reviewsCount})</span>
                         )}
@@ -803,8 +897,8 @@ const DiscoverPageInner: React.FC = () => {
                     </button>
                   </div>
 
-                  {/* Status Badge: Open Now */}
-                  <div className="absolute bottom-3 left-3 pointer-events-none">
+                  {/* Status Badge: Open Now & Offers */}
+                  <div className="absolute bottom-3 left-3 flex items-center gap-1.5 pointer-events-none">
                     {r.openNow ? (
                       <Badge className="bg-[#2E8B57] text-white border-0 text-[9.5px] font-extrabold px-2 py-0.5 shadow-xs">
                         Open Now
@@ -812,6 +906,13 @@ const DiscoverPageInner: React.FC = () => {
                     ) : (
                       <Badge className="bg-[#756B64] text-white border-0 text-[9.5px] font-extrabold px-2 py-0.5 shadow-xs">
                         Closed
+                      </Badge>
+                    )}
+
+                    {r.hasOffer && (
+                      <Badge className="bg-[#C85A3F] text-white border-0 text-[9.5px] font-extrabold px-2 py-0.5 shadow-xs flex items-center gap-1">
+                        <Tag className="w-2.5 h-2.5" />
+                        Offer
                       </Badge>
                     )}
                   </div>
@@ -828,7 +929,7 @@ const DiscoverPageInner: React.FC = () => {
                     </p>
                   </div>
 
-                  {/* Locality & Pricing */}
+                  {/* Locality, Pricing & Distance */}
                   <div className="flex items-center justify-between text-xs text-[#756B64] pt-2 border-t border-[#F3E8DF]">
                     <div className="flex items-center gap-1 truncate max-w-[170px]" title={`${r.area || ''}, ${r.city}`}>
                       <MapPin className="w-3.5 h-3.5 text-[#C85A3F] shrink-0" />
@@ -836,11 +937,14 @@ const DiscoverPageInner: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {r.priceRange && (
-                        <span className="text-[10px] font-extrabold bg-[#F3E8DF] text-[#202124] px-2 py-0.5 rounded-md">
-                          {r.priceRange}
+                      {distanceFormatted && (
+                        <span className="text-[10px] font-bold text-[#2E8B57] bg-[#2E8B57]/10 px-1.5 py-0.5 rounded">
+                          {distanceFormatted}
                         </span>
                       )}
+                      <span className="text-[10px] font-extrabold bg-[#F3E8DF] text-[#202124] px-2 py-0.5 rounded-md">
+                        ₹{costAmount} for two
+                      </span>
                     </div>
                   </div>
 
@@ -876,131 +980,22 @@ const DiscoverPageInner: React.FC = () => {
         </div>
       )}
 
-      {/* 6. Filter Drawer (Advanced Filters) */}
-      {isFilterDrawerOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div 
-            className="absolute inset-0 bg-[#202124]/40 backdrop-blur-xs transition-opacity" 
-            onClick={() => setIsFilterDrawerOpen(false)} 
-          />
-          <div className="relative w-84 max-w-full bg-white border-l border-[#F3E8DF] h-full p-6 flex flex-col justify-between shadow-2xl z-10 text-xs overflow-y-auto">
-            <div className="space-y-6">
-              <div className="flex justify-between items-center pb-3 border-b border-[#F3E8DF]">
-                <div className="flex items-center gap-2">
-                  <SlidersHorizontal className="w-4 h-4 text-[#C85A3F]" />
-                  <span className="text-xs text-[#202124] font-extrabold uppercase tracking-wider">
-                    Filter Options
-                  </span>
-                </div>
-                <button 
-                  type="button"
-                  onClick={() => setIsFilterDrawerOpen(false)} 
-                  className="p-1 hover:bg-[#F3E8DF] rounded-xl text-[#756B64] cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Price Range */}
-              <div className="space-y-2">
-                <label className="text-[11px] text-[#756B64] font-extrabold uppercase block">
-                  Price Range
-                </label>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {['all', '₹', '₹₹', '₹₹₹'].map((pr) => (
-                    <button
-                      key={pr}
-                      type="button"
-                      onClick={() => setSelectedPrice(pr)}
-                      className={`py-2 border text-[11px] font-extrabold rounded-xl transition-all text-center uppercase cursor-pointer ${
-                        selectedPrice === pr 
-                          ? 'bg-[#C85A3F] border-[#C85A3F] text-white shadow-xs' 
-                          : 'bg-[#FCFAF7] border-[#F3E8DF] text-[#202124] hover:border-[#C85A3F]/50'
-                      }`}
-                    >
-                      {pr === 'all' ? 'All' : pr}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Dietary Selection */}
-              <div className="space-y-2">
-                <label className="text-[11px] text-[#756B64] font-extrabold uppercase block">
-                  Dietary & Operating Status
-                </label>
-                <div className="space-y-2.5 font-bold text-[#202124]">
-                  <label className="flex items-center justify-between p-2.5 bg-[#FCFAF7] border border-[#F3E8DF] rounded-xl cursor-pointer">
-                    <span className="text-xs">Vegetarian Options</span>
-                    <input 
-                      type="checkbox" 
-                      checked={showVegOnly} 
-                      onChange={(e) => setShowVegOnly(e.target.checked)}
-                      className="rounded accent-[#C85A3F] w-4 h-4 cursor-pointer" 
-                    />
-                  </label>
-                  <label className="flex items-center justify-between p-2.5 bg-[#FCFAF7] border border-[#F3E8DF] rounded-xl cursor-pointer">
-                    <span className="text-xs">Open Now Only</span>
-                    <input 
-                      type="checkbox" 
-                      checked={showOpenNow} 
-                      onChange={(e) => setShowOpenNow(e.target.checked)}
-                      className="rounded accent-[#C85A3F] w-4 h-4 cursor-pointer" 
-                    />
-                  </label>
-                  <label className="flex items-center justify-between p-2.5 bg-[#FCFAF7] border border-[#F3E8DF] rounded-xl cursor-pointer">
-                    <span className="text-xs">Top Rated (4.0+ Stars)</span>
-                    <input 
-                      type="checkbox" 
-                      checked={showTopRated} 
-                      onChange={(e) => setShowTopRated(e.target.checked)}
-                      className="rounded accent-[#C85A3F] w-4 h-4 cursor-pointer" 
-                    />
-                  </label>
-                </div>
-              </div>
-
-              {/* Area selector in drawer */}
-              {availableAreas.length > 1 && (
-                <div className="space-y-2">
-                  <label className="text-[11px] text-[#756B64] font-extrabold uppercase block">
-                    Area / Locality ({currentCityName})
-                  </label>
-                  <select
-                    value={selectedArea}
-                    onChange={(e) => setSelectedArea(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-[#FCFAF7] border border-[#F3E8DF] rounded-xl text-xs font-bold text-[#202124] outline-none cursor-pointer"
-                  >
-                    {availableAreas.map(area => (
-                      <option key={area} value={area}>{area}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-
-            {/* Bottom Drawer Actions */}
-            <div className="pt-6 border-t border-[#F3E8DF] space-y-2">
-              <button
-                type="button"
-                onClick={() => setIsFilterDrawerOpen(false)}
-                className="w-full bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold py-3 rounded-2xl text-xs transition-all shadow-xs cursor-pointer"
-              >
-                Apply Filters ({filteredRestaurants.length} Venues)
-              </button>
-              {activeFiltersCount > 0 && (
-                <button
-                  type="button"
-                  onClick={clearAllFilters}
-                  className="w-full bg-[#FCFAF7] hover:bg-[#F3E8DF] text-[#756B64] font-bold py-2.5 rounded-2xl text-xs transition-all cursor-pointer"
-                >
-                  Reset All Filters
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 7. Advanced Restaurant Discovery Filter Modal */}
+      <RestaurantFilterModal
+        isOpen={isFilterModalOpen}
+        onClose={() => setIsFilterModalOpen(false)}
+        filters={filters}
+        onApply={(updatedFilters) => setFilters(updatedFilters)}
+        onReset={() => {
+          setFilters(INITIAL_FILTER_STATE);
+          setSelectedArea('All Areas');
+          setSearchQuery('');
+        }}
+        allRestaurants={cityRestaurants}
+        availableCuisines={availableCuisines}
+        userLocation={currentLocation}
+        onOpenLocationModal={openLocationModal}
+      />
 
     </div>
   );
