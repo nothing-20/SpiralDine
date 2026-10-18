@@ -296,17 +296,17 @@ export const OwnerPromotions: React.FC = () => {
     <div className="space-y-6 text-left max-w-7xl mx-auto pb-16">
       
       {/* 1. Header Bar */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-3xl border border-[#F3E8DF] shadow-xs">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-3xl border border-[#D8DDD6] shadow-xs">
         <div>
-          <div className="flex items-center gap-2.5">
-            <div className="p-2.5 bg-[#F3E8DF] text-[#C85A3F] rounded-2xl">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-[#FAF8F4] text-[#D94F2B] border border-[#D8DDD6] rounded-2xl">
               <Gift className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-2xl font-extrabold text-[#202124] tracking-tight">
-                Offers & Promotions
+              <h1 className="text-2xl font-extrabold text-[#202820] tracking-tight">
+                Offers &amp; Promotions
               </h1>
-              <p className="text-xs text-[#756B64] font-medium">
+              <p className="text-xs text-[#5F675F] font-medium mt-0.5">
                 Create, monitor, and manage automated discounts, coupons, BOGO deals, and homepage banners.
               </p>
             </div>
@@ -316,7 +316,7 @@ export const OwnerPromotions: React.FC = () => {
         <div className="flex items-center gap-2">
           <Button
             onClick={handleOpenCreate}
-            className="bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold text-xs px-4 py-2.5 rounded-2xl flex items-center gap-2 shadow-xs cursor-pointer"
+            className="bg-[#D94F2B] hover:bg-[#C2411F] text-white font-extrabold text-xs px-4 py-2.5 rounded-2xl flex items-center gap-2 shadow-xs cursor-pointer focus:ring-2 focus:ring-[#D94F2B]/20 focus:outline-none transition-all"
           >
             <Plus className="w-4 h-4" />
             <span>Create Offer</span>
@@ -326,53 +326,53 @@ export const OwnerPromotions: React.FC = () => {
 
       {/* 2. KPI Metrics Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-        <div className="bg-white p-4 rounded-2xl border border-[#F3E8DF] shadow-2xs space-y-1">
-          <span className="text-[11px] font-bold text-[#756B64] uppercase tracking-wider block">Total Offers</span>
-          <div className="text-xl font-extrabold text-[#202124]">{summary.total}</div>
-          <span className="text-[10px] text-[#756B64]">All campaigns</span>
+        <div className="bg-white p-4 rounded-2xl border border-[#D8DDD6] shadow-2xs space-y-1">
+          <span className="text-[11px] font-bold text-[#5F675F] uppercase tracking-wider block">Total Offers</span>
+          <div className="text-xl font-extrabold text-[#202820]">{summary.total}</div>
+          <span className="text-[10px] text-[#5F675F]">All campaigns</span>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-emerald-200 bg-emerald-50/20 shadow-2xs space-y-1">
-          <span className="text-[11px] font-bold text-emerald-800 uppercase tracking-wider block">Active Now</span>
-          <div className="text-xl font-extrabold text-emerald-700">{summary.active}</div>
-          <span className="text-[10px] text-emerald-600 font-medium">Live on customer app</span>
+        <div className="bg-white p-4 rounded-2xl border border-[#A6E1C4] bg-[#E8F5EE]/40 shadow-2xs space-y-1">
+          <span className="text-[11px] font-bold text-[#167647] uppercase tracking-wider block">Active Now</span>
+          <div className="text-xl font-extrabold text-[#167647]">{summary.active}</div>
+          <span className="text-[10px] text-[#167647] font-semibold">Live on customer app</span>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-blue-200 bg-blue-50/20 shadow-2xs space-y-1">
-          <span className="text-[11px] font-bold text-blue-800 uppercase tracking-wider block">Scheduled</span>
-          <div className="text-xl font-extrabold text-blue-700">{summary.scheduled}</div>
-          <span className="text-[10px] text-blue-600 font-medium">Upcoming validity</span>
+        <div className="bg-white p-4 rounded-2xl border border-[#B2DDFF] bg-[#EFF8FF]/40 shadow-2xs space-y-1">
+          <span className="text-[11px] font-bold text-[#175CD3] uppercase tracking-wider block">Scheduled</span>
+          <div className="text-xl font-extrabold text-[#175CD3]">{summary.scheduled}</div>
+          <span className="text-[10px] text-[#175CD3] font-semibold">Upcoming validity</span>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-[#F3E8DF] shadow-2xs space-y-1">
-          <span className="text-[11px] font-bold text-[#756B64] uppercase tracking-wider block">Drafts</span>
-          <div className="text-xl font-extrabold text-[#202124]">{summary.draft}</div>
-          <span className="text-[10px] text-[#756B64]">Unpublished</span>
+        <div className="bg-white p-4 rounded-2xl border border-[#D8DDD6] shadow-2xs space-y-1">
+          <span className="text-[11px] font-bold text-[#5F675F] uppercase tracking-wider block">Drafts</span>
+          <div className="text-xl font-extrabold text-[#202820]">{summary.draft}</div>
+          <span className="text-[10px] text-[#5F675F]">Unpublished</span>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-[#F3E8DF] shadow-2xs space-y-1">
-          <span className="text-[11px] font-bold text-[#756B64] uppercase tracking-wider block">Redemptions</span>
-          <div className="text-xl font-extrabold text-[#C85A3F]">{summary.totalRedemptions}</div>
-          <span className="text-[10px] text-[#756B64]">Orders converted</span>
+        <div className="bg-white p-4 rounded-2xl border border-[#D8DDD6] shadow-2xs space-y-1">
+          <span className="text-[11px] font-bold text-[#5F675F] uppercase tracking-wider block">Redemptions</span>
+          <div className="text-xl font-extrabold text-[#D94F2B]">{summary.totalRedemptions}</div>
+          <span className="text-[10px] text-[#5F675F]">Orders converted</span>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl border border-[#F3E8DF] shadow-2xs space-y-1">
-          <span className="text-[11px] font-bold text-[#756B64] uppercase tracking-wider block">Attributed Sales</span>
-          <div className="text-xl font-extrabold text-[#202124]">₹{summary.totalRevenue.toLocaleString()}</div>
-          <span className="text-[10px] text-emerald-600 font-medium">Promoted GMV</span>
+        <div className="bg-white p-4 rounded-2xl border border-[#D8DDD6] shadow-2xs space-y-1">
+          <span className="text-[11px] font-bold text-[#5F675F] uppercase tracking-wider block">Attributed Sales</span>
+          <div className="text-xl font-extrabold text-[#202820]">₹{summary.totalRevenue.toLocaleString()}</div>
+          <span className="text-[10px] text-[#167647] font-semibold">Promoted GMV</span>
         </div>
       </div>
 
       {/* 3. Search and Filtering Bar */}
-      <div className="bg-white p-4 rounded-2xl border border-[#F3E8DF] shadow-2xs flex flex-col md:flex-row items-center justify-between gap-3">
+      <div className="bg-white p-4 rounded-2xl border border-[#D8DDD6] shadow-2xs flex flex-col md:flex-row items-center justify-between gap-3">
         <div className="relative flex-1 w-full">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#756B64]" />
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#747C74]" />
           <input
             type="text"
             placeholder="Search promotions by name, description, or coupon code..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-[#FCFAF7] border border-[#F3E8DF] rounded-xl text-xs font-semibold text-[#202124] placeholder-[#756B64] outline-none focus:border-[#C85A3F]"
+            className="w-full pl-10 pr-4 py-2 bg-white border border-[#D8DDD6] rounded-xl text-xs font-semibold text-[#202820] placeholder-[#747C74] outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all"
           />
         </div>
 
@@ -380,7 +380,7 @@ export const OwnerPromotions: React.FC = () => {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 bg-[#FCFAF7] border border-[#F3E8DF] rounded-xl text-xs font-bold text-[#202124] outline-none cursor-pointer"
+            className="px-3 py-2 bg-white border border-[#D8DDD6] rounded-xl text-xs font-bold text-[#202820] outline-none cursor-pointer focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all"
           >
             <option value="all">All Statuses</option>
             <option value="active">Active Only</option>
@@ -392,7 +392,7 @@ export const OwnerPromotions: React.FC = () => {
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
-            className="px-3 py-2 bg-[#FCFAF7] border border-[#F3E8DF] rounded-xl text-xs font-bold text-[#202124] outline-none cursor-pointer"
+            className="px-3 py-2 bg-white border border-[#D8DDD6] rounded-xl text-xs font-bold text-[#202820] outline-none cursor-pointer focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all"
           >
             <option value="all">All Types</option>
             <option value="percentage">Percentage Off</option>
@@ -408,16 +408,16 @@ export const OwnerPromotions: React.FC = () => {
 
       {/* 4. Promotions Table / List */}
       {isLoading ? (
-        <div className="bg-white p-12 rounded-3xl border border-[#F3E8DF] text-center">
+        <div className="bg-white p-12 rounded-3xl border border-[#D8DDD6] text-center shadow-2xs">
           <LoadingSpinner />
         </div>
       ) : filteredPromotions.length === 0 ? (
-        <div className="bg-white p-12 rounded-3xl border border-[#F3E8DF] text-center space-y-3">
-          <div className="w-12 h-12 rounded-2xl bg-[#F3E8DF] text-[#C85A3F] flex items-center justify-center mx-auto">
+        <div className="bg-white p-12 rounded-3xl border border-[#D8DDD6] text-center space-y-3 shadow-2xs">
+          <div className="w-12 h-12 rounded-2xl bg-[#FAF8F4] text-[#D94F2B] border border-[#D8DDD6] flex items-center justify-center mx-auto">
             <Tag className="w-6 h-6" />
           </div>
-          <h3 className="text-base font-extrabold text-[#202124]">No promotions found</h3>
-          <p className="text-xs text-[#756B64] max-w-sm mx-auto">
+          <h3 className="text-base font-extrabold text-[#202820]">No promotions found</h3>
+          <p className="text-xs text-[#5F675F] max-w-sm mx-auto">
             {promotions.length === 0 
               ? 'Get started by creating your first restaurant promotion or coupon discount to drive customer orders.'
               : 'No promotions match your current search query or filter.'}
@@ -425,55 +425,55 @@ export const OwnerPromotions: React.FC = () => {
           {promotions.length === 0 && (
             <Button
               onClick={handleOpenCreate}
-              className="bg-[#C85A3F] text-white text-xs font-extrabold px-4 py-2 rounded-xl"
+              className="bg-[#D94F2B] hover:bg-[#C2411F] text-white text-xs font-extrabold px-4 py-2 rounded-xl shadow-xs transition-all cursor-pointer"
             >
               Create First Offer
             </Button>
           )}
         </div>
       ) : (
-        <div className="bg-white rounded-3xl border border-[#F3E8DF] overflow-hidden shadow-2xs">
+        <div className="bg-white rounded-3xl border border-[#D8DDD6] overflow-hidden shadow-2xs">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-[#FCFAF7] border-b border-[#F3E8DF] text-[#756B64] uppercase text-[10px] font-extrabold tracking-wider">
+              <thead className="bg-[#FAF8F4] border-b border-[#D8DDD6] text-[#5F675F] uppercase text-[10px] font-extrabold tracking-wider">
                 <tr>
                   <th className="py-3 px-4">Offer Details</th>
-                  <th className="py-3 px-4">Type & Value</th>
+                  <th className="py-3 px-4">Type &amp; Value</th>
                   <th className="py-3 px-4">Validity</th>
                   <th className="py-3 px-4">Redemptions</th>
                   <th className="py-3 px-4">Status</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#F3E8DF]">
+              <tbody className="divide-y divide-[#D8DDD6]">
                 {filteredPromotions.map((p) => {
                   const isActive = isPromotionActive(p);
                   return (
-                    <tr key={p.id} className="hover:bg-[#FCFAF7]/50 transition-colors">
+                    <tr key={p.id} className="hover:bg-[#FAF8F4]/70 transition-colors">
                       <td className="py-3.5 px-4">
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
-                            <span className="font-extrabold text-[#202124] text-sm">
+                            <span className="font-extrabold text-[#202820] text-sm">
                               {p.name}
                             </span>
                             {p.badgeText && (
-                              <Badge className="bg-[#C85A3F]/10 text-[#C85A3F] border-0 text-[10px] font-extrabold px-2 py-0.5">
+                              <Badge className="bg-[#D94F2B]/10 text-[#D94F2B] border border-[#D94F2B]/20 text-[10px] font-extrabold px-2 py-0.5 rounded-md">
                                 {p.badgeText}
                               </Badge>
                             )}
                           </div>
                           {p.description && (
-                            <p className="text-xs text-[#756B64] line-clamp-1">
+                            <p className="text-xs text-[#5F675F] line-clamp-1">
                               {p.description}
                             </p>
                           )}
                           {p.code && (
-                            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[#F3E8DF] text-[#202124] font-mono font-bold text-[10px]">
+                            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[#FAF8F4] border border-[#D8DDD6] text-[#202820] font-mono font-bold text-[10px]">
                               <span>CODE: {p.code}</span>
                               <button
                                 type="button"
                                 onClick={() => copyToClipboard(p.code!)}
-                                className="text-[#756B64] hover:text-[#C85A3F] cursor-pointer"
+                                className="text-[#5F675F] hover:text-[#D94F2B] cursor-pointer"
                                 title="Copy promo code"
                               >
                                 <Copy className="w-3 h-3" />
@@ -484,7 +484,7 @@ export const OwnerPromotions: React.FC = () => {
                       </td>
 
                       <td className="py-3.5 px-4 font-bold text-[#202124]">
-                        <div>
+                        <div className="text-[#202820]">
                           {p.type === 'percentage' && `${p.value}% OFF`}
                           {p.type === 'fixed_amount' && `₹${p.value} FLAT OFF`}
                           {p.type === 'bogo' && 'BUY 1 GET 1'}
@@ -495,32 +495,32 @@ export const OwnerPromotions: React.FC = () => {
                           {p.type === 'restaurant_wide' && `${p.value}% Store-Wide`}
                         </div>
                         {p.minOrderValue && (
-                          <div className="text-[10px] text-[#756B64] font-normal">
+                          <div className="text-[10px] text-[#5F675F] font-normal">
                             Min Order: ₹{p.minOrderValue}
                           </div>
                         )}
                         {p.maxDiscountAmount && (
-                          <div className="text-[10px] text-[#756B64] font-normal">
+                          <div className="text-[10px] text-[#5F675F] font-normal">
                             Max Cap: ₹{p.maxDiscountAmount}
                           </div>
                         )}
                       </td>
 
-                      <td className="py-3.5 px-4 text-[#756B64] text-[11px] font-medium">
-                        <div className="flex items-center gap-1">
-                          <Calendar className="w-3 h-3 text-[#C85A3F]" />
+                      <td className="py-3.5 px-4 text-[#5F675F] text-[11px] font-medium">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-[#D94F2B]" />
                           <span>{new Date(p.startDate).toLocaleDateString()} — {new Date(p.endDate).toLocaleDateString()}</span>
                         </div>
                       </td>
 
-                      <td className="py-3.5 px-4 font-bold text-[#202124]">
+                      <td className="py-3.5 px-4 font-bold text-[#202820]">
                         <div>{p.redemptionCount || 0} used</div>
                         {p.globalUsageLimit ? (
-                          <div className="text-[10px] text-[#756B64] font-normal">
+                          <div className="text-[10px] text-[#5F675F] font-normal">
                             Limit: {p.globalUsageLimit}
                           </div>
                         ) : (
-                          <div className="text-[10px] text-[#756B64] font-normal">
+                          <div className="text-[10px] text-[#5F675F] font-normal">
                             Unlimited
                           </div>
                         )}
@@ -528,19 +528,19 @@ export const OwnerPromotions: React.FC = () => {
 
                       <td className="py-3.5 px-4">
                         {isActive ? (
-                          <Badge className="bg-emerald-100 text-emerald-800 border-0 text-[10px] font-extrabold px-2 py-0.5">
+                          <Badge className="bg-[#E8F5EE] text-[#167647] border border-[#A6E1C4] text-[10px] font-extrabold px-2.5 py-0.5 rounded-full">
                             Active
                           </Badge>
                         ) : p.status === 'paused' ? (
-                          <Badge className="bg-amber-100 text-amber-800 border-0 text-[10px] font-extrabold px-2 py-0.5">
+                          <Badge className="bg-[#FEF3D6] text-[#8A5700] border border-[#FDE68A] text-[10px] font-extrabold px-2.5 py-0.5 rounded-full">
                             Paused
                           </Badge>
                         ) : p.status === 'draft' ? (
-                          <Badge className="bg-slate-100 text-slate-700 border-0 text-[10px] font-extrabold px-2 py-0.5">
+                          <Badge className="bg-[#F0F2F0] text-[#5F675F] border border-[#D8DDD6] text-[10px] font-extrabold px-2.5 py-0.5 rounded-full">
                             Draft
                           </Badge>
                         ) : (
-                          <Badge className="bg-rose-100 text-rose-800 border-0 text-[10px] font-extrabold px-2 py-0.5">
+                          <Badge className="bg-[#FEE4E2] text-[#B42318] border border-[#FECDCA] text-[10px] font-extrabold px-2.5 py-0.5 rounded-full">
                             Expired
                           </Badge>
                         )}
@@ -551,7 +551,7 @@ export const OwnerPromotions: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setPreviewPromo(p)}
-                            className="p-1.5 text-[#756B64] hover:text-[#202124] hover:bg-[#F3E8DF] rounded-lg transition-colors cursor-pointer"
+                            className="p-1.5 text-[#5F675F] hover:text-[#202820] hover:bg-[#FAF8F4] border border-transparent hover:border-[#D8DDD6] rounded-lg transition-colors cursor-pointer"
                             title="Preview customer view"
                           >
                             <Eye className="w-4 h-4" />
@@ -560,10 +560,10 @@ export const OwnerPromotions: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleToggleStatus(p)}
-                            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                            className={`p-1.5 rounded-lg border border-transparent transition-colors cursor-pointer ${
                               p.status === 'active' 
-                                ? 'text-amber-700 hover:bg-amber-50' 
-                                : 'text-emerald-700 hover:bg-emerald-50'
+                                ? 'text-[#8A5700] hover:bg-[#FEF3D6] hover:border-[#FDE68A]' 
+                                : 'text-[#167647] hover:bg-[#E8F5EE] hover:border-[#A6E1C4]'
                             }`}
                             title={p.status === 'active' ? 'Pause Offer' : 'Resume Offer'}
                           >
@@ -573,7 +573,7 @@ export const OwnerPromotions: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleOpenEdit(p)}
-                            className="p-1.5 text-[#756B64] hover:text-[#202124] hover:bg-[#F3E8DF] rounded-lg transition-colors cursor-pointer"
+                            className="p-1.5 text-[#5F675F] hover:text-[#202820] hover:bg-[#FAF8F4] border border-transparent hover:border-[#D8DDD6] rounded-lg transition-colors cursor-pointer"
                             title="Edit offer"
                           >
                             <Edit3 className="w-4 h-4" />
@@ -582,7 +582,7 @@ export const OwnerPromotions: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleDuplicate(p)}
-                            className="p-1.5 text-[#756B64] hover:text-[#202124] hover:bg-[#F3E8DF] rounded-lg transition-colors cursor-pointer"
+                            className="p-1.5 text-[#5F675F] hover:text-[#202820] hover:bg-[#FAF8F4] border border-transparent hover:border-[#D8DDD6] rounded-lg transition-colors cursor-pointer"
                             title="Duplicate offer"
                           >
                             <Copy className="w-4 h-4" />
@@ -591,7 +591,7 @@ export const OwnerPromotions: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setDeleteConfirmPromo(p)}
-                            className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            className="p-1.5 text-[#B42318] hover:bg-[#FEE4E2] border border-transparent hover:border-[#FECDCA] rounded-lg transition-colors cursor-pointer"
                             title="Delete offer"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -613,34 +613,42 @@ export const OwnerPromotions: React.FC = () => {
           isOpen={isFormOpen}
           onClose={() => setIsFormOpen(false)}
           title={isEditing ? 'Edit Promotion' : 'Create New Promotion'}
+          variant="light"
+          size="2xl"
         >
           <form onSubmit={handleSaveForm} className="space-y-4 text-xs">
             <div className="space-y-1">
-              <label className="font-extrabold text-[#202124] block">Offer Title *</label>
+              <label className="font-bold text-[#202820] block text-xs">
+                Offer Title <span className="text-[#B42318] font-bold">*</span>
+              </label>
               <input
                 type="text"
                 placeholder="e.g. Weekend Biryani Feast, Festive 20% Off"
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
                 required
-                className="w-full px-3 py-2 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl font-semibold outline-none focus:border-[#C85A3F]"
+                className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-semibold text-[#202820] placeholder-[#747C74] outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"
               />
             </div>
 
             <div className="space-y-1">
-              <label className="font-extrabold text-[#202124] block">Description & Terms</label>
+              <label className="font-bold text-[#202820] block text-xs">
+                Description &amp; Terms
+              </label>
               <textarea
                 placeholder="Explain the offer conditions to diners (e.g. Valid on all main course items above ₹499)..."
                 value={formDescription}
                 onChange={(e) => setFormDescription(e.target.value)}
                 rows={2}
-                className="w-full px-3 py-2 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl font-medium outline-none focus:border-[#C85A3F]"
+                className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-medium text-[#202820] placeholder-[#747C74] outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="font-extrabold text-[#202124] block">Offer Type *</label>
+                <label className="font-bold text-[#202820] block text-xs">
+                  Offer Type <span className="text-[#B42318] font-bold">*</span>
+                </label>
                 <select
                   value={formType}
                   onChange={(e) => {
@@ -650,7 +658,7 @@ export const OwnerPromotions: React.FC = () => {
                     else if (t === 'bogo') setFormBadgeText('BUY 1 GET 1');
                     else if (t === 'fixed_amount') setFormBadgeText('FLAT ₹100 OFF');
                   }}
-                  className="w-full px-3 py-2 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl font-bold outline-none cursor-pointer"
+                  className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] outline-none cursor-pointer focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"
                 >
                   <option value="percentage">Percentage Discount (%)</option>
                   <option value="fixed_amount">Fixed Amount Discount (₹)</option>
@@ -663,8 +671,8 @@ export const OwnerPromotions: React.FC = () => {
               </div>
 
               <div className="space-y-1">
-                <label className="font-extrabold text-[#202124] block">
-                  {formType === 'percentage' || formType === 'coupon_code' ? 'Discount Percentage (%) *' : 'Discount Amount (₹) *'}
+                <label className="font-bold text-[#202820] block text-xs">
+                  {formType === 'percentage' || formType === 'coupon_code' ? 'Discount Percentage (%)' : 'Discount Amount (₹)'} <span className="text-[#B42318] font-bold">*</span>
                 </label>
                 <input
                   type="number"
@@ -673,31 +681,31 @@ export const OwnerPromotions: React.FC = () => {
                   value={formValue}
                   onChange={(e) => setFormValue(Number(e.target.value))}
                   required
-                  className="w-full px-3 py-2 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl font-bold outline-none focus:border-[#C85A3F]"
+                  className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] placeholder-[#747C74] outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="font-extrabold text-[#202124] block">Coupon Code (Optional)</label>
+                <label className="font-bold text-[#202820] block text-xs">Coupon Code (Optional)</label>
                 <input
                   type="text"
                   placeholder="e.g. BIRYANI20 (Auto-capitalized)"
                   value={formCode}
                   onChange={(e) => setFormCode(e.target.value.toUpperCase())}
-                  className="w-full px-3 py-2 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl font-mono font-bold outline-none focus:border-[#C85A3F]"
+                  className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-mono font-bold text-[#202820] placeholder-[#747C74] outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs uppercase"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="font-extrabold text-[#202124] block">Badge Text</label>
+                <label className="font-bold text-[#202820] block text-xs">Badge Text</label>
                 <input
                   type="text"
                   placeholder="e.g. 20% OFF, BOGO, CHEF SPECIAL"
                   value={formBadgeText}
                   onChange={(e) => setFormBadgeText(e.target.value)}
-                  className="w-full px-3 py-2 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl font-bold outline-none focus:border-[#C85A3F]"
+                  className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] placeholder-[#747C74] outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"
                 />
               </div>
             </div>
@@ -705,26 +713,26 @@ export const OwnerPromotions: React.FC = () => {
             {/* Thresholds & Caps */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="font-extrabold text-[#202124] block">Minimum Order Subtotal (₹)</label>
+                <label className="font-bold text-[#202820] block text-xs">Minimum Order Subtotal (₹)</label>
                 <input
                   type="number"
                   min={0}
                   placeholder="e.g. 499 (optional)"
                   value={formMinOrderValue}
                   onChange={(e) => setFormMinOrderValue(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="w-full px-3 py-2 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl font-bold outline-none focus:border-[#C85A3F]"
+                  className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] placeholder-[#747C74] outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="font-extrabold text-[#202124] block">Maximum Discount Cap (₹)</label>
+                <label className="font-bold text-[#202820] block text-xs">Maximum Discount Cap (₹)</label>
                 <input
                   type="number"
                   min={0}
                   placeholder="e.g. 150 (optional cap on % discounts)"
                   value={formMaxDiscount}
                   onChange={(e) => setFormMaxDiscount(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="w-full px-3 py-2 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl font-bold outline-none focus:border-[#C85A3F]"
+                  className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] placeholder-[#747C74] outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"
                 />
               </div>
             </div>
@@ -732,24 +740,28 @@ export const OwnerPromotions: React.FC = () => {
             {/* Validity Dates */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="font-extrabold text-[#202124] block">Start Date *</label>
+                <label className="font-bold text-[#202820] block text-xs">
+                  Start Date <span className="text-[#B42318] font-bold">*</span>
+                </label>
                 <input
                   type="date"
                   value={formStartDate}
                   onChange={(e) => setFormStartDate(e.target.value)}
                   required
-                  className="w-full px-3 py-2 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl font-bold outline-none cursor-pointer"
+                  className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] outline-none cursor-pointer focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"
                 />
               </div>
 
               <div className="space-y-1">
-                <label className="font-extrabold text-[#202124] block">End Date *</label>
+                <label className="font-bold text-[#202820] block text-xs">
+                  End Date <span className="text-[#B42318] font-bold">*</span>
+                </label>
                 <input
                   type="date"
                   value={formEndDate}
                   onChange={(e) => setFormEndDate(e.target.value)}
                   required
-                  className="w-full px-3 py-2 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl font-bold outline-none cursor-pointer"
+                  className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] outline-none cursor-pointer focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"
                 />
               </div>
             </div>
@@ -757,8 +769,8 @@ export const OwnerPromotions: React.FC = () => {
             {/* Category / Item multi-select if applicable */}
             {categories.length > 0 && (formType === 'category_specific' || formType === 'restaurant_wide') && (
               <div className="space-y-1.5">
-                <label className="font-extrabold text-[#202124] block">Eligible Categories</label>
-                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl">
+                <label className="font-bold text-[#202820] block text-xs">Eligible Categories</label>
+                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-2.5 bg-[#FAF8F4] border border-[#D8DDD6] rounded-xl">
                   {categories.map(c => {
                     const isSelected = formApplicableCategories.includes(c.name);
                     return (
@@ -772,8 +784,8 @@ export const OwnerPromotions: React.FC = () => {
                         }}
                         className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all border cursor-pointer ${
                           isSelected
-                            ? 'bg-[#C85A3F] border-[#C85A3F] text-white'
-                            : 'bg-white border-[#E5DCD5] text-[#202124] hover:border-[#C85A3F]/50'
+                            ? 'bg-[#D94F2B] border-[#D94F2B] text-white shadow-xs'
+                            : 'bg-white border-[#D8DDD6] text-[#202820] hover:border-[#D94F2B]/60 hover:bg-white'
                         }`}
                       >
                         {c.name}
@@ -786,8 +798,8 @@ export const OwnerPromotions: React.FC = () => {
 
             {/* Placements */}
             <div className="space-y-1.5">
-              <label className="font-extrabold text-[#202124] block">Display Placements</label>
-              <div className="grid grid-cols-2 gap-2">
+              <label className="font-bold text-[#202820] block text-xs">Display Placements</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
                   { id: 'restaurant_menu' as PromotionPlacement, label: 'Restaurant Menu Banner' },
                   { id: 'cart_suggestion' as PromotionPlacement, label: 'Cart 1-Click Coupon Tray' },
@@ -796,7 +808,7 @@ export const OwnerPromotions: React.FC = () => {
                 ].map(item => {
                   const isChecked = formPlacements.includes(item.id);
                   return (
-                    <label key={item.id} className="flex items-center gap-2 p-2 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl cursor-pointer">
+                    <label key={item.id} className="flex items-center gap-2.5 p-2.5 bg-white border border-[#D8DDD6] hover:border-[#D94F2B]/50 rounded-xl cursor-pointer transition-all">
                       <input
                         type="checkbox"
                         checked={isChecked}
@@ -805,9 +817,9 @@ export const OwnerPromotions: React.FC = () => {
                             prev.includes(item.id) ? prev.filter(x => x !== item.id) : [...prev, item.id]
                           );
                         }}
-                        className="accent-[#C85A3F] w-3.5 h-3.5 rounded cursor-pointer"
+                        className="accent-[#D94F2B] w-4 h-4 rounded cursor-pointer"
                       />
-                      <span className="text-[11px] font-bold text-[#202124]">{item.label}</span>
+                      <span className="text-xs font-semibold text-[#202820]">{item.label}</span>
                     </label>
                   );
                 })}
@@ -816,25 +828,25 @@ export const OwnerPromotions: React.FC = () => {
 
             {/* Stacking & Status */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-              <label className="flex items-center gap-2 p-2.5 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl cursor-pointer">
+              <label className="flex items-center gap-2.5 p-2.5 bg-white border border-[#D8DDD6] hover:border-[#D94F2B]/50 rounded-xl cursor-pointer transition-all">
                 <input
                   type="checkbox"
                   checked={formAllowStacking}
                   onChange={(e) => setFormAllowStacking(e.target.checked)}
-                  className="accent-[#C85A3F] w-4 h-4 rounded cursor-pointer"
+                  className="accent-[#D94F2B] w-4 h-4 rounded cursor-pointer"
                 />
                 <div>
-                  <span className="font-bold text-[#202124] block">Allow Coupon Stacking</span>
-                  <span className="text-[10px] text-[#756B64]">Can be combined with other offers</span>
+                  <span className="font-bold text-[#202820] block text-xs">Allow Coupon Stacking</span>
+                  <span className="text-[10px] text-[#5F675F]">Can be combined with other offers</span>
                 </div>
               </label>
 
               <div className="space-y-1">
-                <label className="font-extrabold text-[#202124] block">Initial Status</label>
+                <label className="font-bold text-[#202820] block text-xs">Initial Status</label>
                 <select
                   value={formStatus}
                   onChange={(e) => setFormStatus(e.target.value as PromotionStatus)}
-                  className="w-full px-3 py-2 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl font-bold outline-none cursor-pointer"
+                  className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] outline-none cursor-pointer focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"
                 >
                   <option value="active">Active (Live immediately)</option>
                   <option value="draft">Draft (Private)</option>
@@ -844,22 +856,21 @@ export const OwnerPromotions: React.FC = () => {
               </div>
             </div>
 
-            <div className="pt-3 border-t border-[#F3E8DF] flex justify-end gap-2">
-              <Button
+            <div className="pt-4 border-t border-[#D8DDD6] flex justify-end gap-2.5">
+              <button
                 type="button"
-                variant="outline"
                 onClick={() => setIsFormOpen(false)}
-                className="text-xs font-bold"
+                className="px-4 py-2 border border-[#D8DDD6] bg-white text-[#202820] hover:bg-[#FAF8F4] font-bold rounded-xl text-xs transition-all cursor-pointer"
               >
                 Cancel
-              </Button>
-              <Button
+              </button>
+              <button
                 type="submit"
                 disabled={isSaving}
-                className="bg-[#C85A3F] hover:bg-[#A94332] text-white text-xs font-extrabold px-5 rounded-xl shadow-xs"
+                className="bg-[#D94F2B] hover:bg-[#C2411F] text-white text-xs font-extrabold px-5 py-2 rounded-xl shadow-xs transition-all cursor-pointer focus:ring-2 focus:ring-[#D94F2B]/20 focus:outline-none disabled:opacity-50"
               >
                 {isSaving ? 'Saving...' : isEditing ? 'Save Changes' : 'Publish Offer'}
-              </Button>
+              </button>
             </div>
           </form>
         </Modal>
@@ -871,27 +882,29 @@ export const OwnerPromotions: React.FC = () => {
           isOpen={Boolean(previewPromo)}
           onClose={() => setPreviewPromo(null)}
           title="Customer View Preview"
+          variant="light"
+          size="xl"
         >
           <div className="space-y-5 text-left text-xs">
-            <p className="text-[#756B64] font-medium text-[11px]">
+            <p className="text-[#5F675F] font-medium text-xs">
               Here is how diners will see and experience this promotion across the customer portal.
             </p>
 
             {/* Preview: Customer Home Carousel Card */}
             <div className="space-y-1.5">
-              <span className="font-extrabold uppercase text-[10px] text-[#756B64] tracking-wider block">
+              <span className="font-extrabold uppercase text-[10px] text-[#5F675F] tracking-wider block">
                 1. Customer Home Carousel Preview
               </span>
-              <div className="bg-gradient-to-r from-[#202124] to-[#3a221d] rounded-2xl p-4 text-white shadow-md relative overflow-hidden">
+              <div className="bg-gradient-to-r from-[#202820] to-[#3a221d] rounded-2xl p-4 text-white shadow-md relative overflow-hidden border border-[#D8DDD6]">
                 <div className="space-y-1 max-w-sm">
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#C85A3F] text-white text-[10px] font-extrabold">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#D94F2B] text-white text-[10px] font-extrabold">
                     <Sparkles className="w-3 h-3" />
                     <span>{previewPromo.badgeText || 'SPECIAL OFFER'}</span>
                   </div>
                   <h4 className="text-base font-extrabold tracking-tight">
                     {previewPromo.name}
                   </h4>
-                  <p className="text-xs text-white/80 line-clamp-2">
+                  <p className="text-xs text-white/90 line-clamp-2">
                     {previewPromo.description || `Get ${previewPromo.value}% off your meal order!`}
                   </p>
                   {previewPromo.code && (
@@ -907,26 +920,26 @@ export const OwnerPromotions: React.FC = () => {
 
             {/* Preview: Restaurant Menu Promotional Banner */}
             <div className="space-y-1.5">
-              <span className="font-extrabold uppercase text-[10px] text-[#756B64] tracking-wider block">
+              <span className="font-extrabold uppercase text-[10px] text-[#5F675F] tracking-wider block">
                 2. Restaurant Menu Header Banner Preview
               </span>
-              <div className="bg-[#FCFAF7] border border-[#C85A3F]/30 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-2xs">
+              <div className="bg-[#FAF8F4] border border-[#D94F2B]/30 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-2xs">
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-[#F3E8DF] text-[#C85A3F] flex items-center justify-center shrink-0">
+                  <div className="w-9 h-9 rounded-xl bg-white border border-[#D8DDD6] text-[#D94F2B] flex items-center justify-center shrink-0">
                     <Tag className="w-4 h-4" />
                   </div>
                   <div className="space-y-0.5">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-extrabold text-[#202124]">
+                      <span className="text-xs font-extrabold text-[#202820]">
                         {previewPromo.name}
                       </span>
                       {previewPromo.code && (
-                        <span className="text-[10px] font-mono font-extrabold bg-[#C85A3F]/10 text-[#C85A3F] px-1.5 py-0.5 rounded">
+                        <span className="text-[10px] font-mono font-extrabold bg-[#D94F2B]/10 text-[#D94F2B] border border-[#D94F2B]/20 px-1.5 py-0.5 rounded">
                           {previewPromo.code}
                         </span>
                       )}
                     </div>
-                    <p className="text-[11px] text-[#756B64] font-medium">
+                    <p className="text-[11px] text-[#5F675F] font-medium">
                       {previewPromo.description || 'Applicable on verified dining orders'}
                     </p>
                   </div>
@@ -936,7 +949,7 @@ export const OwnerPromotions: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => copyToClipboard(previewPromo.code!)}
-                    className="px-3 py-1.5 bg-[#C85A3F] hover:bg-[#A94332] text-white text-[11px] font-extrabold rounded-xl transition-all shadow-xs shrink-0 cursor-pointer"
+                    className="px-3 py-1.5 bg-[#D94F2B] hover:bg-[#C2411F] text-white text-[11px] font-extrabold rounded-xl transition-all shadow-xs shrink-0 cursor-pointer"
                   >
                     Copy Code
                   </button>
@@ -946,40 +959,40 @@ export const OwnerPromotions: React.FC = () => {
 
             {/* Preview: Food Card Pricing */}
             <div className="space-y-1.5">
-              <span className="font-extrabold uppercase text-[10px] text-[#756B64] tracking-wider block">
+              <span className="font-extrabold uppercase text-[10px] text-[#5F675F] tracking-wider block">
                 3. Food Card Discount Preview
               </span>
-              <div className="bg-white border border-[#E5DCD5] rounded-2xl p-3 flex items-center justify-between gap-3 shadow-2xs max-w-sm">
+              <div className="bg-white border border-[#D8DDD6] rounded-2xl p-3 flex items-center justify-between gap-3 shadow-2xs max-w-sm">
                 <div>
                   <div className="flex items-center gap-1.5">
-                    <span className="font-extrabold text-xs text-[#202124]">Special Chicken Biryani</span>
-                    <Badge className="bg-[#C85A3F] text-white text-[9px] px-1.5 py-0.5 font-extrabold">
+                    <span className="font-extrabold text-xs text-[#202820]">Special Chicken Biryani</span>
+                    <Badge className="bg-[#D94F2B] text-white text-[9px] px-1.5 py-0.5 font-extrabold">
                       {previewPromo.badgeText || `${previewPromo.value}% OFF`}
                     </Badge>
                   </div>
                   <div className="flex items-center gap-2 pt-1">
-                    <span className="text-xs font-extrabold text-[#202124]">
+                    <span className="text-xs font-extrabold text-[#202820]">
                       ₹{Math.round(300 * (1 - (previewPromo.value || 20) / 100))}
                     </span>
-                    <span className="text-[11px] text-[#756B64] line-through">
+                    <span className="text-[11px] text-[#5F675F] line-through">
                       ₹300
                     </span>
                   </div>
                 </div>
-                <div className="px-3 py-1.5 bg-[#F3E8DF] text-[#C85A3F] font-extrabold text-xs rounded-xl">
+                <div className="px-3 py-1.5 bg-[#FAF8F4] border border-[#D8DDD6] text-[#D94F2B] font-extrabold text-xs rounded-xl">
                   ADD +
                 </div>
               </div>
             </div>
 
-            <div className="pt-2 flex justify-end">
-              <Button
-                variant="outline"
+            <div className="pt-3 border-t border-[#D8DDD6] flex justify-end">
+              <button
+                type="button"
                 onClick={() => setPreviewPromo(null)}
-                className="text-xs font-bold"
+                className="px-4 py-2 border border-[#D8DDD6] bg-white text-[#202820] hover:bg-[#FAF8F4] font-bold rounded-xl text-xs transition-all cursor-pointer"
               >
                 Close Preview
-              </Button>
+              </button>
             </div>
           </div>
         </Modal>
@@ -995,6 +1008,7 @@ export const OwnerPromotions: React.FC = () => {
           onConfirm={handleDelete}
           confirmLabel="Delete Offer"
           isDangerous={true}
+          variant="light"
         />
       )}
 

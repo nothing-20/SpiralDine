@@ -71,7 +71,10 @@ export const Modal: React.FC<IModalProps> = ({
     <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 md:p-6 overflow-hidden">
       {/* Background Overlay */}
       <div 
-        className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm transition-opacity" 
+        className={cn(
+          "fixed inset-0 transition-opacity",
+          isLight ? "bg-[rgba(20,25,22,0.55)] backdrop-blur-xs" : "bg-slate-950/70 backdrop-blur-sm"
+        )}
         onClick={onClose} 
       />
 
@@ -83,7 +86,7 @@ export const Modal: React.FC<IModalProps> = ({
         className={cn(
           "w-full shadow-2xl relative z-10 flex flex-col max-h-[min(90vh,860px)] animate-in fade-in zoom-in-95 duration-200 overflow-hidden",
           isLight
-            ? "bg-white border border-[#E5E0D9] rounded-3xl text-[#17202A]"
+            ? "bg-white border border-[#D8DDD6] rounded-3xl text-[#202820]"
             : "bg-slate-900 border border-slate-800 backdrop-blur-md rounded-2xl text-slate-100",
           sizeClasses[size] || 'max-w-lg',
           className
@@ -94,12 +97,12 @@ export const Modal: React.FC<IModalProps> = ({
           <div className={cn(
             "flex items-center justify-between px-5 sm:px-6 py-4 shrink-0",
             isLight
-              ? "border-b border-[#F0EBE4] bg-[#FCFAF7]"
+              ? "border-b border-[#D8DDD6] bg-[#FAF8F4]"
               : "border-b border-slate-800/60"
           )}>
             <h3 id="modal-dialog-title" className={cn(
               "font-display font-extrabold text-base sm:text-lg pr-3",
-              isLight ? "text-[#17202A]" : "text-textPearl"
+              isLight ? "text-[#202820]" : "text-textPearl"
             )}>
               {title || 'Dialog'}
             </h3>
@@ -109,7 +112,7 @@ export const Modal: React.FC<IModalProps> = ({
               className={cn(
                 "w-9 h-9 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl transition-all cursor-pointer",
                 isLight 
-                  ? "text-[#7B8794] hover:text-[#17202A] hover:bg-[#F3E8DF]/60" 
+                  ? "text-[#5F675F] hover:text-[#202820] hover:bg-[#F3E8DF]/60" 
                   : "text-mutedAsh hover:text-textPearl hover:bg-slate-800/80"
               )}
               aria-label={closeAriaLabel}
@@ -122,7 +125,7 @@ export const Modal: React.FC<IModalProps> = ({
         {/* Scrollable Content Body */}
         <div className={cn(
           "flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-5 overscroll-contain",
-          isLight ? "text-[#17202A]" : "text-sm text-slate-300",
+          isLight ? "text-[#202820] bg-white" : "text-sm text-slate-300",
           contentClassName
         )}>
           {children}
@@ -133,7 +136,7 @@ export const Modal: React.FC<IModalProps> = ({
           <div className={cn(
             "flex items-center justify-end px-5 sm:px-6 py-3.5 shrink-0",
             isLight
-              ? "border-t border-[#F0EBE4] bg-[#FCFAF7]"
+              ? "border-t border-[#D8DDD6] bg-[#FAF8F4]"
               : "border-t border-slate-800/60 bg-slate-900/50"
           )}>
             {footer}

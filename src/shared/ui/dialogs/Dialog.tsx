@@ -12,6 +12,7 @@ export interface IDialogProps {
   confirmLabel?: string;
   cancelLabel?: string;
   isDangerous?: boolean;
+  variant?: 'dark' | 'light';
 }
 
 export const Dialog: React.FC<IDialogProps> = ({
@@ -22,33 +23,50 @@ export const Dialog: React.FC<IDialogProps> = ({
   message = 'This action cannot be undone and will modify the system settings.',
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
-  isDangerous = false
+  isDangerous = false,
+  variant = 'light'
 }) => {
   if (!isOpen) return null;
+
+  const isLight = variant === 'light';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Background Overlay */}
       <div 
-        className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm transition-opacity" 
+        className={cn(
+          "fixed inset-0 transition-opacity",
+          isLight ? "bg-[rgba(20,25,22,0.55)] backdrop-blur-xs" : "bg-slate-950/70 backdrop-blur-sm"
+        )}
         onClick={onClose} 
       />
 
       {/* Dialog box frame */}
-      <div className="w-full max-w-sm bg-slate-900 border border-slate-800 backdrop-blur-md shadow-2xl rounded-2xl relative z-10 flex flex-col p-6 text-center animate-in fade-in zoom-in-95 duration-200">
+      <div className={cn(
+        "w-full max-w-sm shadow-2xl rounded-3xl relative z-10 flex flex-col p-6 text-center animate-in fade-in zoom-in-95 duration-200",
+        isLight
+          ? "bg-white border border-[#D8DDD6] text-[#202820]"
+          : "bg-slate-900 border border-slate-800 backdrop-blur-md text-slate-100"
+      )}>
         <div className={cn(
-          "w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-4 border",
+          "w-12 h-12 rounded-2xl flex items-center justify-center mx-auto mb-3.5 border",
           isDangerous 
-            ? "bg-red-500/10 border-red-500/20 text-red-500" 
-            : "bg-amber-500/10 border-amber-500/20 text-amber-500"
+            ? (isLight ? "bg-[#FEE4E2] border-[#FECDCA] text-[#B42318]" : "bg-red-500/10 border-red-500/20 text-red-500")
+            : (isLight ? "bg-[#FEF3D6] border-[#FDE68A] text-[#8A5700]" : "bg-amber-500/10 border-amber-500/20 text-amber-500")
         )}>
           <AlertTriangle className="w-5 h-5" />
         </div>
 
-        <h3 className="font-display font-bold text-base text-textPearl mb-1">
+        <h3 className={cn(
+          "font-display font-extrabold text-base mb-1.5",
+          isLight ? "text-[#202820]" : "text-textPearl"
+        )}>
           {title}
         </h3>
-        <p className="text-xs text-mutedAsh mb-6">
+        <p className={cn(
+          "text-xs leading-relaxed mb-6 font-medium",
+          isLight ? "text-[#5F675F]" : "text-mutedAsh"
+        )}>
           {message}
         </p>
 
@@ -56,7 +74,10 @@ export const Dialog: React.FC<IDialogProps> = ({
           <Button 
             variant="secondary" 
             size="sm" 
-            className="flex-1" 
+            className={cn(
+              "flex-1 font-bold rounded-xl",
+              isLight && "border border-[#D8DDD6] bg-white text-[#202820] hover:bg-[#FAF8F4]"
+            )}
             onClick={onClose}
           >
             {cancelLabel}
@@ -64,7 +85,12 @@ export const Dialog: React.FC<IDialogProps> = ({
           <Button 
             variant={isDangerous ? 'danger' : 'primary'} 
             size="sm" 
-            className="flex-1" 
+            className={cn(
+              "flex-1 font-extrabold rounded-xl",
+              isDangerous 
+                ? "bg-[#B42318] hover:bg-[#912018] text-white" 
+                : "bg-[#D94F2B] hover:bg-[#C2411F] text-white"
+            )}
             onClick={() => {
               onConfirm();
               onClose();
