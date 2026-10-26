@@ -174,6 +174,11 @@ export const OwnerInventoryManager: React.FC = () => {
   const [movementCustomEnd, setMovementCustomEnd] = useState('');
   const [selectedMovement, setSelectedMovement] = useState<IStockMovement | null>(null);
 
+  // Quick PO Creation from Ingredients List State
+  const [selectedIngredientIds, setSelectedIngredientIds] = useState<string[]>([]);
+  const [poPrefillIngredients, setPoPrefillIngredients] = useState<IStockIngredient[]>([]);
+  const [initialCreateOpen, setInitialCreateOpen] = useState(false);
+
   // Categories definition
   const categories = [
     { value: 'all', label: 'All Categories' },
@@ -531,6 +536,39 @@ export const OwnerInventoryManager: React.FC = () => {
       return true;
     });
   }, [movements, movementFilter, movementCustomStart, movementCustomEnd]);
+
+  // Quick PO Creation Selection Handlers
+  const handleToggleSelectIngredient = (id: string) => {
+    setSelectedIngredientIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAllVisible = () => {
+    const visibleIds = filteredIngredients.map(i => i.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIngredientIds.includes(id));
+    if (allSelected) {
+      setSelectedIngredientIds(prev => prev.filter(id => !visibleIds.includes(id)));
+    } else {
+      setSelectedIngredientIds(prev => Array.from(new Set([...prev, ...visibleIds])));
+    }
+  };
+
+  const handleQuickCreatePo = (singleIngredient?: IStockIngredient) => {
+    let itemsToOrder: IStockIngredient[] = [];
+    if (singleIngredient) {
+      itemsToOrder = [singleIngredient];
+    } else if (selectedIngredientIds.length > 0) {
+      itemsToOrder = ingredients.filter(i => selectedIngredientIds.includes(i.id));
+    } else {
+      toast.error('Please select at least one ingredient using the checkboxes to create a purchase order.');
+      return;
+    }
+
+    setPoPrefillIngredients(itemsToOrder);
+    setInitialCreateOpen(true);
+    setActiveTab('purchase-orders');
+  };
 
   // Add / Edit Ingredient logic
   const handleOpenAddIngredient = () => {
@@ -1379,20 +1417,34 @@ export const OwnerInventoryManager: React.FC = () => {
       {activeTab === 'ingredients' && (
         <div className="space-y-6">
           <Card className="p-4 border-slate-850 bg-slate-900/20">
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1">
-                <SearchBar 
-                  placeholder="Search ingredient list..." 
-                  value={searchQuery}
-                  onSearchChange={setSearchQuery}
-                />
+            <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between">
+              <div className="flex-1 flex flex-col md:flex-row gap-4">
+                <div className="flex-1">
+                  <SearchBar 
+                    placeholder="Search ingredient list..." 
+                    value={searchQuery}
+                    onSearchChange={setSearchQuery}
+                  />
+                </div>
+                <div className="w-full md:w-56">
+                  <Select 
+                    options={categories}
+                    value={categoryFilter}
+                    onChange={(e) => setCategoryFilter(e.target.value)}
+                  />
+                </div>
               </div>
-              <div className="w-full md:w-56">
-                <Select 
-                  options={categories}
-                  value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
-                />
+              <div className="flex items-center gap-2 shrink-0">
+                <Button 
+                  onClick={() => handleQuickCreatePo()} 
+                  disabled={filteredIngredients.length === 0}
+                  className="bg-[#16845B] hover:bg-[#126B49] text-white flex items-center gap-1.5 text-xs font-bold py-2 px-3 whitespace-nowrap shadow-sm"
+                >
+                  <ShoppingCart className="w-4 h-4" />
+                  <span>
+                    Create Purchase Order {selectedIngredientIds.length > 0 ? `(${selectedIngredientIds.length})` : ''}
+                  </span>
+                </Button>
               </div>
             </div>
           </Card>
@@ -1420,6 +1472,41 @@ export const OwnerInventoryManager: React.FC = () => {
                 keyExtractor={(row: IStockIngredient) => row.id} 
                 data={filteredIngredients}
                 columns={[
+                  {
+                    header: (() => {
+                      const visibleIds = filteredIngredients.map(i => i.id);
+                      const isAllChecked = visibleIds.length > 0 && visibleIds.every(id => selectedIngredientIds.includes(id));
+                      const isSomeChecked = visibleIds.some(id => selectedIngredientIds.includes(id));
+
+                      return (
+                        <div className="flex items-center justify-center">
+                          <input
+                            type="checkbox"
+                            aria-label="Select all visible ingredients"
+                            checked={isAllChecked}
+                            ref={el => { if (el) el.indeterminate = !isAllChecked && isSomeChecked; }}
+                            onChange={handleToggleSelectAllVisible}
+                            className="w-4 h-4 rounded border-slate-700 text-[#16845B] focus:ring-[#16845B] cursor-pointer accent-[#16845B]"
+                          />
+                        </div>
+                      );
+                    })(),
+                    className: "w-10 text-center px-2",
+                    accessor: (row: IStockIngredient) => {
+                      const isSelected = selectedIngredientIds.includes(row.id);
+                      return (
+                        <div className="flex items-center justify-center" onClick={e => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${row.name}`}
+                            checked={isSelected}
+                            onChange={() => handleToggleSelectIngredient(row.id)}
+                            className="w-4 h-4 rounded border-slate-700 text-[#16845B] focus:ring-[#16845B] cursor-pointer accent-[#16845B]"
+                          />
+                        </div>
+                      );
+                    }
+                  },
                   {
                     header: 'Ingredient Details',
                     accessor: (row: IStockIngredient) => (
@@ -1474,7 +1561,16 @@ export const OwnerInventoryManager: React.FC = () => {
                   {
                     header: 'Actions',
                     accessor: (row: IStockIngredient) => (
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-1.5">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title={`Create Purchase Order for ${row.name}`}
+                          onClick={() => handleQuickCreatePo(row)}
+                          className="p-1 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                        >
+                          <ShoppingCart className="w-3.5 h-3.5" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1817,6 +1913,12 @@ export const OwnerInventoryManager: React.FC = () => {
           suppliers={suppliers} 
           ingredients={ingredients} 
           onNavigateToSuppliers={() => setActiveTab('suppliers')} 
+          initialSelectedIngredients={poPrefillIngredients}
+          initialCreateOpen={initialCreateOpen}
+          onClearInitialCreate={() => {
+            setInitialCreateOpen(false);
+            setPoPrefillIngredients([]);
+          }}
         />
       )}
 

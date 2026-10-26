@@ -56,12 +56,18 @@ interface PurchaseOrdersTabProps {
   suppliers: ISupplier[];
   ingredients: IStockIngredient[];
   onNavigateToSuppliers?: () => void;
+  initialSelectedIngredients?: IStockIngredient[];
+  initialCreateOpen?: boolean;
+  onClearInitialCreate?: () => void;
 }
 
 export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({ 
   suppliers, 
   ingredients,
-  onNavigateToSuppliers 
+  onNavigateToSuppliers,
+  initialSelectedIngredients,
+  initialCreateOpen,
+  onClearInitialCreate
 }) => {
   const { user } = useAuth();
   const { activeRestaurant } = useRestaurant();
@@ -91,6 +97,11 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
   const [isCancelOpen, setIsCancelOpen] = useState(false);
   const [cancelPo, setCancelPo] = useState<IPurchaseOrder | null>(null);
   const [cancelReason, setCancelReason] = useState('');
+
+  // Cancellation WhatsApp Notification Dialog State
+  const [isCancelNotifyOpen, setIsCancelNotifyOpen] = useState(false);
+  const [cancelNotifyPo, setCancelNotifyPo] = useState<IPurchaseOrder | null>(null);
+  const [copiedNotice, setCopiedNotice] = useState(false);
 
   // Edit Delivery Address Modal State (for fixing legacy/existing PO addresses)
   const [isEditAddressOpen, setIsEditAddressOpen] = useState(false);
@@ -190,6 +201,83 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
       if (updated) setSelectedPo(updated);
     }
   }, [purchaseOrders]);
+
+  // Helper: Calculate suggested replenishment quantity based on current & min stock
+  const calculateSuggestedQuantity = (ing: IStockIngredient): number => {
+    if (ing.currentStock < ing.minimumStock) {
+      // Replenishment buffer: target 2x minimum stock level minus current stock
+      const deficit = (ing.minimumStock * 2) - ing.currentStock;
+      return Math.max(1, Math.round(deficit));
+    }
+    // If healthy or at minimum limit, suggest a standard batch equal to minimumStock or 10
+    return ing.minimumStock > 0 ? ing.minimumStock : 10;
+  };
+
+  // Handle Quick PO prefill from Ingredients List
+  useEffect(() => {
+    if (initialCreateOpen && initialSelectedIngredients && initialSelectedIngredients.length > 0) {
+      // 1. Identify suppliers for the selected ingredients
+      const supplierCounts = new Map<string, number>();
+      initialSelectedIngredients.forEach(ing => {
+        if (ing.supplierId) {
+          supplierCounts.set(ing.supplierId, (supplierCounts.get(ing.supplierId) || 0) + 1);
+        }
+      });
+
+      let candidateSupplierId = '';
+      if (supplierCounts.size > 0) {
+        let maxCount = 0;
+        supplierCounts.forEach((count, supId) => {
+          if (count > maxCount && suppliers.some(s => s.id === supId)) {
+            maxCount = count;
+            candidateSupplierId = supId;
+          }
+        });
+      }
+      if (!candidateSupplierId && suppliers.length > 0) {
+        candidateSupplierId = suppliers[0].id;
+      }
+      if (candidateSupplierId) {
+        setSelectedSupplierId(candidateSupplierId);
+      }
+
+      // 2. Prefill items with suggested quantities and prices
+      const prefilledItems = initialSelectedIngredients.map(item => {
+        const priceRec = supplierPrices.find(sp => 
+          sp.supplierId === (candidateSupplierId || item.supplierId) && sp.ingredientId === item.id
+        );
+        const unitPrice = priceRec ? priceRec.unitPrice : (item.purchaseCost || 100);
+        const suggestedQty = calculateSuggestedQuantity(item);
+
+        return {
+          ingredientId: item.id,
+          ingredientName: item.name,
+          unit: item.unit || 'kg',
+          quantity: suggestedQty,
+          unitPrice,
+          taxRate: 5,
+          notes: item.currentStock <= item.minimumStock ? 'Replenishment order (Low stock)' : 'Standard restock'
+        };
+      });
+
+      setOrderItems(prefilledItems);
+
+      // 3. Set default branch delivery address
+      if (branches.length > 0) {
+        const defaultBranch = branches[0];
+        setSelectedBranchId(defaultBranch.id);
+        setSelectedBranchName(defaultBranch.name);
+        const bAddr = formatAddress(defaultBranch.address);
+        const rAddr = activeRestaurant ? formatAddress(activeRestaurant.address) : '';
+        setDeliveryAddress(bAddr || rAddr || '');
+      } else if (activeRestaurant?.address) {
+        setDeliveryAddress(formatAddress(activeRestaurant.address));
+      }
+
+      setIsCreateOpen(true);
+      onClearInitialCreate?.();
+    }
+  }, [initialCreateOpen, initialSelectedIngredients, suppliers, supplierPrices, branches, activeRestaurant]);
 
   // Summary Metrics
   const metrics = useMemo(() => {
@@ -442,21 +530,64 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
   // Cancel PO
   const handleCancelPo = async () => {
     if (!tenantId || !cancelPo) return;
-    if (!cancelReason.trim()) {
-      toast.error('Please enter a cancellation reason.');
-      return;
-    }
+    const reason = cancelReason.trim();
 
     try {
-      await vendorPurchaseOrderService.cancelPurchaseOrder(tenantId, cancelPo.id, cancelReason.trim(), user);
+      await vendorPurchaseOrderService.cancelPurchaseOrder(tenantId, cancelPo.id, reason, user);
       toast.success(`Purchase Order ${cancelPo.poNumber} cancelled.`);
-      setIsCancelOpen(false);
+
+      const updatedPo: IPurchaseOrder = {
+        ...cancelPo,
+        status: 'CANCELLED',
+        cancelledAt: new Date().toISOString(),
+        cancellationReason: reason,
+        updatedAt: new Date().toISOString()
+      };
+
+      setPurchaseOrders(prev => prev.map(p => p.id === cancelPo.id ? updatedPo : p));
       if (selectedPo?.id === cancelPo.id) {
-        setIsDetailsOpen(false);
+        setSelectedPo(updatedPo);
       }
+
+      setIsCancelOpen(false);
+      // Immediately open supplier cancellation notification modal
+      setCancelNotifyPo(updatedPo);
+      setIsCancelNotifyOpen(true);
     } catch (err: any) {
       toast.error(err.message || 'Failed to cancel order.');
     }
+  };
+
+  // WhatsApp Cancellation Dispatch
+  const handleDispatchCancellationWhatsApp = (po: IPurchaseOrder) => {
+    if (!tenantId) return;
+    const restName = po.restaurantName || activeRestaurant?.name || activeRestaurant?.restaurantName || 'SpiralDine Restaurant';
+    const msg = vendorPurchaseOrderService.formatPoCancellationWhatsAppMessage(po, restName, po.cancellationReason || cancelReason);
+    const phone = (po.supplierPhone || '').replace(/[^0-9]/g, '');
+
+    // Record audit event
+    vendorPurchaseOrderService.recordCancellationNotificationDispatched(tenantId, po.id, 'whatsapp', user);
+
+    const url = phone 
+      ? `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(msg)}`
+      : `https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`;
+
+    window.open(url, '_blank');
+    toast.success('WhatsApp cancellation notice opened. (Does not confirm supplier delivery or acknowledgement).');
+  };
+
+  // Copy Cancellation Notice to Clipboard
+  const handleCopyCancellationNotice = (po: IPurchaseOrder) => {
+    if (!tenantId) return;
+    const restName = po.restaurantName || activeRestaurant?.name || activeRestaurant?.restaurantName || 'SpiralDine Restaurant';
+    const msg = vendorPurchaseOrderService.formatPoCancellationWhatsAppMessage(po, restName, po.cancellationReason || cancelReason);
+
+    navigator.clipboard.writeText(msg);
+    setCopiedNotice(true);
+    setTimeout(() => setCopiedNotice(false), 3000);
+
+    vendorPurchaseOrderService.recordCancellationNotificationDispatched(tenantId, po.id, 'copied', user);
+    toast.success('Cancellation notice copied to clipboard.');
   };
 
   // Edit Delivery Address for Existing PO (allows correcting legacy orders)
@@ -823,6 +954,18 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                         <XCircle className="w-4 h-4" />
                       </button>
                     )}
+
+                    {/* Share Cancellation Notice via WhatsApp if cancelled */}
+                    {row.status === 'CANCELLED' && (
+                      <button
+                        type="button"
+                        title="Share Cancellation Notice via WhatsApp"
+                        onClick={() => { setCancelNotifyPo(row); setIsCancelNotifyOpen(true); }}
+                        className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                      >
+                        <Share2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 )
               }
@@ -879,6 +1022,40 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                 );
               })()}
             </div>
+
+            {/* Supplier Matching Notice for Items */}
+            {orderItems.length > 0 && (() => {
+              const selectedIngs = ingredients.filter(i => orderItems.some(oi => oi.ingredientId === i.id));
+              const differingSuppliers = Array.from(new Set(selectedIngs.map(i => i.supplierName || 'None'))).filter(Boolean);
+              const noSupplierIngs = selectedIngs.filter(i => !i.supplierId && !i.supplierName);
+
+              if (differingSuppliers.length > 1) {
+                return (
+                  <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-950 text-[11px] space-y-1 mt-2">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Multiple Preferred Suppliers ({differingSuppliers.join(', ')})</span>
+                    </div>
+                    <p className="text-[10.5px] text-amber-800 leading-relaxed">
+                      The selected ingredients have different preferred vendors. Because a purchase order binds to a single supplier, please verify that the vendor selected above is appropriate for all items in this order.
+                    </p>
+                  </div>
+                );
+              }
+
+              if (noSupplierIngs.length > 0) {
+                return (
+                  <div className="p-2.5 bg-slate-100 border border-slate-200 rounded-xl text-slate-800 text-[11px] space-y-1 mt-2">
+                    <p className="font-bold text-[10.5px] text-slate-700">Notice:</p>
+                    <p className="text-[10px] text-slate-600 leading-relaxed">
+                      {noSupplierIngs.map(i => i.name).join(', ')} do not have a preferred supplier record. They will be ordered from the vendor chosen above.
+                    </p>
+                  </div>
+                );
+              }
+
+              return null;
+            })()}
           </div>
 
           {/* Section 2: Delivery Destination (Ship To) */}
@@ -1186,21 +1363,33 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                   <Printer className="w-3.5 h-3.5" />
                   <span>Print</span>
                 </Button>
-                <Button 
-                  onClick={() => handleDispatchWhatsApp(selectedPo)} 
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5"
-                >
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  <span>WhatsApp</span>
-                </Button>
-                <Button 
-                  onClick={() => handleDispatchEmail(selectedPo)} 
-                  variant="secondary"
-                  className="text-xs font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5"
-                >
-                  <Mail className="w-3.5 h-3.5" />
-                  <span>Email</span>
-                </Button>
+                {selectedPo.status === 'CANCELLED' ? (
+                  <Button 
+                    onClick={() => { setCancelNotifyPo(selectedPo); setIsCancelNotifyOpen(true); }}
+                    className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>Cancellation Notice</span>
+                  </Button>
+                ) : (
+                  <>
+                    <Button 
+                      onClick={() => handleDispatchWhatsApp(selectedPo)} 
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>WhatsApp</span>
+                    </Button>
+                    <Button 
+                      onClick={() => handleDispatchEmail(selectedPo)} 
+                      variant="secondary"
+                      className="text-xs font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      <span>Email</span>
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
 
@@ -1367,9 +1556,20 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                 </Button>
               )}
 
-              <Button variant="secondary" onClick={() => setIsDetailsOpen(false)}>
-                Close
-              </Button>
+              <div className="flex items-center gap-2">
+                {selectedPo.status !== 'DELIVERED' && selectedPo.status !== 'CANCELLED' && (
+                  <Button 
+                    onClick={() => { setCancelPo(selectedPo); setCancelReason(''); setIsCancelOpen(true); }}
+                    className="bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold"
+                  >
+                    <XCircle className="w-4 h-4 mr-1.5 text-rose-600" />
+                    <span>Cancel Order</span>
+                  </Button>
+                )}
+                <Button variant="secondary" onClick={() => setIsDetailsOpen(false)}>
+                  Close
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -1494,44 +1694,197 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
         )}
       </Modal>
 
-      {/* MODAL 4: CANCEL PURCHASE ORDER */}
+      {/* MODAL 4: CANCEL PURCHASE ORDER CONFIRMATION */}
       <Modal
         isOpen={isCancelOpen}
         onClose={() => setIsCancelOpen(false)}
-        title={cancelPo ? `Cancel Purchase Order ${cancelPo.poNumber}` : 'Cancel Order'}
+        title={cancelPo ? `Cancel Purchase Order: ${cancelPo.poNumber}` : 'Cancel Order'}
         className="max-w-md bg-white"
       >
-        <div className="space-y-4 text-xs text-left">
-          <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800">
-            <p className="font-bold">Are you sure you want to cancel this purchase order?</p>
-            <p className="text-[11px] text-rose-600 mt-1">Note: Any stock already checked in via previous receipts will remain safely in inventory.</p>
-          </div>
+        {cancelPo && (
+          <div className="space-y-4 text-xs text-left">
+            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-950 space-y-1.5">
+              <p className="font-extrabold text-sm text-rose-900">Are you sure you want to cancel this purchase order?</p>
+              <p className="text-[11px] text-rose-800 leading-relaxed">
+                Are you sure you want to cancel this purchase order? This action will update the order status and may affect the supplier's expectations. You can notify the supplier through WhatsApp after cancellation.
+              </p>
+            </div>
 
-          <div>
-            <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Reason for Cancellation *</label>
-            <textarea
-              rows={3}
-              required
-              placeholder="e.g. Supplier out of stock, cancelled by mutual consent."
-              value={cancelReason}
-              onChange={e => setCancelReason(e.target.value)}
-              className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-rose-500"
-            />
-          </div>
+            {/* PO Summary Card */}
+            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
+              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                <span className="font-mono font-extrabold text-slate-900 text-sm">{cancelPo.poNumber}</span>
+                {renderStatusBadge(cancelPo.status)}
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-slate-600 text-[11px]">
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Vendor</span>
+                  <strong className="text-slate-800">{cancelPo.supplierName}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Order Date</span>
+                  <strong className="text-slate-800">{new Date(cancelPo.createdAt).toLocaleDateString()}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Order Total</span>
+                  <strong className="text-[#16845B] font-mono font-extrabold">{formatPrice(cancelPo.grandTotal)}</strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Items Count</span>
+                  <strong className="text-slate-800">{cancelPo.items.length} item(s)</strong>
+                </div>
+              </div>
 
-          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-            <Button type="button" variant="secondary" onClick={() => setIsCancelOpen(false)}>
-              Back
-            </Button>
-            <Button 
-              type="button" 
-              onClick={handleCancelPo}
-              className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
-            >
-              Confirm Cancellation
-            </Button>
+              {/* Partial Receiving Details */}
+              {cancelPo.status === 'PARTIALLY_RECEIVED' && (
+                <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-950 space-y-1">
+                  <p className="font-bold text-[10.5px] text-amber-900">Partial Receiving Safeguard:</p>
+                  <p className="text-[10px] text-amber-800 leading-relaxed">
+                    Stock already checked in from this order remains safely in kitchen inventory. Only the unreceived remainder will be cancelled.
+                  </p>
+                  <div className="space-y-1 mt-1.5 pt-1.5 border-t border-amber-200/60">
+                    {cancelPo.items.map((it, idx) => {
+                      const received = it.receivedQuantity || 0;
+                      const remaining = Math.max(0, it.quantity - received);
+                      return (
+                        <div key={idx} className="flex justify-between text-[10px]">
+                          <span className="font-medium text-slate-800">{it.ingredientName}:</span>
+                          <span>
+                            <strong className="text-emerald-700">{received}</strong> / {it.quantity} {it.unit} received 
+                            ({remaining} {it.unit} unreceived will be cancelled)
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">
+                Reason for Cancellation (Optional)
+              </label>
+              <textarea
+                rows={2}
+                placeholder="e.g. Supplier unable to fulfill, cancelled by mutual consent..."
+                value={cancelReason}
+                onChange={e => setCancelReason(e.target.value)}
+                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-rose-500"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <Button type="button" variant="secondary" onClick={() => setIsCancelOpen(false)}>
+                Keep Order
+              </Button>
+              <Button 
+                type="button" 
+                onClick={handleCancelPo}
+                className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
+              >
+                Confirm Cancellation
+              </Button>
+            </div>
           </div>
-        </div>
+        )}
+      </Modal>
+
+      {/* MODAL 6: NOTIFY SUPPLIER VIA WHATSAPP ON CANCELLATION */}
+      <Modal
+        isOpen={isCancelNotifyOpen}
+        onClose={() => setIsCancelNotifyOpen(false)}
+        title={cancelNotifyPo ? `Supplier Cancellation Notice: ${cancelNotifyPo.poNumber}` : 'Cancellation Notice'}
+        className="max-w-lg bg-white"
+      >
+        {cancelNotifyPo && (() => {
+          const restName = cancelNotifyPo.restaurantName || activeRestaurant?.name || activeRestaurant?.restaurantName || 'SpiralDine Restaurant';
+          const msg = vendorPurchaseOrderService.formatPoCancellationWhatsAppMessage(cancelNotifyPo, restName, cancelNotifyPo.cancellationReason || cancelReason);
+          const rawPhone = cancelNotifyPo.supplierPhone || '';
+          const digitsOnly = rawPhone.replace(/[^0-9]/g, '');
+          const hasValidPhone = digitsOnly.length >= 7;
+
+          return (
+            <div className="space-y-4 text-xs text-left max-h-[80vh] overflow-y-auto pr-1">
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-950 space-y-1">
+                <p className="font-bold text-sm text-emerald-900">Purchase order has been cancelled.</p>
+                <p className="text-[11px] text-emerald-800 leading-relaxed">
+                  You can now notify <strong>{cancelNotifyPo.supplierName}</strong> through WhatsApp so they do not fulfill or ship this order.
+                </p>
+              </div>
+
+              {/* Contact info or missing phone warning */}
+              {hasValidPhone ? (
+                <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-[11px]">
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase font-bold">Supplier Contact Phone</span>
+                    <strong className="text-slate-900 font-mono text-xs">{cancelNotifyPo.supplierPhone}</strong>
+                  </div>
+                  <span className="text-emerald-700 font-bold text-[10px] flex items-center gap-1 bg-emerald-100/60 px-2 py-0.5 rounded-full">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Direct WhatsApp Ready
+                  </span>
+                </div>
+              ) : (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-950 space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold text-[11px] text-amber-900">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Missing or Invalid Supplier Phone Number</span>
+                  </div>
+                  <p className="text-[10.5px] text-amber-800 leading-relaxed">
+                    No phone number is registered for <strong>{cancelNotifyPo.supplierName}</strong> in your Vendor Directory. You can copy the complete cancellation message below and forward it to your supplier through SMS, Email, or another messaging channel.
+                  </p>
+                </div>
+              )}
+
+              {/* Message Preview */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-[10px] font-extrabold uppercase text-slate-500">
+                    Formatted Cancellation Notice
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCancellationNotice(cancelNotifyPo)}
+                    className="text-[10.5px] text-[#16845B] hover:underline font-bold flex items-center gap-1"
+                  >
+                    {copiedNotice ? <Check className="w-3 h-3 text-emerald-600" /> : null}
+                    <span>{copiedNotice ? 'Copied to Clipboard!' : 'Copy Notice'}</span>
+                  </button>
+                </div>
+                <pre className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-sans text-slate-800 whitespace-pre-wrap leading-relaxed max-h-52 overflow-y-auto">
+                  {msg}
+                </pre>
+                <p className="text-[10px] text-slate-400 mt-1 italic">
+                  * Note: Opening WhatsApp launches the message for sending, but does not constitute verified proof of supplier delivery or acknowledgement.
+                </p>
+              </div>
+
+              <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+                <Button variant="secondary" onClick={() => setIsCancelNotifyOpen(false)}>
+                  Done
+                </Button>
+                <div className="flex gap-2">
+                  <Button 
+                    type="button" 
+                    variant="secondary"
+                    onClick={() => handleCopyCancellationNotice(cancelNotifyPo)}
+                    className="font-bold flex items-center gap-1.5"
+                  >
+                    <span>{copiedNotice ? 'Copied' : 'Copy Notice'}</span>
+                  </Button>
+                  <Button 
+                    type="button" 
+                    onClick={() => handleDispatchCancellationWhatsApp(cancelNotifyPo)}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold flex items-center gap-1.5"
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    <span>Open in WhatsApp</span>
+                  </Button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
 
       {/* MODAL 5: EDIT DELIVERY ADDRESS FOR EXISTING PO */}

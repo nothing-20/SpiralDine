@@ -164,6 +164,8 @@ export interface IPurchaseOrder {
   confirmedAt?: string;
   cancelledAt?: string;
   cancellationReason?: string;
+  cancellationNotifiedVia?: 'whatsapp' | 'manual' | 'copied';
+  cancellationNotifiedAt?: string;
   receiptCount?: number;
   auditLog?: Array<{
     action: string;

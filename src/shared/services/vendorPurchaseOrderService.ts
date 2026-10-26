@@ -526,25 +526,40 @@ export const vendorPurchaseOrderService = {
     if (!snap.exists()) throw new Error('Purchase order not found.');
 
     const po = snap.data() as IPurchaseOrder;
+    // Idempotent guard: if already cancelled, do not duplicate side effects
+    if (po.status === 'CANCELLED') {
+      return;
+    }
     if (po.status === 'DELIVERED') {
-      throw new Error('Fully delivered purchase orders cannot be cancelled.');
+      throw new Error('Fully delivered purchase orders cannot be cancelled. Inventory has already been received into stock.');
     }
 
     const timestamp = new Date().toISOString();
     const userName = user?.displayName || user?.name || user?.email || 'Owner';
+
+    // If partially received, document the unreceived remainder explicitly
+    let partialNote = '';
+    if (po.status === 'PARTIALLY_RECEIVED') {
+      const itemsSummary = po.items.map(it => {
+        const received = it.receivedQuantity || 0;
+        const remainder = Math.max(0, it.quantity - received);
+        return `${it.ingredientName}: received ${received} ${it.unit}, unreceived ${remainder} ${it.unit} cancelled`;
+      }).join('; ');
+      partialNote = ` (Partial order cancelled for unreceived balance: ${itemsSummary}. Received stock remains safely in inventory.)`;
+    }
 
     const auditLog = po.auditLog || [];
     auditLog.push({
       action: 'CANCELLED',
       timestamp,
       performedBy: userName,
-      notes: `Order cancelled. Reason: ${reason}. (Any previously received stock remains in inventory).`
+      notes: `Order cancelled. Reason: ${reason || 'No reason provided'}.${partialNote}`
     });
 
     await updateDoc(docRef, {
       status: 'CANCELLED',
       cancelledAt: timestamp,
-      cancellationReason: reason,
+      cancellationReason: reason || '',
       updatedAt: timestamp,
       auditLog
     });
@@ -555,8 +570,48 @@ export const vendorPurchaseOrderService = {
       performedBy: userName,
       performedByRole: user?.role || 'owner',
       title: `Purchase Order ${po.poNumber} Cancelled`,
-      description: `Cancelled with reason: ${reason}.`,
-      metadata: { poId, poNumber: po.poNumber, reason }
+      description: `Cancelled with reason: ${reason || 'None'}.${partialNote}`,
+      metadata: { poId, poNumber: po.poNumber, reason: reason || '', previousStatus: po.status }
+    });
+  },
+
+  recordCancellationNotificationDispatched: async (
+    tenantId: string,
+    poId: string,
+    method: 'whatsapp' | 'manual' | 'copied',
+    user?: any
+  ): Promise<void> => {
+    const docRef = doc(db, 'restaurants', tenantId, 'purchaseOrders', poId);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) return;
+
+    const po = snap.data() as IPurchaseOrder;
+    const timestamp = new Date().toISOString();
+    const userName = user?.displayName || user?.name || user?.email || 'Owner';
+
+    const auditLog = po.auditLog || [];
+    auditLog.push({
+      action: 'CANCELLATION_NOTIFICATION_DISPATCHED',
+      timestamp,
+      performedBy: userName,
+      notes: `Supplier cancellation notice prepared/shared via ${method}. (Opening WhatsApp does not confirm supplier acknowledgement).`
+    });
+
+    await updateDoc(docRef, {
+      cancellationNotifiedVia: method,
+      cancellationNotifiedAt: timestamp,
+      updatedAt: timestamp,
+      auditLog
+    });
+
+    logEvent(tenantId, {
+      eventType: 'Purchase Order Cancellation Dispatched',
+      eventCategory: 'Management',
+      performedBy: userName,
+      performedByRole: user?.role || 'owner',
+      title: `PO ${po.poNumber} Cancellation Notice Prepared`,
+      description: `Cancellation notice prepared for supplier via ${method}.`,
+      metadata: { poId, poNumber: po.poNumber, method }
     });
   },
 
@@ -1018,6 +1073,48 @@ export const vendorPurchaseOrderService = {
     }
 
     msg += `Please confirm receipt and expected fulfillment schedule.\nThank you!`;
+    return msg;
+  },
+
+  formatPoCancellationWhatsAppMessage: (
+    po: IPurchaseOrder,
+    restaurantName: string = 'SpiralDine Restaurant',
+    cancellationReason?: string
+  ): string => {
+    const effectiveRestName = po.restaurantName || restaurantName;
+    const branchLabel = po.branchName ? ` — ${po.branchName}` : '';
+    const reasonText = (cancellationReason !== undefined && cancellationReason.trim()) 
+      ? cancellationReason.trim() 
+      : (po.cancellationReason ? po.cancellationReason.trim() : '');
+
+    let orderDateFormatted = '';
+    try {
+      const d = new Date(po.createdAt);
+      if (!isNaN(d.getTime())) {
+        orderDateFormatted = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+      } else {
+        orderDateFormatted = po.createdAt || '';
+      }
+    } catch {
+      orderDateFormatted = po.createdAt || '';
+    }
+
+    let msg = `*PURCHASE ORDER CANCELLATION*\n\n`;
+    msg += `*Purchase Order:* ${po.poNumber}\n\n`;
+    msg += `*From:* ${effectiveRestName}${branchLabel}\n`;
+    msg += `*To:* ${po.supplierName}\n\n`;
+    msg += `*Order Date:* ${orderDateFormatted}\n\n`;
+    msg += `*Items:*\n\n`;
+    po.items.forEach((item, idx) => {
+      msg += `${idx + 1}. ${item.ingredientName} — ${item.quantity} ${item.unit}\n`;
+    });
+    msg += `\n*Order Total:* ${formatPrice(po.grandTotal)}\n\n`;
+    msg += `*Status:* CANCELLED\n\n`;
+    if (reasonText) {
+      msg += `*Reason:* ${reasonText}\n\n`;
+    }
+    msg += `Please do not fulfil this purchase order. Kindly confirm receipt of this cancellation notice.\n\n`;
+    msg += `Thank you,\n${effectiveRestName}`;
     return msg;
   },
 
