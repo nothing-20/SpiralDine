@@ -34,6 +34,7 @@ import {
   clearActiveDiningSession
 } from '../../../shared/utils/diningSession';
 import { tableService } from '../../../shared/services/tableService';
+import TableSelectionModal, { ITableData } from '../components/TableSelectionModal';
 
 // Navigation & Header
 import CustomerHeader from '../../../shared/ui/navigation/CustomerHeader';
@@ -43,6 +44,7 @@ import {
   Search,
   ShoppingBag,
   Plus,
+  Coffee,
   Minus,
   Trash2,
   Clock,
@@ -95,6 +97,7 @@ export const CustomerMenu: React.FC = () => {
   // Session & Table State
   const [session, setSession] = useState<any>(null);
   const [tableNumber, setTableNumber] = useState('');
+  const [isTableModalOpen, setIsTableModalOpen] = useState(false);
 
   // Restaurant Branding & Details State
   const [restaurantName, setRestaurantName] = useState('Restaurant');
@@ -216,6 +219,9 @@ export const CustomerMenu: React.FC = () => {
           { name: user?.displayName || '', phone: user?.phoneNumber || '', customerId: user?.uid || '' }
         ).catch(() => {});
       }
+    } else if (!tableParam) {
+      // No active session and no table param: prompt table selection
+      setIsTableModalOpen(true);
     }
 
     if (tableParam) {
@@ -258,6 +264,7 @@ export const CustomerMenu: React.FC = () => {
         syncDiningSessionToFirestore(newSession).catch(() => {});
       }
     }
+
 
     // Fetch Tenant Info from Firestore (tenants/{tenantId})
     const fetchTenantData = async () => {
@@ -423,6 +430,53 @@ export const CustomerMenu: React.FC = () => {
       }
     };
   }, [tenantId, searchParams]);
+
+  const handleSelectTable = (table: ITableData) => {
+    if (!tenantId) return;
+    const cleanNum = String(table.tableNumber || table.number || '').replace(/^TBL-/i, '');
+    const tableId = table.tableId || table.id;
+
+    // Release any previous browsing table if the user picked a different table
+    const existingSession = getActiveDiningSession(tenantId);
+    if (existingSession && (existingSession.tableNumber || existingSession.tableId)) {
+      const prevTable = existingSession.tableNumber || existingSession.tableId;
+      if (prevTable !== cleanNum && prevTable !== tableId) {
+        tableService.releaseTableBrowsing(tenantId, prevTable, {
+          customerId: user?.uid,
+          customerName: user?.displayName || undefined
+        }).catch(err => console.warn('Failed to release previous table browsing:', err));
+      }
+    }
+
+    // Create new explicit dining session for this table
+    const sessionId = generateSessionId();
+    const sessionData = {
+      sessionId,
+      restaurantId: tenantId,
+      tenantId,
+      branchId: table.branchId || 'main',
+      tableId: tableId,
+      tableNumber: cleanNum,
+      tableName: table.tableName || `Table ${cleanNum}`,
+      orderSource: 'app' as const,
+      isLocked: false,
+      status: 'active' as const,
+      startedAt: new Date().toISOString()
+    };
+    saveActiveDiningSession(sessionData);
+    syncDiningSessionToFirestore(sessionData).catch(() => {});
+    setSession(sessionData);
+    setTableNumber(cleanNum);
+
+    tableService.setTableBrowsing(
+      tenantId,
+      cleanNum,
+      'app',
+      { name: user?.displayName || '', phone: user?.phoneNumber || '', customerId: user?.uid || '' }
+    ).catch(() => {});
+
+    setIsTableModalOpen(false);
+  };
 
   // -------------------------------------------------------------
   // 2. Real-time Listener for Active Orders in this Session
@@ -1241,12 +1295,24 @@ export const CustomerMenu: React.FC = () => {
           {/* Table Context & View Restaurant Action Bar */}
           <div className="flex items-center justify-between pt-2 border-t border-[#F3E8DF] gap-2">
             {tableNumber ? (
-              <div className="bg-[#F3E8DF]/70 border border-[#C85A3F]/20 px-2.5 py-1 rounded-lg text-[11px] font-bold text-[#C85A3F] flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setIsTableModalOpen(true)}
+                className="bg-[#F3E8DF]/70 hover:bg-[#F3E8DF] border border-[#C85A3F]/20 px-2.5 py-1 rounded-lg text-[11px] font-bold text-[#C85A3F] flex items-center gap-1.5 cursor-pointer transition-colors"
+                title="Change Table"
+              >
                 <Layers className="w-3.5 h-3.5 text-[#C85A3F] shrink-0" />
                 <span>Ordering at Table {tableNumber}</span>
-              </div>
+              </button>
             ) : (
-              <span className="text-[11px] text-[#756B64] font-medium">Dine-in Menu</span>
+              <button
+                type="button"
+                onClick={() => setIsTableModalOpen(true)}
+                className="bg-[#E85D3F] hover:bg-[#D04B2F] text-white px-2.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+              >
+                <Coffee className="w-3.5 h-3.5" />
+                <span>Select Table</span>
+              </button>
             )}
 
             <button
@@ -2468,6 +2534,17 @@ export const CustomerMenu: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+      {tenantId && (
+        <TableSelectionModal
+          isOpen={isTableModalOpen}
+          onClose={() => setIsTableModalOpen(false)}
+          tenantId={tenantId}
+          restaurantName={restaurantName}
+          branchId="main"
+          currentTableId={tableNumber}
+          onSelectTable={handleSelectTable}
+        />
       )}
     </div>
   );

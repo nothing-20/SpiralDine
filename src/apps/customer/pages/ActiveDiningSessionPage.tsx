@@ -615,6 +615,8 @@ export const ActiveDiningSessionPage: React.FC = () => {
           isOpen={isBillModalOpen}
           onClose={() => setIsBillModalOpen(false)}
           title={`Bill for Table ${currentTable}`}
+          variant="light"
+          className="max-w-md bg-white border border-[#E5DCD5]"
         >
           <div className="p-4 space-y-4 text-left text-xs">
             <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center gap-2 text-emerald-800">

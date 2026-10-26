@@ -1,9 +1,83 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Resend } from 'resend';
 
+interface ITokenUser {
+  uid: string;
+  isAnonymous?: boolean;
+}
+
+/**
+ * Verify Firebase ID token independently on server side.
+ */
+async function verifyAuthToken(token: string): Promise<ITokenUser | null> {
+  if (!token) return null;
+
+  // 1. Emulator / Synthetic decode
+  if (process.env.FIRESTORE_EMULATOR_HOST) {
+    try {
+      const parts = token.split('.');
+      if (parts.length >= 2) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
+        const uid = payload.user_id || payload.sub || payload.uid;
+        if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+        if (uid) return { uid, isAnonymous: payload.firebase?.sign_in_provider === 'anonymous' };
+      }
+    } catch (_) {}
+  }
+
+  // 2. Production token verification via Google Identity Toolkit
+  const apiKey = process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY;
+  if (!apiKey) {
+    try {
+      const parts = token.split('.');
+      if (parts.length >= 2) {
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
+        const uid = payload.user_id || payload.sub || payload.uid;
+        if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
+        if (uid) return { uid, isAnonymous: payload.firebase?.sign_in_provider === 'anonymous' };
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  try {
+    const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: token }),
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.users || data.users.length === 0) return null;
+
+    const user = data.users[0];
+    return {
+      uid: user.localId,
+      isAnonymous: user.providerUserInfo?.length === 0,
+    };
+  } catch (err: any) {
+    console.error('[send-staff-invitation] Token verification error:', err);
+    return null;
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
+  }
+
+  // 1. Enforce Server-Side Authentication
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized: Missing Authorization header.' });
+  }
+
+  const tokenUser = await verifyAuthToken(token);
+  if (!tokenUser || !tokenUser.uid || tokenUser.isAnonymous) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid or expired staff authorization token.' });
   }
 
   const { fullName, email, role, department, activationLink, employeeId, restaurantName: incomingRestName } = req.body || {};
@@ -13,7 +87,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const trimmedEmail = String(email).trim().toLowerCase();
-  const restName = incomingRestName || 'Spiral Dine';
+  const restName = incomingRestName ? String(incomingRestName).trim() : 'Spiral Dine';
+
+  // Sanitize activation link to prevent open redirect phishing
+  let link = `https://spiral-dine.vercel.app/staff/activate?id=${encodeURIComponent(employeeId || '')}`;
+  if (activationLink && typeof activationLink === 'string') {
+    try {
+      const parsedUrl = new URL(activationLink);
+      if (
+        parsedUrl.hostname === 'spiral-dine.vercel.app' ||
+        parsedUrl.hostname.endsWith('.vercel.app') ||
+        parsedUrl.hostname === 'localhost' ||
+        parsedUrl.hostname === '127.0.0.1'
+      ) {
+        link = activationLink;
+      }
+    } catch (_) {
+      // Keep default canonical link if invalid URL
+    }
+  }
 
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
@@ -23,13 +115,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       emailSent: false,
       warning: 'RESEND_API_KEY not configured.',
       employeeId,
-      activationLink
+      activationLink: link,
     });
   }
 
   try {
     const resend = new Resend(apiKey);
-    const link = activationLink || `https://restaurant-os-dun.vercel.app/staff/activate?id=${employeeId || ''}`;
 
     const htmlContent = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #020617; border: 1px solid #1e293b; border-radius: 16px; overflow: hidden; color: #f8fafc;">
@@ -66,7 +157,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       emailId: response.data?.id,
       emailError: response.error ? response.error.message : undefined,
       employeeId,
-      activationLink: link
+      activationLink: link,
     });
   } catch (err: any) {
     console.warn('[Vercel API] send-staff-invitation dispatch failed:', err?.message);
@@ -75,7 +166,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       emailSent: false,
       emailError: err?.message || 'Email dispatch failed',
       employeeId,
-      activationLink
+      activationLink: link,
     });
   }
 }
+

@@ -44,6 +44,15 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return;
     }
 
+    // Customer accounts do not require restaurant staff/owner workspaces.
+    // They are legitimate diners accessing customer-facing ordering and discovery.
+    if (user.role === 'customer') {
+      setWorkspace(null);
+      setValidationError(null);
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     setValidationError(null);
 
@@ -96,6 +105,14 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         } else if (user.role) {
           userData = { ...user };
         }
+      }
+
+      // Customer accounts are diners, not staff members. Exit cleanly without workspace error.
+      if (userData?.role === 'customer') {
+        setWorkspace(null);
+        setValidationError(null);
+        setIsLoading(false);
+        return;
       }
 
       console.info('[WorkspaceValidation] Profile state', {

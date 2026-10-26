@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Mail } from 'lucide-react';
+import { Mail, Settings } from 'lucide-react';
+import { openCookieConsentModal } from '../../../shared/utils/cookieConsent';
 
 export const PublicFooter: React.FC = () => {
   const handleScrollTop = () => {
@@ -57,8 +58,13 @@ export const PublicFooter: React.FC = () => {
                 </Link>
               </li>
               <li>
+                <Link to="/faq" onClick={handleScrollTop} className="hover:text-[#D65336] transition-colors">
+                  FAQ &amp; Help Center
+                </Link>
+              </li>
+              <li>
                 <Link to="/contact" onClick={handleScrollTop} className="hover:text-[#D65336] transition-colors">
-                  Contact Sales & Support
+                  Contact Sales &amp; Support
                 </Link>
               </li>
             </ul>
@@ -80,7 +86,7 @@ export const PublicFooter: React.FC = () => {
               </li>
               <li>
                 <Link to="/staff/login" onClick={handleScrollTop} className="hover:text-[#D65336] transition-colors">
-                  Staff Workspace (Kitchen & Waiter)
+                  Staff Workspace (Kitchen &amp; Waiter)
                 </Link>
               </li>
               <li>
@@ -121,19 +127,42 @@ export const PublicFooter: React.FC = () => {
           <div>
             <span>&copy; {new Date().getFullYear()} Spiral Dine. All rights reserved.</span>
           </div>
-          <div className="flex space-x-6">
+          <div className="flex flex-wrap items-center gap-3 sm:gap-5">
             <Link to="/about" onClick={handleScrollTop} className="hover:text-[#17202A] transition-colors">
               About
             </Link>
-            <Link to="/contact" onClick={handleScrollTop} className="hover:text-[#17202A] transition-colors">
-              Support Desk
+            <Link to="/faq" onClick={handleScrollTop} className="hover:text-[#17202A] transition-colors">
+              Help
             </Link>
-            <Link to="/contact" onClick={handleScrollTop} className="hover:text-[#17202A] transition-colors">
-              Contact Us
+            <Link to="/privacy" onClick={handleScrollTop} className="hover:text-[#17202A] transition-colors">
+              Privacy
             </Link>
+            <Link to="/terms" onClick={handleScrollTop} className="hover:text-[#17202A] transition-colors">
+              Terms
+            </Link>
+            <Link to="/refund-policy" onClick={handleScrollTop} className="hover:text-[#17202A] transition-colors">
+              Refunds
+            </Link>
+            <Link to="/cookie-policy" onClick={handleScrollTop} className="hover:text-[#17202A] transition-colors">
+              Cookie Policy
+            </Link>
+            <Link to="/accessibility" onClick={handleScrollTop} className="hover:text-[#17202A] transition-colors">
+              Accessibility
+            </Link>
+            <Link to="/account-deletion" onClick={handleScrollTop} className="hover:text-[#17202A] transition-colors">
+              Account Deletion
+            </Link>
+            <button
+              type="button"
+              onClick={openCookieConsentModal}
+              className="inline-flex items-center gap-1 hover:text-[#D65336] transition-colors font-semibold"
+            >
+              <Settings className="w-3 h-3" />
+              Cookie Settings
+            </button>
           </div>
           <div>
-            <span className="text-[11px] text-[#8A817A]">Build Version: v1.3.0</span>
+            <span className="text-[11px] text-[#8A817A]">Build Version: v1.3.1</span>
           </div>
         </div>
       </div>

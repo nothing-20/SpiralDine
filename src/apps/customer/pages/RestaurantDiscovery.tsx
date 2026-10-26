@@ -7,6 +7,7 @@ import Card from '../../../components/ui/Card/Card';
 import Badge from '../../../components/ui/Badge/Badge';
 import SearchBar from '../../../components/ui/SearchBar/SearchBar';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner/LoadingSpinner';
+import { RestaurantGridCardSkeleton } from '../components/CustomerSkeletons';
 import { 
   Star, MapPin, Clock, Compass, Filter, Grid, Flame, 
   Sparkles, CheckCircle2, ChevronDown, Check, X, ShieldAlert, Search
@@ -311,8 +312,10 @@ export const RestaurantDiscovery: React.FC = () => {
 
           {/* Grid list results */}
           {isLoading ? (
-            <div className="h-64 flex items-center justify-center">
-              <LoadingSpinner label="Querying culinary registry..." />
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[1, 2, 3, 4, 5, 6].map(idx => (
+                <RestaurantGridCardSkeleton key={idx} />
+              ))}
             </div>
           ) : filteredRestaurants.length === 0 ? (
             <div className="p-12 text-center bg-slate-900/20 border border-slate-900 rounded-2xl space-y-4">
@@ -328,9 +331,9 @@ export const RestaurantDiscovery: React.FC = () => {
                 <Card 
                   key={r.id} 
                   onClick={() => navigate(`/customer/restaurant/${r.id}`)}
-                  className="group bg-slate-900/20 border-slate-850 hover:border-slate-850 rounded-2xl overflow-hidden cursor-pointer transition-all flex flex-col justify-between shadow-lg"
+                  className="group bg-slate-900/20 border-slate-850 hover:border-slate-850 rounded-2xl overflow-hidden cursor-pointer transition-all flex flex-row md:flex-col justify-between shadow-lg"
                 >
-                  <div className="h-36 w-full overflow-hidden relative bg-slate-950 flex items-center justify-center">
+                  <div className="w-28 sm:w-36 md:w-full h-28 sm:h-36 md:h-36 shrink-0 overflow-hidden relative bg-slate-950 flex items-center justify-center">
                     {r.image ? (
                       <img src={r.image} alt={r.name} className="h-full w-full object-cover group-hover:scale-103 transition-all duration-300" />
                     ) : (
@@ -339,15 +342,15 @@ export const RestaurantDiscovery: React.FC = () => {
                       </div>
                     )}
                     {r.rating !== null && (
-                      <div className="absolute top-2.5 right-2.5 bg-slate-950/80 backdrop-blur-md px-2 py-0.5 rounded-lg border border-slate-800 text-[9px] text-slate-350 flex items-center gap-0.5 font-bold">
+                      <div className="absolute top-2 right-2 md:top-2.5 md:right-2.5 bg-slate-950/80 backdrop-blur-md px-1.5 md:px-2 py-0.5 rounded-lg border border-slate-800 text-[9px] text-slate-350 flex items-center gap-0.5 font-bold">
                         <Star className="w-2.5 h-2.5 text-primary fill-current" /> {r.rating}
                       </div>
                     )}
                   </div>
-                  <div className="p-4 space-y-3">
+                  <div className="p-3 md:p-4 space-y-2 md:space-y-3 flex-1 min-w-0">
                     <div className="space-y-0.5">
                       <h4 className="text-xs font-extrabold text-white group-hover:text-primary transition-all truncate">{r.name}</h4>
-                      <p className="text-[10px] text-slate-500 font-semibold">{r.cuisine}</p>
+                      <p className="text-[10px] text-slate-500 font-semibold truncate">{r.cuisine}</p>
                       {r.street && <p className="text-[9.5px] text-slate-450 truncate">{r.street}</p>}
                     </div>
                     <div className="flex justify-between items-center text-[9px] text-slate-450 pt-2 border-t border-slate-900">
@@ -367,7 +370,7 @@ export const RestaurantDiscovery: React.FC = () => {
                       </div>
                     </div>
                     {r.googleMapsUrl && (
-                      <div className="pt-0.5">
+                      <div className="pt-0.5 hidden md:block">
                         <a
                           href={r.googleMapsUrl}
                           target="_blank"

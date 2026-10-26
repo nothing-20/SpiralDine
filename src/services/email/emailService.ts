@@ -1,3 +1,5 @@
+import { auth } from '../../config/firebase';
+
 export const emailService = {
   async sendStaffInvitation(data: {
     fullName: string;
@@ -12,10 +14,12 @@ export const emailService = {
     employeeId?: string;
   }): Promise<{ success: boolean; employeeId?: string; error?: string }> {
     try {
+      const idToken = await auth.currentUser?.getIdToken();
       const res = await fetch('/api/send-staff-invitation', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {}),
         },
         body: JSON.stringify(data),
       });

@@ -14,7 +14,9 @@ import {
   signInWithPhoneNumber,
   ConfirmationResult,
   ApplicationVerifier,
-  linkWithPhoneNumber
+  linkWithPhoneNumber,
+  linkWithCredential,
+  EmailAuthProvider
 } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from './config';
@@ -175,24 +177,44 @@ export const signUpCustomer = async (
     console.warn('[AUTH signUpCustomer] Note setting session persistence:', persistErr);
   }
 
-  const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+  let userCredential: UserCredential;
+
+  // If the user is currently an anonymous guest diner, link credentials to preserve UID, orders, and sessions
+  if (auth.currentUser && auth.currentUser.isAnonymous) {
+    try {
+      const cred = EmailAuthProvider.credential(email.trim(), password.trim());
+      userCredential = await linkWithCredential(auth.currentUser, cred);
+      console.log('[AUTH signUpCustomer] Successfully linked anonymous account with email. Preserved UID:', userCredential.user.uid);
+    } catch (linkErr: any) {
+      if (linkErr.code === 'auth/email-already-in-use' || linkErr.code === 'auth/credential-already-in-use') {
+        throw linkErr;
+      }
+      console.warn('[AUTH signUpCustomer] linkWithCredential failed, falling back to createUser:', linkErr);
+      userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password.trim());
+    }
+  } else {
+    userCredential = await createUserWithEmailAndPassword(auth, email.trim(), password.trim());
+  }
+
   const user = userCredential.user;
 
-  // Create customer profile in customers/{uid}
+  // Create or merge customer profile in customers/{uid}
   const customerRef = doc(db, 'customers', user.uid);
   await setDoc(customerRef, {
     uid: user.uid,
-    fullName,
-    displayName: fullName,
-    email,
+    fullName: fullName.trim(),
+    displayName: fullName.trim(),
+    email: email.trim().toLowerCase(),
     role: 'customer' as TUserRole,
     tenantId: null,
-    phoneNumber: phoneNumber || '',
+    phoneNumber: phoneNumber?.trim() || '',
     walletBalance: 0,
     loyaltyPoints: 0,
     status: 'active',
+    isAnonymous: false,
+    updatedAt: new Date().toISOString(),
     createdAt: new Date().toISOString()
-  });
+  }, { merge: true });
 
   return userCredential;
 };

@@ -44,7 +44,7 @@ service cloud.firestore {
       return isAuth() && (
         isSuperAdmin() ||
         (userExists() && getUserData().get('tenantId', '') == tenantId && 
-         getUserData().get('role', '') in ['super_admin', 'super-admin', 'owner', 'admin', 'manager', 'waiter', 'cashier', 'reception', 'kitchen'])
+         getUserData().get('role', '') in ['super_admin', 'super-admin', 'owner', 'admin', 'manager', 'waiter', 'cashier', 'reception', 'kitchen', 'chef'])
       );
     }
 
@@ -160,17 +160,28 @@ service cloud.firestore {
       allow write: if hasRole('super-admin');
     }
 
-    // Customer support ticketing
+    // Customer support ticketing: strictly restricted to ticket owner and authorized support/management staff
     match /supportTickets/{ticketId} {
-      allow read: if isAuth();
-      allow create: if isAuth();
-      allow update: if isAuth();
+      allow read: if isAuth() && (
+        resource.data.customerId == request.auth.uid ||
+        isSuperAdmin() ||
+        (userExists() && getUserData().get('role', '') in ['super_admin', 'super-admin', 'admin', 'owner', 'manager', 'support'])
+      );
+      allow create: if isAuth() && (
+        request.resource.data.customerId == request.auth.uid ||
+        isSuperAdmin()
+      );
+      allow update: if isAuth() && (
+        (resource.data.customerId == request.auth.uid && request.resource.data.customerId == resource.data.customerId) ||
+        isSuperAdmin() ||
+        (userExists() && getUserData().get('role', '') in ['super_admin', 'super-admin', 'admin', 'owner', 'manager', 'support'])
+      );
       allow delete: if hasRole('super-admin');
     }
 
     // Audit logs - Immutable audit logs protection
     match /auditLogs/{logId} {
-      allow read: if isAuth();
+      allow read: if isSuperAdmin() || (userExists() && getUserData().get('role', '') in ['super_admin', 'super-admin', 'admin', 'owner']);
       allow create: if isAuth();
       allow update, delete: if false; // Immutable protection
     }
@@ -240,16 +251,37 @@ service cloud.firestore {
     // Collection listing/querying: strictly restricted to authenticated staff to prevent enumeration of pending invitations.
     match /employees/{employeeId} {
       allow get: if isAuth() || resource.data.activationStatus in ['invited', 'activated'];
-      allow list: if isAuth();
-      allow create: if isAuth();
-      allow update: if isAuth();
-      allow delete: if isAuth();
+      allow list: if isAuth() && (
+        isSuperAdmin() || 
+        (userExists() && getUserData().get('role', '') in ['owner', 'admin', 'manager', 'waiter', 'kitchen', 'cashier', 'staff'])
+      );
+      allow create: if isAuth() && (
+        isSuperAdmin() || 
+        isTenantManager(request.resource.data.get('tenantId', ''))
+      );
+      allow update: if isAuth() && (
+        isSuperAdmin() ||
+        isTenantManager(resource.data.get('tenantId', '')) ||
+        (resource.data.activationStatus == 'invited' && 
+         request.resource.data.get('activationStatus', '') == 'activated' && 
+         request.resource.data.get('firebaseUid', '') == request.auth.uid) ||
+        (resource.data.get('firebaseUid', '') == request.auth.uid)
+      );
+      allow delete: if isAuth() && (
+        isSuperAdmin() || 
+        isTenantManager(resource.data.get('tenantId', ''))
+      );
     }
 
     // Tenants base metadata profiles (Public read for customer discovery)
     match /tenants/{tenantId} {
       allow read: if true;
-      allow write: if isAuth();
+      allow write: if isAuth() && (
+        isSuperAdmin() || 
+        isTenantManager(tenantId) || 
+        (resource == null && request.resource.data.get('ownerUid', '') == request.auth.uid) ||
+        (resource != null && resource.data.get('ownerUid', '') == request.auth.uid)
+      );
     }
 
     // Merchant Restaurant hierarchy (scoping subcollections)
@@ -261,7 +293,7 @@ service cloud.firestore {
       // Public & Customer readable subcollections (branches, tables)
       match /branches/{branchId} {
         allow read: if true;
-        allow write: if isAuth();
+        allow write: if isAuth() && (isSuperAdmin() || isTenantManager(tenantId));
       }
 
       match /tables/{tableId} {
@@ -280,7 +312,10 @@ service cloud.firestore {
 
       // Customer Orders - customer/staff creation, customer cannot modify financials, paymentStatus, or paidAt
       match /orders/{orderId} {
-        allow read: if true;
+        // Secure order reads: authorized tenant staff or the authentic customer owning the order
+        allow read: if isTenantStaff(tenantId) || (
+          isAuth() && resource.data.get('customerId', '') != '' && resource.data.get('customerId', '') == request.auth.uid
+        );
         allow create: if (
           request.resource.data.get('tenantId', '') == tenantId &&
           (request.resource.data.get('paymentStatus', 'pending') == 'pending' ||
@@ -318,7 +353,8 @@ service cloud.firestore {
       // Created on valid order placement; managed by authorized kitchen & restaurant staff.
       // Historical tickets must be preserved for operational and tax audit (deletion forbidden).
       match /kitchenTickets/{ticketId} {
-        allow read: if true;
+        // Secure kitchen tickets: restricted strictly to authorized tenant staff
+        allow read: if isTenantStaff(tenantId);
         // Staff can create any ticket; Customer/Guest ordering can only create an initial ticket linked to an order
         allow create: if (
           request.resource.data.get('tenantId', '') == tenantId &&
@@ -391,8 +427,10 @@ service cloud.firestore {
       // Payment Gateway Attempts - server/staff managed, diner read
       match /paymentAttempts/{attemptId} {
         allow read: if isTenantStaff(tenantId) || 
-          (isAuth() && resource.data.get('customerId', '') == request.auth.uid) || 
-          true;
+          (isAuth() && (
+            resource.data.get('customerId', '') == request.auth.uid || 
+            resource.data.get('customerUid', '') == request.auth.uid
+          ));
         allow write: if isTenantStaff(tenantId);
       }
 
@@ -414,13 +452,13 @@ service cloud.firestore {
     match /waiterRequests/{reqId} {
       allow read: if true;
       allow create: if true;
-      allow update: if isAuth();
+      allow update: if isTenantStaff(tenantId) || isSuperAdmin() || (isAuth() && resource.data.get('customerId', '') == request.auth.uid);
     }
 
     match /requests/{reqId} {
       allow read: if true;
       allow create: if true;
-      allow update: if isAuth();
+      allow update: if isTenantStaff(tenantId) || isSuperAdmin() || (isAuth() && resource.data.get('customerId', '') == request.auth.uid);
     }
 
     match /diningSessions/{sessionId} {
@@ -510,7 +548,7 @@ service cloud.firestore {
       // Strictly excludes specific collections that have custom security and immutability invariants
       match /{subcollection}/{docId} {
         allow read: if isAuth() && (isTenant(tenantId) || isSuperAdmin()) &&
-          !(subcollection in ['bills', 'transactions']);
+          !(subcollection in ['bills', 'transactions', 'orders', 'kitchenTickets']);
         allow write: if isTenantStaff(tenantId) &&
           !(subcollection in [
             'bills', 'transactions', 'orders', 'kitchenTickets', 'tables', 

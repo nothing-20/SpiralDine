@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { useCurrency } from '../../../context/CurrencyContext';
@@ -177,15 +177,38 @@ export const CustomerOrdersPage: React.FC = () => {
       }
     }
 
-    if (sessionTenantId) {
+    if (sessionTenantId && user?.uid) {
       try {
         const ordersRef = collection(db, 'restaurants', sessionTenantId, 'orders');
-        const qOrders = user?.uid ? query(ordersRef, where('customerId', '==', user.uid)) : ordersRef;
+        const qOrders = query(ordersRef, where('customerId', '==', user.uid));
         const unsubSession = onSnapshot(qOrders, (snap) => {
           const fetched: CustomerOrder[] = [];
           snap.forEach(d => {
             const data = d.data() as CustomerOrder;
-            fetched.push({ ...data, id: d.id, tenantId: sessionTenantId });
+            const oId = d.id;
+            fetched.push({ ...data, id: oId, tenantId: sessionTenantId });
+
+            // Self-healing: ensure order index exists in customers/{uid}/orders for cross-platform sync
+            if (user?.uid && !user.isAnonymous && sessionTenantId && oId) {
+              const custOrderRef = doc(db, 'customers', user.uid, 'orders', oId);
+              getDoc(custOrderRef).then(idxSnap => {
+                if (!idxSnap.exists()) {
+                  setDoc(custOrderRef, {
+                    id: oId,
+                    orderId: oId,
+                    primaryOrderId: data.primaryOrderId || oId,
+                    tenantId: sessionTenantId,
+                    restaurantName: data.restaurantName || sessionTenantId,
+                    tableNumber: data.tableNumber || '',
+                    total: data.total || 0,
+                    status: data.status || 'NEW',
+                    itemsCount: Array.isArray(data.items) ? data.items.length : 1,
+                    createdAt: data.createdAt || new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                  }, { merge: true }).catch(() => {});
+                }
+              }).catch(() => {});
+            }
           });
           mergeOrders(fetched, true); // Authoritative: directly from restaurants/{tenantId}/orders
           setIsLoading(false);

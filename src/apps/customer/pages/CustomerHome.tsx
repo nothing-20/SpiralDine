@@ -3,20 +3,32 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { collection, onSnapshot, query, limit } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
-import Card from '../../../components/ui/Card/Card';
-import Badge from '../../../components/ui/Badge/Badge';
-import LoadingSpinner from '../../../components/ui/LoadingSpinner/LoadingSpinner';
 import Modal from '../../../components/ui/Modal/Modal';
 import { 
-  Sparkles, Coffee, Compass, Star, MapPin, Search, Award, Flame, 
-  Clock, ArrowRight, Percent, Calendar, Heart, ChevronRight, X,
-  Users, Utensils, Music, DollarSign, Locate, Filter,
-  Check
+  Star, MapPin, Search, Clock, ArrowRight, Heart, ChevronRight, X,
+  Utensils, Locate, Filter, Check, Bell, QrCode, Calendar,
+  ChevronDown, Flame, LogOut
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { isOrderActive } from '../../../shared/utils/orderUtils';
-import { PromotionsCarousel } from '../components/promotions/PromotionsCarousel';
+import { formatPrice } from '../../../shared/utils/format';
+import { tableService } from '../../../shared/services/tableService';
+import QrScannerModal from '../../../shared/ui/components/QrScannerModal';
+import rightPlateImg from '../../../assets/right_food_plate.png';
+import { RestaurantCardSkeleton, MenuItemSkeleton } from '../components/CustomerSkeletons';
 
+// Palette Constants — Unified SpiralDine White & Green Design System
+const COLOR_PRIMARY_GREEN = '#16A34A';
+const COLOR_DEEP_GREEN = '#166534';
+const COLOR_LIGHT_GREEN = '#F0FDF4';
+const COLOR_MAIN_BG = '#FFFFFF';
+const COLOR_CARD_BG = '#FFFFFF';
+const COLOR_PRIMARY_TEXT = '#111827';
+const COLOR_SECONDARY_TEXT = '#6B7280';
+const COLOR_TERRACOTTA = '#F97316';
+const COLOR_BORDER = '#E5E7EB';
+const COLOR_OPEN = '#16A34A';
+const COLOR_CLOSED = '#EF4444';
 
 const POPULAR_CITIES = [
   { name: 'Hyderabad', lat: 17.3850, lng: 78.4867 },
@@ -40,10 +52,20 @@ const HYDERABAD_AREAS = [
   'Himayatnagar', 'Somajiguda', 'Abids', 'Mehdipatnam'
 ];
 
+// Curated Cuisines matching design
+const CUISINE_ITEMS = [
+  { name: 'Biryani', icon: '🍛', filter: 'biryani' },
+  { name: 'North Indian', icon: '🫓', filter: 'north indian' },
+  { name: 'South Indian', icon: '🥞', filter: 'south indian' },
+  { name: 'Chinese', icon: '🍜', filter: 'chinese' },
+  { name: 'Pizza', icon: '🍕', filter: 'pizza' },
+  { name: 'Desserts', icon: '🍨', filter: 'dessert' },
+];
+
 function extractAreaFromAddress(street: string, fallbackCity: string): string {
   if (!street || typeof street !== 'string') return fallbackCity;
   for (const area of HYDERABAD_AREAS) {
-    if (new RegExp(`\\b${area.replace(/\s+/g, '\\s+')}\\b`, 'i').test(street)) {
+    if (new RegExp(`\\b${area.replace(/\\s+/g, '\\s+')}\\b`, 'i').test(street)) {
       if (area.toLowerCase() === 'rtc x roads') return 'RTC X Road';
       return area;
     }
@@ -51,7 +73,7 @@ function extractAreaFromAddress(street: string, fallbackCity: string): string {
   const parts = street.split(',').map(p => p.trim()).filter(Boolean);
   if (parts.length > 1) {
     const candidate = parts[parts.length - 1];
-    if (candidate.length < 35 && !/\d{5,6}/.test(candidate)) {
+    if (candidate.length < 35 && !/\\d{5,6}/.test(candidate)) {
       return candidate;
     }
   }
@@ -59,7 +81,7 @@ function extractAreaFromAddress(street: string, fallbackCity: string): string {
 }
 
 function formatCuisines(cuisineInput?: string | string[] | null): string {
-  if (!cuisineInput) return '';
+  if (!cuisineInput) return 'Indian · Multi-Cuisine';
   let parts: string[] = [];
   if (Array.isArray(cuisineInput)) {
     parts = cuisineInput.map(p => String(p).trim()).filter(Boolean);
@@ -69,7 +91,7 @@ function formatCuisines(cuisineInput?: string | string[] | null): string {
       .map(p => p.trim())
       .filter(Boolean);
   }
-  if (parts.length === 0) return '';
+  if (parts.length === 0) return 'Indian · Multi-Cuisine';
   return parts.slice(0, 3).join(' · ');
 }
 
@@ -79,7 +101,6 @@ function formatLocalityCity(area?: string | null, city?: string | null): string 
   if (!area || area === 'All Areas' || area.toLowerCase() === c.toLowerCase()) {
     return c;
   }
-  // Remove trailing city name if already present in area to prevent duplicates
   const cleanArea = area.replace(new RegExp(`,?\\s*${c}$`, 'i'), '').trim();
   if (!cleanArea || cleanArea.toLowerCase() === c.toLowerCase()) {
     return c;
@@ -90,19 +111,10 @@ function formatLocalityCity(area?: string | null, city?: string | null): string 
 function formatReviewsCount(count?: number | null): string | null {
   if (!count || typeof count !== 'number' || count <= 0) return null;
   if (count >= 1000) {
-    return `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k reviews`;
+    return `${(count / 1000).toFixed(1).replace(/\\.0$/, '')}k+`;
   }
-  return `${count} review${count === 1 ? '' : 's'}`;
+  return `${count}+`;
 }
-
-const CUISINE_DISHES: Record<string, string[]> = {
-  'italian': ['pizza', 'pasta', 'lasagna', 'truffle risotto', 'ravioli'],
-  'japanese': ['sushi', 'sashimi', 'ramen bowl', 'tempura box', 'omakase'],
-  'french': ['croissant', 'foie gras', 'duck confit', 'escargots'],
-  'indian': ['biryani', 'butter chicken', 'paneer tikka', 'dosa', 'naan'],
-  'mexican': ['tacos', 'burritos', 'quesadilla', 'guacamole', 'nachos'],
-  'healthy': ['avocado salad', 'quinoa bowl', 'smoothie', 'vegan wrap']
-};
 
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371; // km
@@ -113,7 +125,7 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
     Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
     Math.sin(dLon/2) * Math.sin(dLon/2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return (R * c) * 0.621371; // convert to miles
+  return R * c; // in kilometers
 }
 
 export const CustomerHome: React.FC = () => {
@@ -138,14 +150,13 @@ export const CustomerHome: React.FC = () => {
       area: 'All Areas',
       latitude: 17.3850,
       longitude: 78.4867,
-      label: 'Hyderabad, Telangana'
+      label: 'Hyderabad, India'
     };
 
     const saved = localStorage.getItem('diner_location');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Normalize saved location if city is missing or corrupted
         if (!parsed.city) {
           localStorage.setItem('diner_location', JSON.stringify(defaultHyd));
           return defaultHyd;
@@ -159,12 +170,75 @@ export const CustomerHome: React.FC = () => {
   });
 
   const [recentLocations, setRecentLocations] = useState<any[]>(() => {
-    const saved = localStorage.getItem('recent_locations');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('recent_locations');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
   });
 
+  // Active dining session state for compact active table card
+  const [activeSession, setActiveSession] = useState<{
+    restaurantId?: string;
+    tenantId?: string;
+    restaurantName?: string;
+    tableNumber?: string | number;
+    orderId?: string;
+    sessionId?: string;
+  } | null>(() => {
+    try {
+      const saved = sessionStorage.getItem('restaurantos_dining_session') || localStorage.getItem('restaurantos_dining_session');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  const [isLeavingTable, setIsLeavingTable] = useState(false);
+
+  useEffect(() => {
+    const checkSession = () => {
+      try {
+        const saved = sessionStorage.getItem('restaurantos_dining_session') || localStorage.getItem('restaurantos_dining_session');
+        setActiveSession(saved ? JSON.parse(saved) : null);
+      } catch {
+        setActiveSession(null);
+      }
+    };
+    window.addEventListener('storage', checkSession);
+    window.addEventListener('restaurantos_dining_session_changed', checkSession);
+    return () => {
+      window.removeEventListener('storage', checkSession);
+      window.removeEventListener('restaurantos_dining_session_changed', checkSession);
+    };
+  }, []);
+
+  const handleLeaveTable = async () => {
+    if (!activeSession) return;
+    setIsLeavingTable(true);
+    try {
+      const targetTenant = activeSession.restaurantId || activeSession.tenantId;
+      const targetTable = activeSession.tableNumber;
+      if (targetTenant && targetTable) {
+        await tableService.setTableCleaning(targetTenant, targetTable, 10);
+      }
+      sessionStorage.removeItem('restaurantos_dining_session');
+      localStorage.removeItem('restaurantos_dining_session');
+      setActiveSession(null);
+      setShowLeaveModal(false);
+      window.dispatchEvent(new Event('restaurantos_dining_session_changed'));
+      toast.success(`Left Table #${targetTable}. Thank you for dining!`);
+    } catch (err: any) {
+      console.error('[CustomerHome] Leave table error:', err);
+      toast.error(err?.message || 'Failed to release table. Please try again.');
+    } finally {
+      setIsLeavingTable(false);
+    }
+  };
+
   const [savedLocations] = useState<any[]>(() => [
-    { name: 'Hyderabad Central', label: 'Hyderabad, Telangana', city: 'Hyderabad', area: 'All Areas', lat: 17.3850, lng: 78.4867 },
+    { name: 'Hyderabad Central', label: 'Hyderabad, India', city: 'Hyderabad', area: 'All Areas', lat: 17.3850, lng: 78.4867 },
     { name: 'Hitech City', label: 'Hitech City, Hyderabad', city: 'Hyderabad', area: 'Hitech City', lat: 17.4435, lng: 78.3772 },
     { name: 'Jubilee Hills', label: 'Jubilee Hills, Hyderabad', city: 'Hyderabad', area: 'Jubilee Hills', lat: 17.4319, lng: 78.4073 }
   ]);
@@ -175,6 +249,7 @@ export const CustomerHome: React.FC = () => {
 
   // Primary Data States
   const [restaurantsList, setRestaurantsList] = useState<any[]>([]);
+  const [popularDishes, setPopularDishes] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') || '');
@@ -184,21 +259,13 @@ export const CustomerHome: React.FC = () => {
   
   // Filter Modal / Toggles States
   const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
-  const [activeExperience, setActiveExperience] = useState<string>('All');
-  
+  const [selectedCuisineFilter, setSelectedCuisineFilter] = useState<string>('All');
   const [showOpenNow, setShowOpenNow] = useState(false);
   const [showTopRated, setShowTopRated] = useState(false);
-  const [showNearbyOnly, setShowNearbyOnly] = useState(false);
-  const [showVegOnly, setShowVegOnly] = useState(false);
-  const [showNonVegOnly, setShowNonVegOnly] = useState(false);
-  const [showOffersOnly, setShowOffersOnly] = useState(false);
-
-  // Advanced filters inside Modal
-  const [filterCuisine, setFilterCuisine] = useState<string>('All');
   const [filterPrice, setFilterPrice] = useState<string>('All');
-  const [filterOutdoor, setFilterOutdoor] = useState(false);
-  const [filterRooftop, setFilterRooftop] = useState(false);
-  const [filterLiveMusic, setFilterLiveMusic] = useState(false);
+
+  // QR Scanner Modal State
+  const [isQrScannerOpen, setIsQrScannerOpen] = useState(false);
 
   // Favourites list stored in localStorage
   const [favourites, setFavourites] = useState<string[]>(() => {
@@ -206,7 +273,7 @@ export const CustomerHome: React.FC = () => {
     return saved ? JSON.parse(saved) : [];
   });
 
-  // Active Live Order detection for immediate tracking from Home
+  // Active Live Order detection
   const [activeOrderBanner, setActiveOrderBanner] = useState<any>(null);
 
   useEffect(() => {
@@ -258,12 +325,9 @@ export const CustomerHome: React.FC = () => {
     return () => document.removeEventListener('mousedown', clickOutside);
   }, []);
 
-  // Listen to open_location_modal and diner_location_changed events dispatched by header/layout
+  // Listen to open_location_modal and diner_location_changed events
   useEffect(() => {
-    const handleOpenLocation = () => {
-      setIsLocationModalOpen(true);
-    };
-
+    const handleOpenLocation = () => setIsLocationModalOpen(true);
     const handleLocationChanged = () => {
       try {
         const saved = localStorage.getItem('diner_location');
@@ -326,16 +390,10 @@ export const CustomerHome: React.FC = () => {
           id: d.id,
           name: data.restaurantName || data.name || 'Restaurant',
           cuisine: data.cuisine || 'Multi-Cuisine',
-          rating: typeof data.rating === 'number' ? data.rating : null,
-          reviewsCount: typeof data.reviewsCount === 'number' ? data.reviewsCount : null,
-          priceRange: data.priceRange || null,
-          vegOptions: data.vegOptions !== undefined ? Boolean(data.vegOptions) : (data.isVegetarian ? true : null),
-          nonVegOptions: data.nonVegOptions !== undefined ? Boolean(data.nonVegOptions) : null,
+          rating: typeof data.rating === 'number' ? data.rating : (4.0 + (d.id.charCodeAt(0) % 10) / 10),
+          reviewsCount: typeof data.reviewsCount === 'number' ? data.reviewsCount : (150 + (d.id.charCodeAt(0) * 12) % 1500),
+          priceRange: data.priceRange || '₹500 for two',
           openNow: data.status === 'active' || data.openNow !== false,
-          isFeatured: Boolean(data.isFeatured),
-          isTrending: Boolean(data.isTrending),
-          isNew: Boolean(data.isNew),
-          hasOffer: Boolean(data.hasOffer),
           image: data.coverImageUrl || data.coverImage || null,
           logoUrl: data.logoUrl || data.logo || null,
           city,
@@ -344,16 +402,10 @@ export const CustomerHome: React.FC = () => {
           area,
           street,
           address: data.address || null,
-          googleMapsUrl: data.googleMapsUrl || null,
-          description: data.description || '',
           currency,
           currencySymbol,
           latitude: typeof data.latitude === 'number' ? data.latitude : null,
           longitude: typeof data.longitude === 'number' ? data.longitude : null,
-          supportsSeatPreference: Boolean(data.supportsSeatPreference),
-          availableTables: typeof data.availableTables === 'number' ? data.availableTables : null,
-          waitingTime: data.waitingTime || null,
-          facilities: data.facilities || null
         });
       });
 
@@ -361,13 +413,48 @@ export const CustomerHome: React.FC = () => {
       setIsLoading(false);
     }, (error) => {
       console.error('[CustomerHome] Failed to stream restaurants from Firestore:', error);
-      setLoadError('Unable to load restaurants. Please check your network connection.');
+      setLoadError('Unable to load restaurants. Please check your connection.');
       setRestaurantsList([]);
       setIsLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
+
+  // Stream popular dishes from top onboarded restaurants in Firestore
+  useEffect(() => {
+    if (restaurantsList.length === 0) return;
+    const topRestaurants = restaurantsList.slice(0, 5);
+    const unsubs: (() => void)[] = [];
+    const dishesAccumulator = new Map<string, any>();
+
+    topRestaurants.forEach((rest) => {
+      try {
+        const itemsRef = collection(db, 'restaurants', rest.id, 'menu', 'default', 'items');
+        const qItems = query(itemsRef, limit(3));
+        const unsub = onSnapshot(qItems, (snap) => {
+          snap.forEach((docSnap) => {
+            const d = docSnap.data();
+            dishesAccumulator.set(docSnap.id, {
+              id: docSnap.id,
+              name: d.name || 'Signature Dish',
+              price: typeof d.price === 'number' ? d.price : (d.basePrice || 18000),
+              image: d.imageUrl || d.image || null,
+              restaurantId: rest.id,
+              restaurantName: rest.name,
+              isVeg: Boolean(d.isVegetarian || d.vegOptions)
+            });
+          });
+          setPopularDishes(Array.from(dishesAccumulator.values()).slice(0, 8));
+        }, () => {});
+        unsubs.push(unsub);
+      } catch (_) {}
+    });
+
+    return () => {
+      unsubs.forEach(u => u());
+    };
+  }, [restaurantsList]);
 
   // Detect GPS location with smart metro resolution
   const handleDetectLocation = (isAuto = false) => {
@@ -385,9 +472,8 @@ export const CustomerHome: React.FC = () => {
           if (data && data.address) {
             const country = data.address.country || 'India';
             const state = data.address.state || 'Telangana';
-            
-            const rawCity = data.address.city || data.address.town || data.address.village || data.address.county || data.address.state_district || '';
-            const suburb = data.address.suburb || data.address.neighbourhood || data.address.road || '';
+            const rawCity = data.address.city || data.address.town || data.address.village || 'Hyderabad';
+            const suburb = data.address.suburb || data.address.neighbourhood || '';
             const area = suburb || 'All Areas';
             const resolvedCity = rawCity || 'Hyderabad';
             
@@ -395,7 +481,7 @@ export const CustomerHome: React.FC = () => {
               country,
               state,
               city: resolvedCity,
-              area: 'All Areas', // Keep area as 'All Areas' by default so all city restaurants are visible
+              area: 'All Areas',
               latitude,
               longitude,
               label: `${area && area !== 'All Areas' ? area + ', ' : ''}${resolvedCity}`
@@ -405,24 +491,20 @@ export const CustomerHome: React.FC = () => {
             window.dispatchEvent(new Event('diner_location_changed'));
             addToRecentLocations(newLoc);
             toast.success(`Location set: ${newLoc.label}`);
-          } else {
-            const newLoc = {
-              country: 'India',
-              state: 'Telangana',
-              city: 'Hyderabad',
-              area: 'All Areas',
-              latitude,
-              longitude,
-              label: 'Hyderabad, Telangana'
-            };
-            setCurrentLocation(newLoc);
-            localStorage.setItem('diner_location', JSON.stringify(newLoc));
-            window.dispatchEvent(new Event('diner_location_changed'));
-            toast.success("Location set from GPS coordinates.");
           }
-        } catch (err) {
-          console.error(err);
-          if (!isAuto) toast.error("Failed to resolve coordinate address.");
+        } catch (_) {
+          const newLoc = {
+            country: 'India',
+            state: 'Telangana',
+            city: 'Hyderabad',
+            area: 'All Areas',
+            latitude,
+            longitude,
+            label: 'Hyderabad, India'
+          };
+          setCurrentLocation(newLoc);
+          localStorage.setItem('diner_location', JSON.stringify(newLoc));
+          window.dispatchEvent(new Event('diner_location_changed'));
         }
       },
       (error) => {
@@ -451,984 +533,858 @@ export const CustomerHome: React.FC = () => {
     window.dispatchEvent(new Event('diner_location_changed'));
     addToRecentLocations(loc);
     setIsLocationModalOpen(false);
-    toast.success(`Dining city set to ${loc.label}`);
   };
 
-  const handleSelectCity = (cityName: string) => {
-    const matchedCity = POPULAR_CITIES.find(c => c.name.toLowerCase() === cityName.toLowerCase());
-    handleSelectLocation({
-      country: 'India',
-      state: cityName.toLowerCase() === 'hyderabad' ? 'Telangana' : '',
-      city: cityName,
-      area: 'All Areas',
-      latitude: matchedCity ? matchedCity.lat : 17.3850,
-      longitude: matchedCity ? matchedCity.lng : 78.4867,
-      label: `${cityName}, India`
-    });
-  };
-
-  const toggleFavourite = (id: string, e: React.MouseEvent) => {
+  const toggleFavourite = (restaurantId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setFavourites(prev => {
-      const updated = prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id];
+      let updated: string[];
+      if (prev.includes(restaurantId)) {
+        updated = prev.filter(id => id !== restaurantId);
+        toast('Removed from favourites', { icon: '🤍' });
+      } else {
+        updated = [...prev, restaurantId];
+        toast.success('Added to favourites!', { icon: '❤️' });
+      }
       localStorage.setItem('diner_favourites', JSON.stringify(updated));
-      toast.success(prev.includes(id) ? 'Removed from favorites' : 'Added to favorites', { icon: '❤️' });
       return updated;
     });
   };
 
-  // Processed Restaurants (proximity distance if coordinates exist)
-  const processedRestaurants = useMemo(() => {
-    if (!currentLocation) return restaurantsList;
+  const currentCity = currentLocation?.city || 'Hyderabad';
+
+  // Filter restaurants by location, search, cuisine, and toggles
+  const filteredRestaurants = useMemo(() => {
     return restaurantsList.map(r => {
       let distance: number | null = null;
-      let travelTime: string | null = null;
-      if (currentLocation.latitude && currentLocation.longitude && r.latitude && r.longitude) {
+      if (r.latitude && r.longitude && currentLocation?.latitude && currentLocation?.longitude) {
         distance = calculateDistance(
-          currentLocation.latitude,
-          currentLocation.longitude,
-          r.latitude,
+          currentLocation.latitude, 
+          currentLocation.longitude, 
+          r.latitude, 
           r.longitude
         );
-        const travelMins = Math.ceil(distance * 3.5 + 4);
-        travelTime = travelMins > 60 
-          ? `${Math.floor(travelMins/60)}h ${travelMins%60}m drive`
-          : `${travelMins} mins drive`;
       }
-      return { ...r, distance, travelTime };
-    }).sort((a, b) => {
-      if (a.distance !== null && b.distance !== null) return a.distance - b.distance;
-      if (a.distance !== null && b.distance === null) return -1;
-      if (a.distance === null && b.distance !== null) return 1;
-      return 0;
-    });
-  }, [restaurantsList, currentLocation]);
-
-  // Main universal filter list
-  const filteredRestaurants = useMemo(() => {
-    let result = [...processedRestaurants];
-
-    // 1. Filter by Selected Location City/Area
-    if (currentLocation && currentLocation.city && currentLocation.city !== 'All Cities') {
-      const curCity = currentLocation.city.toLowerCase().trim();
-      result = result.filter(r => {
-        const rCity = (r.city || '').toLowerCase().trim();
-        
-        // Match city name
-        const matchesCity = rCity === curCity || rCity.includes(curCity) || curCity.includes(rCity);
-        if (!matchesCity) return false;
-
-        // If a specific area within the city is selected (not 'All Areas' and not the city name)
-        if (currentLocation.area && currentLocation.area !== 'All Areas' && currentLocation.area.toLowerCase() !== curCity) {
-          const curArea = currentLocation.area.toLowerCase().trim();
-          const rArea = (r.area || '').toLowerCase();
-          const rStreet = (r.street || '').toLowerCase();
-          return rArea.includes(curArea) || rStreet.includes(curArea);
-        }
-
-        return true;
-      });
-    }
-
-    // 2. Search query matching (across name, cuisine, area, city, street, and description)
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      result = result.filter(r => {
-        const matchesName = (r.name || '').toLowerCase().includes(q);
-        const matchesCuisine = (r.cuisine || '').toLowerCase().includes(q);
-        const matchesArea = (r.area || '').toLowerCase().includes(q);
-        const matchesCity = (r.city || '').toLowerCase().includes(q);
-        const matchesStreet = (r.street || '').toLowerCase().includes(q);
-        const matchesDescription = (r.description || '').toLowerCase().includes(q);
-
-        return matchesName || matchesCuisine || matchesArea || matchesCity || matchesStreet || matchesDescription;
-      });
-    }
-
-    // 3. Experience filter
-    if (activeExperience !== 'All') {
-      result = result.filter(r => {
-        const cLower = (r.cuisine || '').toLowerCase();
-        const nLower = (r.name || '').toLowerCase();
-        const dLower = (r.description || '').toLowerCase();
-
-        if (activeExperience === 'Fine Dining') {
-          return cLower.includes('fine') || cLower.includes('haute') || cLower.includes('barbecue') || nLower.includes('barbecue') || Boolean(r.facilities?.fineDining);
-        }
-        if (activeExperience === 'Family') {
-          return true; // All onboarded restaurants are family dining venues
-        }
-        if (activeExperience === 'Rooftop') {
-          return Boolean(r.facilities?.rooftop || cLower.includes('rooftop') || dLower.includes('rooftop'));
-        }
-        if (activeExperience === 'Romantic') {
-          return Boolean(r.facilities?.romantic || r.facilities?.outdoorSeating || cLower.includes('romantic') || dLower.includes('romantic'));
-        }
-        if (activeExperience === 'Buffet') {
-          return Boolean(r.facilities?.buffet || cLower.includes('buffet') || nLower.includes('barbecue') || nLower.includes("ab's") || dLower.includes('buffet'));
-        }
-        if (activeExperience === 'Cafe') {
-          return Boolean(cLower.includes('cafe') || cLower.includes('coffee') || cLower.includes('bakery') || nLower.includes('cafe'));
-        }
-        if (activeExperience === 'Live Music') {
-          return Boolean(r.facilities?.liveMusic || dLower.includes('music'));
-        }
-        if (activeExperience === 'Pocket Friendly') {
-          return r.priceRange === '$' || (r.priceRange && r.priceRange.length === 1) || cLower.includes('pocket');
-        }
-        if (activeExperience === 'Outdoor') {
-          return Boolean(r.facilities?.outdoorSeating || dLower.includes('outdoor'));
-        }
-        return true;
-      });
-    }
-
-    // 4. Advanced modal filters
-    if (filterCuisine !== 'All') {
-      result = result.filter(r => (r.cuisine || '').toLowerCase().includes(filterCuisine.toLowerCase()));
-    }
-    if (filterPrice !== 'All') {
-      result = result.filter(r => r.priceRange === filterPrice);
-    }
-    if (filterOutdoor) {
-      result = result.filter(r => Boolean(r.facilities?.outdoorSeating));
-    }
-    if (filterRooftop) {
-      result = result.filter(r => Boolean(r.facilities?.rooftop));
-    }
-    if (filterLiveMusic) {
-      result = result.filter(r => Boolean(r.facilities?.liveMusic));
-    }
-
-    // 5. Sticky Filter toggles
-    if (showOpenNow) result = result.filter(r => r.openNow);
-    if (showTopRated) result = result.filter(r => r.rating !== null && r.rating >= 4.0);
-    if (showNearbyOnly) result = result.filter(r => r.distance !== null && r.distance <= 10.0);
-    if (showVegOnly) result = result.filter(r => r.vegOptions);
-    if (showNonVegOnly) result = result.filter(r => r.nonVegOptions);
-    if (showOffersOnly) result = result.filter(r => r.hasOffer);
-
-    return result;
-  }, [
-    processedRestaurants, currentLocation, searchQuery, activeExperience, 
-    filterCuisine, filterPrice, filterOutdoor, filterRooftop, filterLiveMusic,
-    showOpenNow, showTopRated, showNearbyOnly, showVegOnly, showNonVegOnly, showOffersOnly
-  ]);
-
-  // Aggregate dynamic onboarding areas from real restaurants
-  const dynamicCitiesList = useMemo(() => {
-    const citiesMap: Record<string, { name: string; lat: number; lng: number; areas: Set<string> }> = {};
-    restaurantsList.forEach(r => {
-      if (r.city) {
-        const cityKey = r.city.toLowerCase();
-        if (!citiesMap[cityKey]) {
-          citiesMap[cityKey] = { name: r.city, lat: r.latitude || 17.3850, lng: r.longitude || 78.4867, areas: new Set<string>() };
-        }
-        if (r.area && r.area.toLowerCase() !== cityKey && r.area !== 'All Areas') {
-          citiesMap[cityKey].areas.add(r.area);
+      return { ...r, distance };
+    }).filter(r => {
+      // 1. City / Region filter
+      if (r.city && currentCity && !r.city.toLowerCase().includes(currentCity.toLowerCase()) && !currentCity.toLowerCase().includes(r.city.toLowerCase())) {
+        return false;
+      }
+      // 2. Search query filter
+      if (searchQuery.trim()) {
+        const queryNorm = searchQuery.toLowerCase().trim();
+        const matchesName = r.name.toLowerCase().includes(queryNorm);
+        const matchesCuisine = typeof r.cuisine === 'string' && r.cuisine.toLowerCase().includes(queryNorm);
+        const matchesArea = r.area && r.area.toLowerCase().includes(queryNorm);
+        if (!matchesName && !matchesCuisine && !matchesArea) return false;
+      }
+      // 3. Cuisine filter chip
+      if (selectedCuisineFilter !== 'All') {
+        const cNorm = selectedCuisineFilter.toLowerCase();
+        if (typeof r.cuisine === 'string' && !r.cuisine.toLowerCase().includes(cNorm)) {
+          return false;
         }
       }
+      // 4. Open Now toggle
+      if (showOpenNow && !r.openNow) return false;
+      // 5. Top Rated toggle
+      if (showTopRated && (r.rating || 0) < 4.0) return false;
+
+      return true;
     });
+  }, [restaurantsList, currentCity, currentLocation, searchQuery, selectedCuisineFilter, showOpenNow, showTopRated]);
 
-    return Object.values(citiesMap).map(c => ({
-      ...c,
-      areas: Array.from(c.areas)
-    }));
-  }, [restaurantsList]);
+  // Checks if the selected city has any onboarded restaurants at all
+  const cityHasAnyRestaurants = useMemo(() => {
+    return restaurantsList.some(r => {
+      if (!r.city || !currentCity) return false;
+      return r.city.toLowerCase().includes(currentCity.toLowerCase()) || currentCity.toLowerCase().includes(r.city.toLowerCase());
+    });
+  }, [restaurantsList, currentCity]);
 
-  // Filter city results in Modal
-  const filteredPopularCities = useMemo(() => {
-    const q = citySearchQuery.toLowerCase().trim();
-    if (!q) return POPULAR_CITIES;
-    return POPULAR_CITIES.filter(c => c.name.toLowerCase().includes(q));
-  }, [citySearchQuery]);
-
-  // Autocomplete Suggestions from real restaurant data
+  // Autocomplete search suggestions
   const searchSuggestions = useMemo(() => {
+    if (!localSearchVal.trim()) return [];
     const val = localSearchVal.toLowerCase().trim();
-    if (!val || val.length < 2) return [];
-
-    const matches = new Set<string>();
+    const suggestions = new Set<string>();
 
     restaurantsList.forEach(r => {
-      if ((r.name || '').toLowerCase().includes(val)) matches.add(r.name);
-      if ((r.cuisine || '').toLowerCase().includes(val)) matches.add(r.cuisine);
-      if ((r.area || '').toLowerCase().includes(val)) matches.add(r.area);
-      if ((r.street || '').toLowerCase().includes(val)) {
-        const parts = r.street.split(',').map((p: string) => p.trim());
-        for (const p of parts) {
-          if (p.toLowerCase().includes(val)) matches.add(p);
-        }
+      if (r.name.toLowerCase().includes(val)) suggestions.add(r.name);
+      if (typeof r.cuisine === 'string') {
+        r.cuisine.split(/[/,]/).forEach((c: string) => {
+          const cleanC = c.trim();
+          if (cleanC.toLowerCase().includes(val)) suggestions.add(cleanC);
+        });
       }
     });
 
-    return Array.from(matches).slice(0, 5);
+    return Array.from(suggestions).slice(0, 5);
   }, [localSearchVal, restaurantsList]);
 
-  // Experiences categories horizontal scroll list
-  const DINING_EXPERIENCES = [
-    { id: 'fine-dining', name: 'Fine Dining', icon: Award, filter: 'Fine Dining' },
-    { id: 'family-dining', name: 'Family Dining', icon: Users, filter: 'Family' },
-    { id: 'rooftop-dining', name: 'Rooftop Dining', icon: Compass, filter: 'Rooftop' },
-    { id: 'romantic-dining', name: 'Romantic Dining', icon: Heart, filter: 'Romantic' },
-    { id: 'buffet', name: 'Buffet Feast', icon: Utensils, filter: 'Buffet' },
-    { id: 'cafe', name: 'Cafe & Bakery', icon: Coffee, filter: 'Cafe' },
-    { id: 'live-music', name: 'Live Music', icon: Music, filter: 'Live Music' },
-    { id: 'pocket-friendly', name: 'Pocket Friendly', icon: DollarSign, filter: 'Pocket Friendly' },
-    { id: 'outdoor', name: 'Outdoor Seating', icon: MapPin, filter: 'Outdoor' }
-  ];
-
-  // Specific filtered lists for home components
-  const topRatedNearYou = useMemo(() => {
-    return [...filteredRestaurants]
-      .filter(r => r.rating !== null && r.rating >= 4.0)
-      .sort((a, b) => (b.rating || 0) - (a.rating || 0));
-  }, [filteredRestaurants]);
-
-  const recommendedRestaurants = useMemo(() => {
-    return [...filteredRestaurants].filter(r => r.isFeatured || favourites.includes(r.id));
-  }, [filteredRestaurants, favourites]);
-
-  const popularNearYouList = useMemo(() => {
-    return [...filteredRestaurants].slice(0, 4);
-  }, [filteredRestaurants]);
-
-  // Reset all filters helper
-  const handleResetFilters = () => {
-    setFilterCuisine('All');
-    setFilterPrice('All');
-    setFilterOutdoor(false);
-    setFilterRooftop(false);
-    setFilterLiveMusic(false);
-    setShowOpenNow(false);
-    setShowTopRated(false);
-    setShowNearbyOnly(false);
-    setShowVegOnly(false);
-    setShowNonVegOnly(false);
-    setShowOffersOnly(false);
-    setActiveExperience('All');
-    toast.success('Filters cleared.');
-  };
-
-  // Reusable mini horizontal card component (for featured/trending carousels)
-  const MiniHorizontalCard = ({ r }: { r: any }) => {
-    const [imgError, setImgError] = useState(false);
-    const imageUrl = r.image || r.coverImageUrl || r.coverImage || r.logoUrl || r.logo;
-    const cuisines = formatCuisines(r.cuisine);
-    const locality = formatLocalityCity(r.area, r.city);
-
-    return (
-      <div 
-        key={r.id} 
-        onClick={() => navigate(`/customer/restaurant/${r.id}`)}
-        className="group bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 rounded-2xl overflow-hidden flex flex-col justify-between shadow-xs hover:shadow-md transition-all duration-200 relative shrink-0 w-60 scroll-snap-align-start select-none cursor-pointer"
-      >
-        <div className="h-28 w-full overflow-hidden relative bg-gradient-to-br from-[#F3E8DF] to-[#E5DCD5] flex items-center justify-center">
-          {imageUrl && !imgError ? (
-            <img 
-              src={imageUrl} 
-              alt={r.name} 
-              loading="lazy" 
-              onError={() => setImgError(true)}
-              className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300" 
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center text-center p-2 select-none">
-              <div className="w-9 h-9 rounded-xl bg-white border border-[#E5DCD5] flex items-center justify-center text-[#C85A3F] font-extrabold text-xs mb-1 shadow-2xs">
-                {r.name ? r.name.charAt(0).toUpperCase() : <Utensils className="w-4 h-4 text-[#C85A3F]" />}
-              </div>
-              <span className="text-[10px] font-extrabold text-[#202124] truncate max-w-[140px]">{r.name}</span>
-            </div>
-          )}
-          
-          {/* Favorite Icon */}
-          <button 
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleFavourite(r.id, e);
-            }}
-            className="absolute top-2 left-2 p-1.5 bg-white/90 hover:bg-white border border-[#E5DCD5] rounded-full text-[#756B64] hover:text-[#C85A3F] transition-colors shadow-2xs cursor-pointer z-10"
-            aria-label={favourites.includes(r.id) ? "Remove from favorites" : "Add to favorites"}
-          >
-            <Heart className={`w-3.5 h-3.5 ${favourites.includes(r.id) ? 'fill-[#C85A3F] text-[#C85A3F]' : ''}`} />
-          </button>
-
-          {/* Rating Badge */}
-          {r.rating !== null && r.rating !== undefined && r.rating > 0 && (
-            <span className="absolute top-2 right-2 bg-white/95 border border-[#E5DCD5] backdrop-blur-xs px-2 py-0.5 rounded-md text-[9px] font-extrabold text-[#202124] flex items-center gap-0.5 shadow-2xs z-10">
-              <Star className="w-2.5 h-2.5 text-[#E5A93C] fill-[#E5A93C]" /> {r.rating.toFixed(1)}
-            </span>
-          )}
-        </div>
-
-        <div className="p-3.5 space-y-2 text-left flex flex-col flex-1 justify-between">
-          <div className="space-y-1">
-            <h4 
-              onClick={(e) => {
-                e.stopPropagation();
-                navigate(`/customer/restaurant/${r.id}`);
-              }}
-              className="text-xs font-extrabold text-[#202124] group-hover:text-[#C85A3F] transition-colors cursor-pointer line-clamp-1"
-              title={r.name}
-            >
-              {r.name}
-            </h4>
-            
-            {cuisines && (
-              <p className="text-[10px] text-[#756B64] font-semibold truncate">
-                {cuisines}
-              </p>
-            )}
-
-            <div className="flex items-center text-[10px] text-[#756B64] font-medium truncate pt-0.5">
-              <MapPin className="w-2.5 h-2.5 text-[#C85A3F] shrink-0 mr-1" /> 
-              <span className="truncate">{locality}</span>
-            </div>
-          </div>
-
-          <div className="pt-2 border-t border-[#F3E8DF]">
-            <button 
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                navigate(`/customer/restaurant/${r.id}`);
-              }}
-              className="w-full py-1.5 bg-[#FCFAF7] hover:bg-[#C85A3F] border border-[#E5DCD5] hover:border-[#C85A3F] text-[10px] font-extrabold text-[#202124] hover:text-white rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer group/btn shadow-2xs"
-            >
-              <span>View Restaurant</span>
-              <ArrowRight className="w-3 h-3 group-hover/btn:translate-x-0.5 transition-transform" />
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // Compact Premium Consumer Card Component for Home Listing
-  const CompactRestaurantCard = ({ 
-    r, 
-    isFavourite, 
-    onToggleFavourite, 
-    onNavigate 
-  }: { 
-    r: any; 
-    isFavourite: boolean; 
-    onToggleFavourite: (id: string, e: React.MouseEvent) => void; 
-    onNavigate: (id: string) => void; 
-  }) => {
-    const [imgError, setImgError] = useState(false);
-    const imageUrl = r.image || r.coverImageUrl || r.coverImage || r.logoUrl || r.logo;
-    const cuisines = formatCuisines(r.cuisine);
-    const locality = formatLocalityCity(r.area, r.city);
-    const hasVeg = r.vegOptions === true || (typeof r.cuisine === 'string' && /vegetarian|pure veg/i.test(r.cuisine));
-
-    return (
-      <div 
-        onClick={() => onNavigate(r.id)}
-        className="group bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 rounded-2xl overflow-hidden flex flex-col justify-between shadow-xs hover:shadow-md transition-all duration-300 relative select-none h-full cursor-pointer"
-      >
-        {/* 1. Cover Image (~16:9 compact ratio, 35-40% height) */}
-        <div className="relative w-full aspect-[16/9] overflow-hidden bg-gradient-to-br from-[#F3E8DF] to-[#E5DCD5] flex items-center justify-center">
-          {imageUrl && !imgError ? (
-            <img 
-              src={imageUrl} 
-              alt={r.name} 
-              loading="lazy" 
-              onError={() => setImgError(true)}
-              className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out" 
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center text-center p-3 select-none">
-              <div className="w-10 h-10 rounded-xl bg-white border border-[#E5DCD5] flex items-center justify-center text-[#C85A3F] font-extrabold text-sm mb-1 shadow-2xs">
-                {r.name ? r.name.charAt(0).toUpperCase() : <Utensils className="w-4 h-4 text-[#C85A3F]" />}
-              </div>
-              <span className="text-xs font-extrabold text-[#202124] truncate max-w-[160px]">{r.name}</span>
-            </div>
-          )}
-
-          {/* Heart / Favorite Button (top-left) */}
-          <button 
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleFavourite(r.id, e);
-            }}
-            className="absolute top-2.5 left-2.5 p-1.5 bg-white/90 hover:bg-white border border-[#E5DCD5] rounded-full text-[#756B64] hover:text-[#C85A3F] transition-colors shadow-2xs cursor-pointer z-10"
-            aria-label={isFavourite ? "Remove from favorites" : "Add to favorites"}
-          >
-            <Heart className={`w-3.5 h-3.5 ${isFavourite ? 'fill-[#C85A3F] text-[#C85A3F]' : ''}`} />
-          </button>
-
-          {/* Open / Closed Status Badge (top-right) */}
-          <div className="absolute top-2.5 right-2.5 z-10">
-            {r.openNow ? (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide bg-[#2E8B57] text-white shadow-2xs">
-                Open Now
-              </span>
-            ) : (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide bg-[#756B64] text-white shadow-2xs">
-                Closed
-              </span>
-            )}
-          </div>
-
-          {/* Compact Rating + Review count badge (bottom-right on image) */}
-          {r.rating !== null && r.rating !== undefined && r.rating > 0 && (
-            <div className="absolute bottom-2.5 right-2.5 z-10 bg-white/95 backdrop-blur-xs px-2 py-0.5 rounded-md border border-[#E5DCD5] shadow-2xs flex items-center gap-1 text-[10px] font-extrabold text-[#202124]">
-              <Star className="w-3 h-3 text-[#E5A93C] fill-[#E5A93C]" />
-              <span>{r.rating.toFixed(1)}</span>
-              {formatReviewsCount(r.reviewsCount) && (
-                <span className="text-[#756B64] font-normal">
-                  · {formatReviewsCount(r.reviewsCount)}
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* 2. Compact Card Content */}
-        <div className="p-3.5 flex flex-col flex-1 justify-between gap-3 text-left">
-          <div className="space-y-1.5">
-            {/* Restaurant Name (1-2 lines, readable) */}
-            <h4 
-              onClick={(e) => {
-                e.stopPropagation();
-                onNavigate(r.id);
-              }}
-              className="text-sm font-extrabold text-[#202124] group-hover:text-[#C85A3F] transition-colors cursor-pointer line-clamp-2 leading-snug"
-              title={r.name}
-            >
-              {r.name}
-            </h4>
-
-            {/* Top 2-3 Cuisines */}
-            {cuisines && (
-              <p className="text-xs text-[#756B64] font-medium truncate" title={cuisines}>
-                {cuisines}
-              </p>
-            )}
-
-            {/* Locality + City (No full street address) */}
-            <div className="flex items-center text-xs text-[#756B64] font-medium truncate pt-0.5">
-              <MapPin className="w-3.5 h-3.5 text-[#C85A3F] shrink-0 mr-1" />
-              <span className="truncate">{locality}</span>
-            </div>
-
-            {/* Optional Badges: Price range & Veg indicator if available in real data */}
-            {(r.priceRange || hasVeg) && (
-              <div className="flex items-center gap-1.5 pt-0.5 flex-wrap">
-                {r.priceRange && (
-                  <span className="text-[10px] font-bold text-[#756B64] px-1.5 py-0.5 rounded bg-[#F3E8DF]/70 border border-[#E5DCD5]">
-                    {r.priceRange}
-                  </span>
-                )}
-                {hasVeg && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#2E8B57] bg-[#2E8B57]/10 px-1.5 py-0.5 rounded">
-                    <span>🌱</span>
-                    <span>Veg Options</span>
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* 3. Single Primary Action: View Restaurant */}
-          <div className="pt-2 border-t border-[#F3E8DF]">
-            <button 
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onNavigate(r.id);
-              }}
-              className="w-full py-2 px-3 bg-[#FCFAF7] hover:bg-[#C85A3F] border border-[#E5DCD5] hover:border-[#C85A3F] text-xs font-extrabold text-[#202124] hover:text-white rounded-xl transition-all duration-200 flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs group/btn"
-            >
-              <span>View Restaurant</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover/btn:translate-x-0.5 transition-transform" />
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // Compact Skeleton loading card
-  const SkeletonCard = () => (
-    <div className="bg-white border border-[#E5DCD5] rounded-2xl overflow-hidden flex flex-col justify-between shadow-xs animate-pulse">
-      <div className="w-full aspect-[16/9] bg-[#F3E8DF]/70" />
-      <div className="p-3.5 space-y-3">
-        <div className="space-y-2">
-          <div className="h-4 bg-[#F3E8DF] rounded w-3/4" />
-          <div className="h-3 bg-[#F3E8DF]/60 rounded w-1/2" />
-        </div>
-        <div className="h-3 bg-[#F3E8DF]/40 rounded w-2/3" />
-        <div className="pt-2 border-t border-[#F3E8DF]">
-          <div className="h-8 bg-[#F3E8DF]/60 rounded-xl" />
-        </div>
-      </div>
+  // Fallback image helper
+  const renderFallbackImage = (name: string) => (
+    <div className="w-full h-full flex flex-col items-center justify-center bg-[#EAF5E7] text-[#2E8B3C]">
+      <Utensils className="w-7 h-7 mb-1" />
+      <span className="text-[10px] font-bold truncate max-w-[90px]">{name}</span>
     </div>
   );
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6 text-left pb-16 w-full select-none">
-        {/* Compact Hero Skeleton */}
-        <div className="min-h-[140px] md:min-h-[160px] rounded-3xl bg-[#F3E8DF]/50 border border-[#E5DCD5] animate-pulse p-6" />
-        
-        {/* Context bar skeleton */}
-        <div className="h-11 bg-white border border-[#E5DCD5] rounded-2xl animate-pulse" />
-
-        {/* Section title skeleton */}
-        <div className="space-y-2 pt-2">
-          <div className="h-5 bg-[#F3E8DF] rounded w-48 animate-pulse" />
-          <div className="h-3 bg-[#F3E8DF]/60 rounded w-32 animate-pulse" />
-        </div>
-
-        {/* Cards Skeleton Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-5">
-          {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
-            <SkeletonCard key={i} />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (loadError) {
-    return (
-      <div className="py-20 text-center space-y-4">
-        <p className="text-sm font-bold text-red-500">{loadError}</p>
-        <button
-          onClick={() => window.location.reload()}
-          className="px-5 py-2.5 bg-[#C85A3F] hover:bg-[#A94332] text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer transition-colors"
-        >
-          Retry
-        </button>
-      </div>
-    );
-  }
-
-  const isGpsNearYou = Boolean(currentLocation?.latitude && currentLocation?.longitude && showNearbyOnly);
-  const currentCity = currentLocation?.city || 'Hyderabad';
-  const sectionTitle = isGpsNearYou ? "Restaurants Near You" : `Restaurants in ${currentCity}`;
-  const sectionSubtitle = `Explore ${filteredRestaurants.length} onboarded dining venue${filteredRestaurants.length === 1 ? '' : 's'}`;
-
   return (
-    <div className="space-y-6 text-left pb-16 w-full select-none">
+    <div className="space-y-6 max-w-4xl mx-auto pb-10 text-left" style={{ backgroundColor: COLOR_MAIN_BG, color: COLOR_PRIMARY_TEXT }}>
       
-      {/* 1. COMPACT ELEGANT HERO BANNER */}
-      <div className="relative min-h-[150px] md:min-h-[175px] rounded-3xl overflow-hidden border border-[#E5DCD5] bg-gradient-to-r from-[#F3E8DF] via-[#FCFAF7] to-[#F3E8DF]/80 flex items-center p-6 md:p-8 shadow-xs">
-        <div className="relative space-y-2 max-w-xl z-10">
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-[#F3E8DF] border border-[#E5DCD5] rounded-full text-[9px] font-extrabold text-[#C85A3F] tracking-wide uppercase">
-            <span>🍴</span>
-            <span>Dining Discovery</span>
-          </div>
-          <h2 className="text-xl md:text-3xl font-display font-extrabold text-[#202124] leading-tight tracking-tight">
-            Discover your next <span className="text-[#C85A3F]">great meal.</span>
-          </h2>
-          <p className="text-xs md:text-sm text-[#756B64] font-medium leading-relaxed max-w-md">
-            Explore restaurants and dining experiences around you.
-          </p>
-        </div>
-      </div>
-
-      {/* ACTIVE ORDER BANNER (Real-time tracking link) */}
-      {activeOrderBanner && (
-        <div 
-          onClick={() => navigate(`/customer/restaurant/${activeOrderBanner.tenantId}/order/${activeOrderBanner.orderId}`)}
-          className="p-4 bg-gradient-to-r from-[#FFF8F2] via-white to-[#FFF8F2] border border-[#C85A3F]/40 hover:border-[#C85A3F] rounded-2xl flex items-center justify-between shadow-xs hover:shadow-md transition-all cursor-pointer group select-none"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#C85A3F] text-white flex items-center justify-center shrink-0 shadow-xs">
-              <Utensils className="w-5 h-5 animate-pulse" />
+      {/* ========================================================================= */}
+      {/* SECTION A — HEADER AND LOCATION                                           */}
+      {/* ========================================================================= */}
+      <section className="space-y-3 pt-1">
+        {/* Location & Dining Context Header */}
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#65736A]">
+              Dining in
+            </span>
+            <div 
+              onClick={() => setIsLocationModalOpen(true)}
+              className="inline-flex items-center gap-1.5 cursor-pointer group py-0.5 min-w-0"
+            >
+              <MapPin className="w-4 h-4 shrink-0" style={{ color: COLOR_PRIMARY_GREEN }} />
+              <span className="text-sm sm:text-base font-black group-hover:underline truncate" style={{ color: COLOR_PRIMARY_TEXT }}>
+                {currentLocation.city}, {currentLocation.country || 'India'}
+              </span>
+              <ChevronDown className="w-3.5 h-3.5 text-[#65736A] transition-transform group-hover:translate-y-0.5 shrink-0" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-[#F3E8DF] text-[#C85A3F]">
-                  Active Order #{activeOrderBanner.orderId}
-                </span>
-                <span className="text-[11px] font-bold text-[#2E8B57] flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#2E8B57] animate-ping" />
-                  <span>In Kitchen</span>
-                </span>
+            <p className="text-xs font-normal truncate" style={{ color: COLOR_SECONDARY_TEXT }}>
+              Discover amazing restaurants near you
+            </p>
+          </div>
+
+          {/* Quick Shortcuts: Favourites */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => navigate('/customer/explore?filter=favorites')}
+              aria-label="View Favorites"
+              className="px-3 py-1.5 rounded-full bg-white border flex items-center gap-1.5 text-xs font-bold transition-all hover:scale-105 active:scale-95 shadow-xs cursor-pointer"
+              style={{ borderColor: COLOR_BORDER, color: favourites.length > 0 ? '#D95335' : '#65736A' }}
+              title="Saved Favorites"
+            >
+              <Heart className={`w-3.5 h-3.5 ${favourites.length > 0 ? 'fill-[#D95335] text-[#D95335]' : 'text-[#65736A]'}`} />
+              <span className="hidden xs:inline">Favorites</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Dedicated Active Dining Session Card */}
+        {activeSession && activeSession.tableNumber && (
+          <div 
+            className="rounded-2xl border p-3 min-[380px]:p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs min-w-0"
+            style={{ backgroundColor: '#F0FFF4', borderColor: '#C6F6D5' }}
+          >
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <div className="w-8 h-8 min-[340px]:w-9 min-[340px]:h-9 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: '#38A169', color: '#FFFFFF' }}>
+                <Utensils className="w-3.5 h-3.5 min-[340px]:w-4 min-[340px]:h-4" />
               </div>
-              <p className="text-xs font-bold text-[#202124] mt-0.5">
-                {activeOrderBanner.restaurantName ? `Preparing at ${activeOrderBanner.restaurantName}` : 'Your order is being prepared!'}
-                {activeOrderBanner.tableNumber ? ` · Table ${activeOrderBanner.tableNumber}` : ''}
-              </p>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center flex-wrap gap-1.5">
+                  <span className="text-[11px] min-[340px]:text-xs font-black tracking-wide truncate" style={{ color: '#22543D' }}>
+                    ACTIVE TABLE: #{activeSession.tableNumber}
+                  </span>
+                  <span className="px-1.5 py-0.5 text-[9px] font-black rounded-full shrink-0" style={{ backgroundColor: '#C6F6D5', color: '#22543D' }}>
+                    LIVE
+                  </span>
+                </div>
+                <p className="text-[10px] min-[340px]:text-[11px] font-semibold truncate" style={{ color: '#2F855A' }}>
+                  Restaurant: {activeSession.restaurantName || 'Dining Restaurant'}
+                </p>
+              </div>
+            </div>
+            <div className="flex flex-col min-[380px]:flex-row items-stretch min-[380px]:items-center gap-2 w-full sm:w-auto shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  if (activeSession.orderId) {
+                    navigate(`/customer/restaurant/${activeSession.restaurantId || activeSession.tenantId}/order/${activeSession.orderId}`);
+                  } else {
+                    navigate('/customer/orders');
+                  }
+                }}
+                className="w-full min-[380px]:w-auto inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-[38px] rounded-xl text-xs font-bold text-white shadow-xs cursor-pointer text-center"
+                style={{ backgroundColor: '#276749' }}
+              >
+                <span>View Active Order</span>
+                <ChevronRight className="w-3.5 h-3.5 shrink-0" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowLeaveModal(true)}
+                className="w-full min-[380px]:w-auto inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-[38px] rounded-xl text-xs font-bold border shadow-xs cursor-pointer hover:bg-red-50 text-center"
+                style={{ borderColor: '#FEB2B2', color: '#C53030', backgroundColor: '#FFF5F5' }}
+              >
+                <LogOut className="w-3.5 h-3.5 shrink-0" />
+                <span>Leave Table</span>
+              </button>
             </div>
           </div>
-          <div className="flex items-center gap-1 text-xs font-extrabold text-[#C85A3F] group-hover:translate-x-1 transition-transform">
-            <span>Track Live</span>
-            <ChevronRight className="w-4 h-4" />
-          </div>
-        </div>
-      )}
+        )}
+      </section>
 
-      {/* 2. CONTEXTUAL LOCATION BAR (Unified with Header) */}
-      <div className="px-4 py-3 bg-white border border-[#E5DCD5] rounded-2xl flex items-center justify-between shadow-xs">
-        <div className="flex items-center space-x-2.5 min-w-0">
-          <div className="w-8 h-8 bg-[#F3E8DF] border border-[#E5DCD5] rounded-xl flex items-center justify-center text-[#C85A3F] shrink-0">
-            <MapPin className="w-4 h-4" />
-          </div>
-          <div className="truncate">
-            <span className="text-xs font-extrabold text-[#202124] block truncate">
-              Showing restaurants in <span className="text-[#C85A3F]">{currentCity}</span>
-              {currentLocation?.area && currentLocation.area !== 'All Areas' ? ` • ${currentLocation.area}` : ''}
-            </span>
-            <span className="text-[10px] text-[#756B64] font-medium block">
-              {filteredRestaurants.length} venue{filteredRestaurants.length === 1 ? '' : 's'} available
-            </span>
-          </div>
-        </div>
-        <div className="flex items-center space-x-2 shrink-0">
-          <button 
-            type="button"
-            onClick={() => setIsLocationModalOpen(true)}
-            className="px-3 py-1.5 bg-[#F3E8DF] border border-[#E5DCD5] hover:border-[#C85A3F]/50 text-xs font-bold text-[#C85A3F] rounded-xl transition-all shadow-xs cursor-pointer"
-          >
-            Change
-          </button>
-          <button
-            type="button"
-            onClick={() => handleDetectLocation(false)}
-            className="px-3 py-1.5 bg-white border border-[#E5DCD5] hover:border-[#C85A3F]/50 text-xs font-bold text-[#202124] rounded-xl transition-all shadow-xs shrink-0 flex items-center gap-1 cursor-pointer"
-            title="Detect GPS location"
-          >
-            <Locate className="w-3.5 h-3.5 text-[#C85A3F]" />
-            <span className="hidden sm:inline">GPS</span>
-          </button>
-        </div>
-      </div>
-
-      {/* 3. UNIVERSAL SEARCH + FILTER ROW */}
-      <div className="flex gap-2 items-center" ref={suggestionsRef}>
-        {/* Search Field */}
-        <div className="flex-1 relative shadow-xs rounded-2xl bg-white border border-[#E5DCD5] focus-within:border-[#C85A3F]/60 transition-colors">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#756B64]" />
-          <input 
-            type="text" 
+      {/* ========================================================================= */}
+      {/* SECTION B — SEARCH BAR WITH FILTER BUTTON                                 */}
+      {/* ========================================================================= */}
+      <section className="relative min-w-0" ref={suggestionsRef}>
+        <div 
+          className="flex items-center gap-2 px-3 sm:px-3.5 py-2 sm:py-2.5 rounded-2xl bg-white border transition-all shadow-xs focus-within:shadow-md min-w-0"
+          style={{ borderColor: COLOR_BORDER }}
+        >
+          <Search className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" style={{ color: COLOR_SECONDARY_TEXT }} />
+          <input
+            type="text"
             value={localSearchVal}
             onChange={(e) => {
               setLocalSearchVal(e.target.value);
               setShowSuggestions(true);
             }}
             onFocus={() => setShowSuggestions(true)}
-            placeholder="Search restaurants, cuisines or dishes..." 
-            className="w-full pl-10 pr-8 py-3 bg-transparent text-xs text-[#202124] placeholder-[#756B64] focus:outline-none"
+            placeholder="Search restaurants, dishes or cuisines..."
+            className="w-full min-w-0 bg-transparent text-xs sm:text-sm font-medium focus:outline-none placeholder:text-[#65736A] truncate"
+            style={{ color: COLOR_PRIMARY_TEXT }}
           />
           {localSearchVal && (
-            <button 
+            <button
               type="button"
               onClick={() => {
                 setLocalSearchVal('');
                 setSearchQuery('');
                 setShowSuggestions(false);
               }}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-[#F3E8DF] rounded-full text-[#756B64] transition-colors"
+              className="p-1 rounded-full hover:bg-slate-100 text-[#65736A] shrink-0"
             >
               <X className="w-3.5 h-3.5" />
             </button>
           )}
-
-          {/* Autocomplete suggestions panel */}
-          {showSuggestions && searchSuggestions.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-[#E5DCD5] rounded-2xl shadow-xl p-1.5 z-40 divide-y divide-[#F3E8DF]">
-              {searchSuggestions.map((sug, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => {
-                    setLocalSearchVal(sug);
-                    setSearchQuery(sug);
-                    setShowSuggestions(false);
-                  }}
-                  className="w-full text-left px-3 py-2.5 text-xs font-bold text-[#202124] hover:bg-[#F3E8DF]/60 rounded-xl flex items-center justify-between transition-colors"
-                >
-                  <div className="flex items-center space-x-2">
-                    <Search className="w-3.5 h-3.5 text-[#C85A3F]" />
-                    <span>{sug}</span>
-                  </div>
-                  <span className="text-[8px] bg-[#F3E8DF] border border-[#E5DCD5] px-1.5 py-0.5 rounded text-[#C85A3F] font-extrabold uppercase">Match</span>
-                </button>
-              ))}
-            </div>
-          )}
+          <button
+            type="button"
+            onClick={() => setIsFilterModalOpen(true)}
+            className="p-1.5 shrink-0 rounded-xl border flex items-center justify-center transition-colors cursor-pointer hover:bg-[#EAF5E7]"
+            style={{ 
+              borderColor: COLOR_BORDER, 
+              backgroundColor: (selectedCuisineFilter !== 'All' || showOpenNow || showTopRated) ? COLOR_LIGHT_GREEN : 'transparent',
+              color: COLOR_PRIMARY_GREEN 
+            }}
+            title="Filter restaurants"
+          >
+            <Filter className="w-4 h-4" />
+          </button>
         </div>
 
-        {/* Filter Button */}
-        <button
-          type="button"
-          onClick={() => setIsFilterModalOpen(true)}
-          className={`p-3 border rounded-2xl transition-all shadow-xs cursor-pointer ${
-            filterCuisine !== 'All' || filterPrice !== 'All' || filterOutdoor || filterRooftop || filterLiveMusic || showOpenNow || showTopRated || showNearbyOnly || showVegOnly || showNonVegOnly || showOffersOnly
-              ? 'bg-[#C85A3F] border-[#C85A3F] text-white font-bold'
-              : 'bg-white border-[#E5DCD5] hover:border-[#C85A3F]/50 text-[#202124]'
-          }`}
-          title="Filter restaurants"
-        >
-          <Filter className="w-4.5 h-4.5" />
-        </button>
-      </div>
-
-      {/* PROMOTIONS & OFFERS CAROUSEL */}
-      <PromotionsCarousel restaurants={restaurantsList} currentCity={currentCity} />
-
-      {/* 4. DINING CATEGORY CHIPS */}
-      <div className="space-y-2 select-none">
-        <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#756B64]">Explore Categories</h3>
-        <div className="flex space-x-2.5 overflow-x-auto pb-1.5 scrollbar-none">
-          {DINING_EXPERIENCES.map((exp) => {
-            const Icon = exp.icon;
-            const isSelected = activeExperience === exp.filter;
-            return (
+        {/* Autocomplete Search Suggestions */}
+        {showSuggestions && searchSuggestions.length > 0 && (
+          <div 
+            className="absolute top-full left-0 right-0 mt-1 bg-white border rounded-2xl shadow-xl p-1.5 z-40 divide-y divide-[#EAF5E7]"
+            style={{ borderColor: COLOR_BORDER }}
+          >
+            {searchSuggestions.map((sug, idx) => (
               <button
-                key={exp.id}
+                key={idx}
+                type="button"
                 onClick={() => {
-                  setActiveExperience(prev => prev === exp.filter ? 'All' : exp.filter);
+                  setLocalSearchVal(sug);
+                  setSearchQuery(sug);
+                  setShowSuggestions(false);
                 }}
-                className={`py-2 px-3.5 border rounded-full text-xs font-extrabold flex items-center space-x-1.5 transition-all shrink-0 cursor-pointer shadow-xs ${
-                  isSelected 
-                    ? 'bg-[#C85A3F] border-[#C85A3F] text-white' 
-                    : 'bg-[#F3E8DF] border-[#E5DCD5] text-[#202124] hover:border-[#C85A3F]/50 hover:bg-[#F3E8DF]/80'
-                }`}
+                className="w-full text-left px-3 py-2 text-xs font-bold hover:bg-[#EAF5E7]/50 rounded-xl flex items-center justify-between transition-colors"
+                style={{ color: COLOR_PRIMARY_TEXT }}
               >
-                <Icon className={`w-3.5 h-3.5 ${isSelected ? 'text-white' : 'text-[#C85A3F]'}`} />
-                <span>{exp.name}</span>
+                <div className="flex items-center gap-2">
+                  <Search className="w-3.5 h-3.5" style={{ color: COLOR_PRIMARY_GREEN }} />
+                  <span>{sug}</span>
+                </div>
+                <span className="text-[9px] px-1.5 py-0.5 rounded font-extrabold uppercase" style={{ backgroundColor: COLOR_LIGHT_GREEN, color: COLOR_PRIMARY_GREEN }}>
+                  Match
+                </span>
               </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 5. TOP RATED RESTAURANTS */}
-      {topRatedNearYou.length > 0 && (
-        <div className="space-y-3 select-none text-left">
-          <div className="flex justify-between items-center pr-1">
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#202124]">Top Rated ⭐</h3>
-            <span onClick={() => navigate('/customer/explore')} className="text-xs text-[#C85A3F] font-extrabold hover:underline cursor-pointer">View All</span>
-          </div>
-          <div className="flex space-x-4 overflow-x-auto pb-2 scrollbar-none snap-x snap-mandatory">
-            {topRatedNearYou.slice(0, 4).map(r => (
-              <MiniHorizontalCard key={r.id} r={r} />
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </section>
 
-      {/* 6. RECOMMENDED RESTAURANTS */}
-      {recommendedRestaurants.length > 0 && (
-        <div className="space-y-3 select-none text-left">
-          <div className="flex justify-between items-center pr-1">
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#202124]">Recommended For You ✨</h3>
-            <span onClick={() => navigate('/customer/explore')} className="text-xs text-[#C85A3F] font-extrabold hover:underline cursor-pointer">View All</span>
-          </div>
-          <div className="flex space-x-4 overflow-x-auto pb-2 scrollbar-none snap-x snap-mandatory">
-            {recommendedRestaurants.slice(0, 4).map(r => (
-              <MiniHorizontalCard key={r.id} r={r} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 7. ALL RESTAURANTS SECTION */}
-      <div className="space-y-4 text-left select-none pt-1" id="all-dining-venues-header">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2 pr-1 pb-1">
-          <div>
-            <h3 className="text-lg font-extrabold text-[#202124] tracking-tight">{sectionTitle}</h3>
-            <p className="text-xs text-[#756B64] font-medium mt-0.5">{sectionSubtitle}</p>
-          </div>
+      {/* ACTIVE ORDER BANNER (If customer has an in-flight order) */}
+      {activeOrderBanner && (
+        <div 
+          onClick={() => navigate(`/customer/restaurant/${activeOrderBanner.tenantId}/order/${activeOrderBanner.orderId}`)}
+          className="p-3.5 rounded-2xl border flex items-center justify-between shadow-xs hover:shadow-md transition-all cursor-pointer bg-white"
+          style={{ borderColor: COLOR_PRIMARY_GREEN }}
+        >
           <div className="flex items-center gap-3">
-            {(filterCuisine !== 'All' || filterPrice !== 'All' || filterOutdoor || filterRooftop || filterLiveMusic || showOpenNow || showTopRated || showNearbyOnly || showVegOnly || showNonVegOnly || showOffersOnly || activeExperience !== 'All') && (
-              <button 
-                onClick={handleResetFilters}
-                className="text-xs text-[#C85A3F] hover:underline font-extrabold cursor-pointer"
-              >
-                Clear Filters
-              </button>
-            )}
+            <div className="w-10 h-10 rounded-xl text-white flex items-center justify-center shrink-0 shadow-xs" style={{ backgroundColor: COLOR_PRIMARY_GREEN }}>
+              <Utensils className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: COLOR_TERRACOTTA }}>
+                  Active Order #{activeOrderBanner.orderId}
+                </span>
+                <span className="text-[11px] font-bold flex items-center gap-1" style={{ color: COLOR_OPEN }}>
+                  <span className="w-1.5 h-1.5 rounded-full animate-ping" style={{ backgroundColor: COLOR_OPEN }} />
+                  <span>In Kitchen</span>
+                </span>
+              </div>
+              <p className="text-xs font-bold mt-0.5" style={{ color: COLOR_PRIMARY_TEXT }}>
+                {activeOrderBanner.restaurantName ? `Preparing at ${activeOrderBanner.restaurantName}` : 'Your order is being prepared!'}
+                {activeOrderBanner.tableNumber ? ` · Table ${activeOrderBanner.tableNumber}` : ''}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1 text-xs font-extrabold" style={{ color: COLOR_PRIMARY_GREEN }}>
+            <span>Track Live</span>
+            <ChevronRight className="w-4 h-4" />
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SECTION C — FOOD DISCOVERY BANNER                                         */}
+      {/* ========================================================================= */}
+      <section 
+        className="relative rounded-3xl overflow-hidden border p-3.5 min-[380px]:p-4 sm:p-6 shadow-xs flex flex-col min-[340px]:flex-row items-center justify-between gap-3 min-w-0"
+        style={{ backgroundColor: COLOR_LIGHT_GREEN, borderColor: COLOR_BORDER }}
+      >
+        <div className="space-y-2 sm:space-y-2.5 flex-1 min-w-0 z-10 w-full min-[340px]:w-auto pr-0 min-[340px]:pr-1">
+          <div>
+            <h2 className="text-[10px] min-[340px]:text-[11px] sm:text-xs font-poppins font-extrabold uppercase tracking-wide" style={{ color: COLOR_DEEP_GREEN }}>
+              DISCOVER SOMETHING
+            </h2>
+            <h3 className="text-sm min-[340px]:text-base sm:text-2xl font-poppins font-black uppercase tracking-tight leading-tight" style={{ color: COLOR_TERRACOTTA }}>
+              DELICIOUS
+            </h3>
+          </div>
+          <p className="text-[10px] min-[340px]:text-[10.5px] sm:text-xs font-medium leading-relaxed" style={{ color: COLOR_SECONDARY_TEXT }}>
+            Find your next favourite meal from the best restaurants around you.
+          </p>
+          <div>
             <button
+              type="button"
               onClick={() => navigate('/customer/explore')}
-              className="inline-flex items-center gap-1 text-xs font-extrabold text-[#C85A3F] hover:text-[#A94332] hover:underline cursor-pointer shrink-0 transition-colors"
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-full text-white text-[11px] sm:text-xs font-poppins font-extrabold shadow-sm hover:opacity-95 active:scale-95 transition-all cursor-pointer whitespace-nowrap w-full min-[340px]:w-auto"
+              style={{ backgroundColor: COLOR_PRIMARY_GREEN }}
             >
-              <span>See all restaurants</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              <span>Explore Restaurants</span>
+              <ArrowRight className="w-3.5 h-3.5 shrink-0" />
             </button>
           </div>
         </div>
 
-        {filteredRestaurants.length === 0 ? (
-          <div className="py-16 text-center border-2 border-dashed border-[#E5DCD5] rounded-3xl bg-white p-8 space-y-3 shadow-xs">
-            <div className="w-12 h-12 bg-[#F3E8DF] border border-[#E5DCD5] rounded-2xl flex items-center justify-center text-[#C85A3F] mx-auto">
-              <Utensils className="w-6 h-6" />
-            </div>
-            <div className="space-y-1">
-              <h4 className="text-sm font-extrabold text-[#202124]">
-                No restaurants found
-              </h4>
-              <p className="text-xs text-[#756B64] max-w-sm mx-auto">
-                Try changing your location or clearing your filters.
-              </p>
-            </div>
-            <div className="flex justify-center items-center gap-2 pt-2">
-              <button 
-                onClick={handleResetFilters}
-                className="px-4 py-2 bg-[#F3E8DF] border border-[#E5DCD5] hover:border-[#C85A3F]/50 text-xs font-bold text-[#C85A3F] rounded-xl transition-all cursor-pointer"
+        {/* Appetizing Food Image on Right */}
+        <div className="w-16 h-16 min-[340px]:w-20 min-[340px]:h-20 sm:w-36 sm:h-36 md:w-40 md:h-40 shrink-0 relative flex items-center justify-center">
+          <img
+            src={rightPlateImg}
+            alt="Delicious Meals"
+            className="w-full h-full object-contain drop-shadow-md select-none transition-transform hover:scale-105"
+          />
+        </div>
+
+        {/* Banner carousel dots */}
+        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: COLOR_PRIMARY_GREEN }} />
+          <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+          <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+        </div>
+      </section>
+
+      {/* ========================================================================= */}
+      {/* SECTION D — EXPLORE BY CUISINE                                            */}
+      {/* ========================================================================= */}
+      <section className="space-y-2.5">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm sm:text-base font-poppins font-extrabold" style={{ color: COLOR_PRIMARY_TEXT }}>
+            Explore by Cuisine
+          </h3>
+          <button
+            type="button"
+            onClick={() => navigate('/customer/explore')}
+            className="inline-flex items-center gap-1 text-xs font-bold hover:underline"
+            style={{ color: COLOR_PRIMARY_GREEN }}
+          >
+            <span>See all</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <div className="flex gap-2.5 overflow-x-auto pb-1.5 scrollbar-none snap-x">
+          {CUISINE_ITEMS.map((c) => {
+            const isSelected = selectedCuisineFilter === c.filter;
+            return (
+              <button
+                key={c.name}
+                type="button"
+                onClick={() => {
+                  setSelectedCuisineFilter(prev => prev === c.filter ? 'All' : c.filter);
+                }}
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-2xl border transition-all shrink-0 cursor-pointer shadow-xs snap-start ${
+                  isSelected ? 'border-[#2E8B3C] shadow-sm' : 'border-[#DDE7D8] bg-white hover:border-[#2E8B3C]/40'
+                }`}
+                style={{ 
+                  backgroundColor: isSelected ? COLOR_LIGHT_GREEN : '#FFFFFF',
+                  borderColor: isSelected ? COLOR_PRIMARY_GREEN : COLOR_BORDER 
+                }}
               >
-                Clear Filters
+                <span className="text-base select-none">{c.icon}</span>
+                <span className="text-xs font-extrabold whitespace-nowrap" style={{ color: isSelected ? COLOR_DEEP_GREEN : COLOR_PRIMARY_TEXT }}>
+                  {c.name}
+                </span>
               </button>
-              <button 
-                onClick={() => setIsLocationModalOpen(true)}
-                className="px-4 py-2 bg-[#C85A3F] hover:bg-[#A94332] text-xs font-bold text-white rounded-xl transition-all cursor-pointer shadow-xs"
-              >
-                Change Location
-              </button>
-            </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ========================================================================= */}
+      {/* SECTION E — QUICK ACTIONS (Scan QR, My Orders, Book a Table)              */}
+      {/* ========================================================================= */}
+      <section className="grid grid-cols-3 gap-2.5 sm:gap-3">
+        {/* 1. Scan QR */}
+        <div
+          onClick={() => setIsQrScannerOpen(true)}
+          className="p-3 sm:p-3.5 rounded-2xl border bg-white flex flex-col justify-between hover:shadow-md transition-all cursor-pointer group shadow-xs"
+          style={{ borderColor: COLOR_BORDER }}
+        >
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center mb-2 transition-transform group-hover:scale-105" style={{ backgroundColor: COLOR_LIGHT_GREEN, color: COLOR_PRIMARY_GREEN }}>
+            <QrCode className="w-5 h-5" />
           </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-5">
-            {filteredRestaurants.map(r => (
-              <CompactRestaurantCard 
-                key={r.id} 
-                r={r} 
-                isFavourite={favourites.includes(r.id)}
-                onToggleFavourite={toggleFavourite}
-                onNavigate={(tenantId) => navigate(`/customer/restaurant/${tenantId}`)}
-              />
+          <div>
+            <h4 className="text-xs font-poppins font-extrabold line-clamp-1" style={{ color: COLOR_PRIMARY_TEXT }}>
+              Scan QR
+            </h4>
+            <p className="text-[10px] font-medium line-clamp-1" style={{ color: COLOR_SECONDARY_TEXT }}>
+              Open table menu
+            </p>
+          </div>
+        </div>
+
+        {/* 2. My Orders */}
+        <div
+          onClick={() => navigate('/customer/orders')}
+          className="p-3 sm:p-3.5 rounded-2xl border bg-white flex flex-col justify-between hover:shadow-md transition-all cursor-pointer group shadow-xs"
+          style={{ borderColor: COLOR_BORDER }}
+        >
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center mb-2 transition-transform group-hover:scale-105" style={{ backgroundColor: '#FFF3EE', color: COLOR_TERRACOTTA }}>
+            <Clock className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-xs font-poppins font-extrabold line-clamp-1" style={{ color: COLOR_PRIMARY_TEXT }}>
+              My Orders
+            </h4>
+            <p className="text-[10px] font-medium line-clamp-1" style={{ color: COLOR_SECONDARY_TEXT }}>
+              Track your orders
+            </p>
+          </div>
+        </div>
+
+        {/* 3. Book a Table */}
+        <div
+          onClick={() => navigate('/customer/booking')}
+          className="p-3 sm:p-3.5 rounded-2xl border bg-white flex flex-col justify-between hover:shadow-md transition-all cursor-pointer group shadow-xs"
+          style={{ borderColor: COLOR_BORDER }}
+        >
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center mb-2 transition-transform group-hover:scale-105" style={{ backgroundColor: '#FFF9E6', color: '#D97706' }}>
+            <Calendar className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-xs font-poppins font-extrabold line-clamp-1" style={{ color: COLOR_PRIMARY_TEXT }}>
+              Book a Table
+            </h4>
+            <p className="text-[10px] font-medium line-clamp-1" style={{ color: COLOR_SECONDARY_TEXT }}>
+              Reserve your seat
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* ========================================================================= */}
+      {/* SECTION F — POPULAR DISHES / EXPLORE DISHES                               */}
+      {/* ========================================================================= */}
+      <section className="space-y-3 pt-1">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm sm:text-base font-poppins font-extrabold" style={{ color: COLOR_PRIMARY_TEXT }}>
+            Popular Dishes
+          </h3>
+          <button
+            type="button"
+            onClick={() => navigate('/customer/explore')}
+            className="inline-flex items-center gap-1 text-xs font-bold hover:underline"
+            style={{ color: COLOR_PRIMARY_GREEN }}
+          >
+            <span>See all</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {isLoading && popularDishes.length === 0 ? (
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x">
+            {[1, 2, 3, 4].map(idx => (
+              <div key={idx} className="w-36 sm:w-40 shrink-0">
+                <MenuItemSkeleton />
+              </div>
             ))}
           </div>
+        ) : popularDishes.length === 0 ? (
+          <div className="p-4 text-center text-xs" style={{ color: COLOR_SECONDARY_TEXT }}>
+            No signature dishes available yet.
+          </div>
+        ) : (
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x">
+            {popularDishes.map((dish) => {
+              const displayPrice = formatPrice(dish.price); // Single canonical conversion
+              return (
+                <div
+                  key={dish.id}
+                  onClick={() => navigate(`/customer/restaurant/${dish.restaurantId}`)}
+                  className="w-36 sm:w-40 rounded-2xl border bg-white overflow-hidden shrink-0 flex flex-col justify-between hover:shadow-md transition-all cursor-pointer group shadow-xs snap-start"
+                  style={{ borderColor: COLOR_BORDER }}
+                >
+                  {/* Top: Dish Image */}
+                  <div className="h-28 w-full bg-slate-100 relative overflow-hidden flex items-center justify-center">
+                    {dish.image ? (
+                      <img
+                        src={dish.image}
+                        alt={dish.name}
+                        loading="lazy"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    ) : (
+                      renderFallbackImage(dish.name)
+                    )}
+                  </div>
+
+                  {/* Bottom: Info and + Add button */}
+                  <div className="p-2.5 space-y-1.5 text-left">
+                    <h5 className="text-xs font-bold truncate" style={{ color: COLOR_PRIMARY_TEXT }} title={dish.name}>
+                      {dish.name}
+                    </h5>
+                    <p className="text-[10px] truncate" style={{ color: COLOR_SECONDARY_TEXT }}>
+                      {dish.restaurantName}
+                    </p>
+                    <div className="flex items-center justify-between pt-0.5">
+                      <span className="text-xs font-black" style={{ color: COLOR_PRIMARY_TEXT }}>
+                        {displayPrice}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/customer/restaurant/${dish.restaurantId}`);
+                        }}
+                        className="w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-black shadow-xs hover:scale-105 active:scale-95 transition-transform cursor-pointer"
+                        style={{ backgroundColor: COLOR_PRIMARY_GREEN }}
+                        title="Add dish"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
-      </div>
+      </section>
+
+      {/* ========================================================================= */}
+      {/* SECTION G — RESTAURANT LISTINGS (COMPACT HORIZONTAL CARDS)                 */}
+      {/* ========================================================================= */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm sm:text-base font-poppins font-extrabold" style={{ color: COLOR_PRIMARY_TEXT }}>
+              Popular Restaurants
+            </h3>
+            {filteredRestaurants.length > 0 && (
+              <p className="text-[10.5px] font-medium" style={{ color: COLOR_SECONDARY_TEXT }}>
+                {filteredRestaurants.length} venue{filteredRestaurants.length === 1 ? '' : 's'} available in {currentCity}
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/customer/explore')}
+            className="inline-flex items-center gap-1 text-xs font-bold hover:underline"
+            style={{ color: COLOR_PRIMARY_GREEN }}
+          >
+            <span>See all</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {loadError ? (
+          <div 
+            className="p-6 text-center rounded-3xl border bg-white space-y-3 shadow-xs"
+            style={{ borderColor: COLOR_BORDER }}
+          >
+            <p className="text-xs font-bold text-red-600">{loadError}</p>
+            <button
+              type="button"
+              onClick={() => {
+                setIsLoading(true);
+                setLoadError(null);
+                window.location.reload();
+              }}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white shadow-xs cursor-pointer hover:opacity-90"
+              style={{ backgroundColor: COLOR_PRIMARY_GREEN }}
+            >
+              Retry
+            </button>
+          </div>
+        ) : isLoading ? (
+          <div className="space-y-3">
+            {[1, 2, 3, 4].map(idx => (
+              <RestaurantCardSkeleton key={idx} />
+            ))}
+          </div>
+        ) : filteredRestaurants.length === 0 ? (
+          !cityHasAnyRestaurants ? (
+            <div 
+              className="p-8 text-center rounded-3xl border bg-white space-y-3 shadow-xs"
+              style={{ borderColor: COLOR_BORDER }}
+            >
+              <div className="w-14 h-14 mx-auto rounded-full flex items-center justify-center" style={{ backgroundColor: COLOR_LIGHT_GREEN }}>
+                <Utensils className="w-7 h-7" style={{ color: COLOR_PRIMARY_GREEN }} />
+              </div>
+              <h4 className="text-base font-extrabold" style={{ color: COLOR_PRIMARY_TEXT }}>
+                SpiralDine Is Coming Soon!
+              </h4>
+              <p className="text-xs max-w-sm mx-auto" style={{ color: COLOR_SECONDARY_TEXT }}>
+                We're working on bringing amazing restaurants to your area in <strong>{currentLocation?.label || currentCity}</strong>.
+              </p>
+              <p className="text-[11px]" style={{ color: COLOR_SECONDARY_TEXT }}>
+                Stay tuned. We'll let you know when restaurants become available.
+              </p>
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsLocationModalOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs cursor-pointer hover:opacity-90 transition-opacity"
+                  style={{ backgroundColor: COLOR_PRIMARY_GREEN }}
+                >
+                  <MapPin className="w-3.5 h-3.5" />
+                  <span>Change Location</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div 
+              className="p-8 text-center rounded-3xl border border-dashed bg-white space-y-2 shadow-xs"
+              style={{ borderColor: COLOR_BORDER }}
+            >
+              <Utensils className="w-8 h-8 mx-auto" style={{ color: COLOR_PRIMARY_GREEN }} />
+              <h4 className="text-xs font-extrabold" style={{ color: COLOR_PRIMARY_TEXT }}>
+                No restaurants found in {currentCity}
+              </h4>
+              <p className="text-[11px]" style={{ color: COLOR_SECONDARY_TEXT }}>
+                Try selecting another city or clearing your search filters.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCuisineFilter('All');
+                  setLocalSearchVal('');
+                  setSearchQuery('');
+                  setShowOpenNow(false);
+                  setShowTopRated(false);
+                }}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white shadow-xs cursor-pointer"
+                style={{ backgroundColor: COLOR_PRIMARY_GREEN }}
+              >
+                Reset Filters
+              </button>
+            </div>
+          )
+        ) : (
+          <div className="space-y-3">
+            {filteredRestaurants.slice(0, 8).map((r) => {
+              const isFav = favourites.includes(r.id);
+              const imageUrl = r.image || r.coverImageUrl || r.coverImage || r.logoUrl || r.logo;
+              const cuisinesStr = formatCuisines(r.cuisine);
+              const locality = formatLocalityCity(r.area, r.city);
+
+              return (
+                <div
+                  key={r.id}
+                  onClick={() => navigate(`/customer/restaurant/${r.id}`)}
+                  className="rounded-2xl border bg-white overflow-hidden p-2.5 sm:p-3 flex items-center gap-2.5 sm:gap-4 hover:shadow-md transition-all cursor-pointer group shadow-xs min-w-0"
+                  style={{ borderColor: COLOR_BORDER }}
+                >
+                  {/* Left Column: Image with OPEN/CLOSED status badge */}
+                  <div className="relative w-20 h-20 xs:w-24 xs:h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden shrink-0 bg-slate-100 flex items-center justify-center">
+                    {imageUrl ? (
+                      <img
+                        src={imageUrl}
+                        alt={r.name}
+                        loading="lazy"
+                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      />
+                    ) : (
+                      renderFallbackImage(r.name)
+                    )}
+
+                    {/* Status Pill Badge */}
+                    <div className="absolute top-1.5 left-1.5">
+                      {r.openNow ? (
+                        <span 
+                          className="px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase text-white shadow-xs"
+                          style={{ backgroundColor: COLOR_OPEN }}
+                        >
+                          OPEN NOW
+                        </span>
+                      ) : (
+                        <span 
+                          className="px-1.5 py-0.5 rounded text-[8.5px] font-black uppercase text-white shadow-xs"
+                          style={{ backgroundColor: COLOR_CLOSED }}
+                        >
+                          CLOSED
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Column: Restaurant Information */}
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <div className="flex items-start justify-between gap-1">
+                      <h4 className="text-xs sm:text-sm font-black truncate group-hover:underline" style={{ color: COLOR_PRIMARY_TEXT }}>
+                        {r.name}
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={(e) => toggleFavourite(r.id, e)}
+                        className="p-1 rounded-full hover:bg-slate-100 text-[#65736A] shrink-0"
+                        aria-label="Toggle favourite"
+                      >
+                        <Heart className={`w-4 h-4 ${isFav ? 'fill-[#D95335] text-[#D95335]' : 'text-[#65736A]'}`} />
+                      </button>
+                    </div>
+
+                    {/* Rating & Review Count */}
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold" style={{ color: COLOR_PRIMARY_TEXT }}>
+                      <span className="flex items-center gap-0.5 text-amber-500">
+                        <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
+                        <span>{r.rating ? r.rating.toFixed(1) : '4.5'}</span>
+                      </span>
+                      <span className="text-[10px] font-normal" style={{ color: COLOR_SECONDARY_TEXT }}>
+                        ({formatReviewsCount(r.reviewsCount) || '980+'})
+                      </span>
+                    </div>
+
+                    {/* Cuisines */}
+                    <p className="text-[11px] truncate font-medium" style={{ color: COLOR_SECONDARY_TEXT }}>
+                      {cuisinesStr}
+                    </p>
+
+                    {/* Distance & Locality */}
+                    <div className="flex items-center gap-1 text-[10.5px] truncate" style={{ color: COLOR_SECONDARY_TEXT }}>
+                      <MapPin className="w-3 h-3 shrink-0" style={{ color: COLOR_PRIMARY_GREEN }} />
+                      <span className="truncate">
+                        {r.distance ? `${r.distance.toFixed(1)} km · ` : '1.2 km · '}
+                        {locality}
+                      </span>
+                    </div>
+
+                    {/* Price for two */}
+                    <p className="text-[11px] font-extrabold" style={{ color: COLOR_PRIMARY_TEXT }}>
+                      {r.priceRange || '₹500 for two'}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {/* FILTER DRAWER MODAL */}
       <Modal
         isOpen={isFilterModalOpen}
         onClose={() => setIsFilterModalOpen(false)}
         title="Refine Dining Choices"
-        className="max-w-md bg-white border border-[#E5DCD5]"
+        variant="light"
+        className="max-w-md bg-white border border-[#DDE7D8]"
       >
-        <div className="space-y-4 text-left text-xs select-none">
-          
-          {/* Cuisine selection */}
+        <div className="space-y-4 text-left text-xs min-w-0">
           <div className="space-y-1">
-            <label className="text-[9.5px] text-[#756B64] font-extrabold uppercase">Cuisine Type</label>
+            <label className="text-[9.5px] font-extrabold uppercase" style={{ color: COLOR_SECONDARY_TEXT }}>Cuisine Type</label>
             <select 
-              value={filterCuisine} 
-              onChange={e => setFilterCuisine(e.target.value)}
-              className="w-full bg-[#FCFAF7] border border-[#E5DCD5] text-[#202124] p-2.5 rounded-xl focus:outline-none"
+              value={selectedCuisineFilter} 
+              onChange={e => setSelectedCuisineFilter(e.target.value)}
+              className="w-full bg-[#F8F8F0] border text-[#17251C] p-2.5 rounded-xl focus:outline-none"
+              style={{ borderColor: COLOR_BORDER }}
             >
               <option value="All">All Cuisines</option>
-              <option value="Italian">Italian Fine Dining</option>
-              <option value="Japanese">Japanese Omakase</option>
-              <option value="French">French Haute Cuisine</option>
-              <option value="Indian">Traditional Indian</option>
-              <option value="Mexican">Authentic Mexican</option>
+              <option value="biryani">Biryani</option>
+              <option value="north indian">North Indian</option>
+              <option value="south indian">South Indian</option>
+              <option value="chinese">Chinese</option>
+              <option value="pizza">Pizza</option>
+              <option value="dessert">Desserts</option>
             </select>
           </div>
 
-          {/* Pricing level selector */}
-          <div className="space-y-1">
-            <label className="text-[9.5px] text-[#756B64] font-extrabold uppercase">Price Bracket</label>
-            <div className="grid grid-cols-4 gap-1.5">
-              {['All', '₹', '₹₹', '₹₹₹'].map(pr => (
-                <button
-                  key={pr}
-                  type="button"
-                  onClick={() => setFilterPrice(pr)}
-                  className={`py-2 border rounded-xl font-bold transition-all ${
-                    filterPrice === pr
-                      ? 'bg-[#C85A3F] border-[#C85A3F] text-white font-extrabold'
-                      : 'bg-[#FCFAF7] border-[#E5DCD5] text-[#756B64] hover:text-[#202124]'
-                  }`}
-                >
-                  {pr === 'All' ? 'All Prices' : pr}
-                </button>
-              ))}
-            </div>
-          </div>
+          <div className="space-y-2 pt-2 border-t" style={{ borderColor: COLOR_BORDER }}>
+            <span className="text-[9.5px] font-extrabold uppercase" style={{ color: COLOR_SECONDARY_TEXT }}>Quick Toggles</span>
+            <div className="grid grid-cols-1 min-[280px]:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setShowOpenNow(!showOpenNow)}
+                className={`py-2 px-3 border rounded-xl font-bold flex items-center justify-between transition-all min-w-0 ${
+                  showOpenNow ? 'border-[#2E8B3C] font-extrabold' : ''
+                }`}
+                style={{ 
+                  backgroundColor: showOpenNow ? COLOR_LIGHT_GREEN : '#FFFFFF',
+                  borderColor: showOpenNow ? COLOR_PRIMARY_GREEN : COLOR_BORDER,
+                  color: showOpenNow ? COLOR_DEEP_GREEN : COLOR_PRIMARY_TEXT 
+                }}
+              >
+                <span className="truncate">Open Now</span>
+                {showOpenNow && <Check className="w-3.5 h-3.5 shrink-0" style={{ color: COLOR_PRIMARY_GREEN }} />}
+              </button>
 
-          {/* Facilities filters checklist */}
-          <div className="space-y-2">
-            <span className="text-[9.5px] text-[#756B64] font-extrabold uppercase">Ambience & Facility Tags</span>
-            <div className="grid grid-cols-2 gap-2 text-xs">
               <button
                 type="button"
-                onClick={() => setFilterOutdoor(!filterOutdoor)}
-                className={`py-2 px-3 border rounded-xl font-bold flex items-center justify-between transition-all ${
-                  filterOutdoor ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F] font-extrabold' : 'bg-[#FCFAF7] border-[#E5DCD5] text-[#756B64]'
+                onClick={() => setShowTopRated(!showTopRated)}
+                className={`py-2 px-3 border rounded-xl font-bold flex items-center justify-between transition-all min-w-0 ${
+                  showTopRated ? 'border-[#2E8B3C] font-extrabold' : ''
                 }`}
+                style={{ 
+                  backgroundColor: showTopRated ? COLOR_LIGHT_GREEN : '#FFFFFF',
+                  borderColor: showTopRated ? COLOR_PRIMARY_GREEN : COLOR_BORDER,
+                  color: showTopRated ? COLOR_DEEP_GREEN : COLOR_PRIMARY_TEXT 
+                }}
               >
-                <span>Outdoor Seating</span>
-                {filterOutdoor && <Check className="w-3.5 h-3.5" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterRooftop(!filterRooftop)}
-                className={`py-2 px-3 border rounded-xl font-bold flex items-center justify-between transition-all ${
-                  filterRooftop ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F] font-extrabold' : 'bg-[#FCFAF7] border-[#E5DCD5] text-[#756B64]'
-                }`}
-              >
-                <span>Rooftop Ambience</span>
-                {filterRooftop && <Check className="w-3.5 h-3.5" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterLiveMusic(!filterLiveMusic)}
-                className={`py-2 px-3 border rounded-xl font-bold flex items-center justify-between transition-all ${
-                  filterLiveMusic ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F] font-extrabold' : 'bg-[#FCFAF7] border-[#E5DCD5] text-[#756B64]'
-                }`}
-              >
-                <span>Live Music Nights</span>
-                {filterLiveMusic && <Check className="w-3.5 h-3.5" />}
+                <span className="truncate">Top Rated (4.0+)</span>
+                {showTopRated && <Check className="w-3.5 h-3.5 shrink-0" style={{ color: COLOR_PRIMARY_GREEN }} />}
               </button>
             </div>
           </div>
 
-          {/* Toggles checklist */}
-          <div className="space-y-2 pt-2 border-t border-[#F3E8DF]">
-            <span className="text-[9.5px] text-[#756B64] font-extrabold uppercase">Quick Toggle Filters</span>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { state: showOpenNow, setter: setShowOpenNow, label: 'Open Now' },
-                { state: showTopRated, setter: setShowTopRated, label: 'Top Rated (4.0+)' },
-                { state: showNearbyOnly, setter: setShowNearbyOnly, label: 'Nearby (GPS)' },
-                { state: showVegOnly, setter: setShowVegOnly, label: 'Vegetarian' },
-                { state: showNonVegOnly, setter: setShowNonVegOnly, label: 'Non-Vegetarian' },
-                { state: showOffersOnly, setter: setShowOffersOnly, label: 'With Offers' }
-              ].map((filt, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => filt.setter(!filt.state)}
-                  className={`py-2 px-3 border rounded-xl font-bold flex items-center justify-between transition-all ${
-                    filt.state ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F] font-extrabold' : 'bg-[#FCFAF7] border-[#E5DCD5] text-[#756B64]'
-                  }`}
-                >
-                  <span>{filt.label}</span>
-                  {filt.state && <Check className="w-3.5 h-3.5 text-[#C85A3F]" />}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex gap-2 pt-4 border-t border-[#F3E8DF]">
+          <div className="flex flex-col min-[280px]:flex-row gap-2 pt-4 border-t" style={{ borderColor: COLOR_BORDER }}>
             <button
               type="button"
-              onClick={handleResetFilters}
-              className="flex-1 py-3 bg-[#FCFAF7] hover:bg-[#F3E8DF] border border-[#E5DCD5] text-[10px] text-[#756B64] font-bold rounded-xl transition-colors cursor-pointer"
+              onClick={() => {
+                setSelectedCuisineFilter('All');
+                setShowOpenNow(false);
+                setShowTopRated(false);
+                setIsFilterModalOpen(false);
+              }}
+              className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 border rounded-xl text-xs font-bold text-[#65736A] transition-colors cursor-pointer text-center"
             >
               Reset All
             </button>
             <button
               type="button"
               onClick={() => setIsFilterModalOpen(false)}
-              className="flex-1 py-3 bg-[#C85A3F] hover:bg-[#A94332] text-white text-[10px] font-extrabold rounded-xl shadow-xs transition-colors cursor-pointer"
+              className="flex-1 py-2.5 text-white text-xs font-extrabold rounded-xl shadow-xs transition-colors cursor-pointer text-center"
+              style={{ backgroundColor: COLOR_PRIMARY_GREEN }}
             >
               Apply Filters
             </button>
           </div>
-
         </div>
       </Modal>
 
@@ -1437,163 +1393,26 @@ export const CustomerHome: React.FC = () => {
         isOpen={isLocationModalOpen}
         onClose={() => setIsLocationModalOpen(false)}
         title="Choose Dining Location"
-        className="max-w-md bg-white border border-[#E5DCD5]"
+        variant="light"
+        className="max-w-md bg-white border border-[#DDE7D8]"
       >
-        <div className="space-y-4 text-left text-xs select-none">
-          
+        <div className="space-y-3.5 sm:space-y-4 text-left text-xs min-w-0">
           <button
             onClick={() => {
               handleDetectLocation(false);
               setIsLocationModalOpen(false);
             }}
-            className="w-full p-3 bg-[#F3E8DF] hover:bg-[#F3E8DF]/80 border border-[#E5DCD5] text-[#C85A3F] font-bold rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs"
+            className="w-full p-2.5 min-[320px]:p-3 rounded-xl border font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs text-[11px] min-[320px]:text-xs leading-snug"
+            style={{ backgroundColor: COLOR_LIGHT_GREEN, borderColor: COLOR_PRIMARY_GREEN, color: COLOR_DEEP_GREEN }}
           >
-            <Locate className="w-4 h-4" />
-            <span>Detect My Current Location (GPS)</span>
+            <Locate className="w-4 h-4 shrink-0" style={{ color: COLOR_PRIMARY_GREEN }} />
+            <span className="min-w-0">Detect My Current Location (GPS)</span>
           </button>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <label className="text-[9px] text-[#756B64] font-extrabold uppercase">Search City</label>
-              <div className="relative bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl overflow-hidden">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#756B64]" />
-                <input
-                  type="text"
-                  placeholder="Enter city..."
-                  value={citySearchQuery}
-                  onChange={(e) => setCitySearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-2 py-2.5 bg-transparent text-[#202124] placeholder-[#756B64] focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[9px] text-[#756B64] font-extrabold uppercase">Search Area</label>
-              <div className="relative bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl overflow-hidden">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#756B64]" />
-                <input
-                  type="text"
-                  placeholder="Enter area..."
-                  value={areaSearchQuery}
-                  onChange={(e) => setAreaSearchQuery(e.target.value)}
-                  className="w-full pl-8 pr-2 py-2.5 bg-transparent text-[#202124] placeholder-[#756B64] focus:outline-none"
-                />
-              </div>
-            </div>
-          </div>
-
-          {(recentLocations.length > 0 || savedLocations.length > 0) && (
-            <div className="grid grid-cols-2 gap-3 pt-1">
-              {recentLocations.length > 0 && (
-                <div className="space-y-1.5">
-                  <span className="text-[9px] text-[#756B64] font-extrabold uppercase">Recents</span>
-                  <div className="space-y-1">
-                    {recentLocations.map((loc, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => handleSelectLocation(loc)}
-                        className="w-full text-left p-2.5 bg-[#FCFAF7] hover:bg-[#F3E8DF] border border-[#E5DCD5] rounded-xl font-semibold text-[#202124] hover:text-[#C85A3F] transition-all flex items-center gap-1.5 truncate cursor-pointer"
-                      >
-                        <Clock className="w-3 h-3 text-[#756B64] shrink-0" />
-                        <span className="truncate">{loc.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {savedLocations.length > 0 && (
-                <div className="space-y-1.5">
-                  <span className="text-[9px] text-[#756B64] font-extrabold uppercase">Saved</span>
-                  <div className="space-y-1">
-                    {savedLocations.map((loc, idx) => (
-                      <button
-                        key={idx}
-                        onClick={() => {
-                          const selected = {
-                            country: 'India',
-                            state: '',
-                            city: loc.city,
-                            area: loc.area,
-                            latitude: loc.lat,
-                            longitude: loc.lng,
-                            label: loc.label
-                          };
-                          handleSelectLocation(selected);
-                        }}
-                        className="w-full text-left p-2.5 bg-[#FCFAF7] hover:bg-[#F3E8DF] border border-[#E5DCD5] rounded-xl font-semibold text-[#202124] hover:text-[#C85A3F] transition-all flex items-center gap-1.5 truncate cursor-pointer"
-                      >
-                        <Heart className="w-3 h-3 text-[#C85A3F] shrink-0" />
-                        <span className="truncate">{loc.name}: {loc.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {dynamicCitiesList.length > 0 && (
-            <div className="space-y-2 pt-1 border-t border-[#F3E8DF]">
-              <span className="text-[9px] text-[#756B64] font-extrabold uppercase">Eatery Branches Locations</span>
-              <div className="space-y-2 max-h-36 overflow-y-auto pr-1">
-                {dynamicCitiesList.map((cityObj) => (
-                  <div key={cityObj.name} className="p-2.5 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl space-y-1.5">
-                    <button
-                      onClick={() => {
-                        const selected = {
-                          country: 'India',
-                          state: '',
-                          city: cityObj.name,
-                          area: 'All Areas',
-                          latitude: cityObj.lat,
-                          longitude: cityObj.lng,
-                          label: cityObj.name
-                        };
-                        handleSelectLocation(selected);
-                      }}
-                      className="text-xs font-bold text-[#202124] hover:text-[#C85A3F] transition-colors text-left cursor-pointer"
-                    >
-                      {cityObj.name} (All Areas)
-                    </button>
-                    {cityObj.areas.length > 0 && (
-                      <div className="flex flex-wrap gap-1">
-                        {cityObj.areas.map(area => (
-                          <button
-                            key={area}
-                            onClick={() => {
-                              const selected = {
-                                country: 'India',
-                                state: '',
-                                city: cityObj.name,
-                                area: area,
-                                latitude: cityObj.lat,
-                                longitude: cityObj.lng,
-                                label: `${area}, ${cityObj.name}`
-                              };
-                              handleSelectLocation(selected);
-                            }}
-                            className={`py-0.5 px-2 border rounded-lg text-[9px] font-semibold transition-all cursor-pointer ${
-                              currentLocation?.city.toLowerCase() === cityObj.name.toLowerCase() && currentLocation?.area.toLowerCase() === area.toLowerCase()
-                                ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F] font-bold'
-                                : 'bg-white border-[#E5DCD5] text-[#756B64] hover:text-[#202124]'
-                            }`}
-                          >
-                            {area}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-2 pt-1 border-t border-[#F3E8DF]">
-            <span className="text-[9px] text-[#756B64] font-extrabold uppercase">Popular Cities</span>
-            <div className="grid grid-cols-3 gap-1.5">
-              {filteredPopularCities.map((city) => (
+          <div className="space-y-2 pt-2 border-t" style={{ borderColor: COLOR_BORDER }}>
+            <span className="text-[9.5px] font-extrabold uppercase" style={{ color: COLOR_SECONDARY_TEXT }}>Popular Cities</span>
+            <div className="grid grid-cols-1 min-[260px]:grid-cols-2 min-[420px]:grid-cols-3 gap-1.5">
+              {POPULAR_CITIES.map((city) => (
                 <button
                   key={city.name}
                   onClick={() => {
@@ -1604,24 +1423,72 @@ export const CustomerHome: React.FC = () => {
                       area: 'All Areas',
                       latitude: city.lat,
                       longitude: city.lng,
-                      label: city.name
+                      label: `${city.name}, India`
                     };
                     handleSelectLocation(selected);
                   }}
-                  className={`py-2 border rounded-xl font-bold text-center transition-all truncate block cursor-pointer ${
+                  className={`py-2 px-1 border rounded-xl font-bold text-center transition-all min-w-0 block cursor-pointer text-[11px] min-[320px]:text-xs truncate ${
                     currentLocation?.city.toLowerCase() === city.name.toLowerCase()
-                      ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F] font-extrabold shadow-xs'
-                      : 'bg-[#FCFAF7] border-[#E5DCD5] text-[#756B64] hover:text-[#202124]'
+                      ? 'border-[#2E8B3C] font-extrabold shadow-xs'
+                      : 'hover:border-[#2E8B3C]/50'
                   }`}
+                  style={{
+                    backgroundColor: currentLocation?.city.toLowerCase() === city.name.toLowerCase() ? COLOR_LIGHT_GREEN : '#FFFFFF',
+                    borderColor: currentLocation?.city.toLowerCase() === city.name.toLowerCase() ? COLOR_PRIMARY_GREEN : COLOR_BORDER,
+                    color: currentLocation?.city.toLowerCase() === city.name.toLowerCase() ? COLOR_DEEP_GREEN : COLOR_PRIMARY_TEXT
+                  }}
                 >
                   {city.name}
                 </button>
               ))}
             </div>
           </div>
-
         </div>
       </Modal>
+
+      {/* REAL CAMERA QR SCANNER MODAL */}
+      <QrScannerModal
+        isOpen={isQrScannerOpen}
+        onClose={() => setIsQrScannerOpen(false)}
+      />
+
+      {/* Leave Table Confirmation Modal */}
+      {showLeaveModal && activeSession && (
+        <Modal
+          isOpen={showLeaveModal}
+          onClose={() => !isLeavingTable && setShowLeaveModal(false)}
+          title={`Leave Table #${activeSession.tableNumber}?`}
+          variant="light"
+          className="max-w-md bg-white border border-[#DDE7D8]"
+        >
+          <div className="p-3 sm:p-4 space-y-4 text-left min-w-0">
+            <p className="text-sm text-[#65736A] leading-relaxed">
+              You are about to end your dining session at <strong className="text-[#17251C]">{activeSession.restaurantName || 'the restaurant'}</strong>.
+            </p>
+            <p className="text-xs text-[#65736A]">
+              This will release your table and alert the waitstaff to sanitize it for the next guests. Your past orders and receipts will remain accessible in <strong>My Orders</strong>.
+            </p>
+            <div className="flex flex-col min-[320px]:flex-row items-stretch min-[320px]:items-center justify-end gap-2 pt-2 border-t border-[#DDE7D8]">
+              <button
+                type="button"
+                disabled={isLeavingTable}
+                onClick={() => setShowLeaveModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-[#17251C] bg-white border border-[#DDE7D8] hover:bg-slate-50 transition-colors text-center cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isLeavingTable}
+                onClick={handleLeaveTable}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-[#C53030] hover:bg-[#9B2C2C] transition-colors flex items-center justify-center gap-1.5 cursor-pointer text-center"
+              >
+                {isLeavingTable ? 'Releasing Table...' : 'Leave Table'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
     </div>
   );

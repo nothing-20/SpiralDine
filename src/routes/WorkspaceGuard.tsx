@@ -13,6 +13,11 @@ export const WorkspaceGuard: React.FC = () => {
     return <Outlet />;
   }
 
+  // Customer accounts are diners and must never be permitted into staff/owner workspaces
+  if (role === 'customer' || user?.role === 'customer') {
+    return <Navigate to="/unauthorized" replace />;
+  }
+
   if (isLoading || authLoading || authStatus === 'AUTH_LOADING' || authStatus === 'PROFILE_LOADING') {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center space-y-6 select-none relative overflow-hidden">

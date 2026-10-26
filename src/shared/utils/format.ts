@@ -179,3 +179,53 @@ export function getElapsedMinutes(isoString: string): number {
   const diffMs = now - start;
   return Math.floor(diffMs / 60000);
 }
+
+/**
+ * Checks if a given timestamp falls on "today" according to the restaurant's timezone (defaults to Asia/Kolkata).
+ */
+export function isTodayInTimezone(isoString?: string, timeZone: string = 'Asia/Kolkata'): boolean {
+  if (!isoString) return false;
+  try {
+    const orderDate = new Date(isoString);
+    if (isNaN(orderDate.getTime())) return false;
+    const orderDateStr = orderDate.toLocaleDateString('en-CA', { timeZone });
+    const todayDateStr = new Date().toLocaleDateString('en-CA', { timeZone });
+    return orderDateStr === todayDateStr;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Checks if a given timestamp falls on "yesterday" according to the restaurant's timezone (defaults to Asia/Kolkata).
+ */
+export function isYesterdayInTimezone(isoString?: string, timeZone: string = 'Asia/Kolkata'): boolean {
+  if (!isoString) return false;
+  try {
+    const orderDate = new Date(isoString);
+    if (isNaN(orderDate.getTime())) return false;
+    const orderDateStr = orderDate.toLocaleDateString('en-CA', { timeZone });
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayDateStr = yesterday.toLocaleDateString('en-CA', { timeZone });
+    return orderDateStr === yesterdayDateStr;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Checks if a given timestamp falls within the last N days according to the restaurant's timezone (defaults to Asia/Kolkata).
+ */
+export function isWithinDaysInTimezone(isoString?: string, days: number = 7, timeZone: string = 'Asia/Kolkata'): boolean {
+  if (!isoString) return false;
+  try {
+    const orderDate = new Date(isoString);
+    if (isNaN(orderDate.getTime())) return false;
+    const now = new Date();
+    const past = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    return orderDate.getTime() >= past.getTime();
+  } catch {
+    return false;
+  }
+}

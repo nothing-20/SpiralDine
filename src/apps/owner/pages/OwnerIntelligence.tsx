@@ -41,11 +41,14 @@ import {
   Workflow, 
   ShieldCheck,
   Send,
-  Zap
+  Zap,
+  ArrowLeft
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 
 export const OwnerIntelligence: React.FC = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const tenantId = user?.tenantId;
 
@@ -159,10 +162,19 @@ export const OwnerIntelligence: React.FC = () => {
       {/* HEADER BLOCK */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-display font-extrabold text-textPearl flex items-center gap-2">
-            <Brain className="w-7 h-7 text-primary" />
-            <span>Restaurant Intelligence Engine</span>
-          </h1>
+          <div className="flex items-center gap-2 mb-1">
+            <button
+              onClick={() => navigate('/owner/more')}
+              className="p-1.5 rounded-xl bg-slate-800 text-slate-300 hover:text-white md:hidden active:scale-95 transition-all"
+              aria-label="Back to More"
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+            <h1 className="text-xl md:text-2xl font-display font-extrabold text-textPearl flex items-center gap-2">
+              <Brain className="w-6 h-6 md:w-7 md:h-7 text-primary" />
+              <span>Restaurant Intelligence Engine</span>
+            </h1>
+          </div>
           <p className="text-xs text-mutedAsh font-semibold">The operations brain, analyzing real-time parameters to compile forecasts and recommend decisions.</p>
         </div>
       </div>

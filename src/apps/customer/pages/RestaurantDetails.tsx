@@ -7,6 +7,7 @@ import Button from '../../../components/ui/Button/Button';
 import Badge from '../../../components/ui/Badge/Badge';
 import Modal from '../../../components/ui/Modal/Modal';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner/LoadingSpinner';
+import { RestaurantDetailsSkeleton, MenuItemSkeleton } from '../components/CustomerSkeletons';
 import { formatPrice } from '../../../utils/format';
 import { 
   Star, MapPin, Clock, ArrowLeft, Heart, Check, 
@@ -166,6 +167,8 @@ export const RestaurantDetails: React.FC = () => {
     navigate(`/customer/restaurant/${restaurant.id}/menu?table=${session.tableNumber}`);
   };
 
+  const [retryTrigger, setRetryTrigger] = useState(0);
+
   useEffect(() => {
     let isMounted = true;
     if (!tenantId) {
@@ -315,7 +318,7 @@ export const RestaurantDetails: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [tenantId]);
+  }, [tenantId, retryTrigger]);
 
   // Derived category list combining registered categories and items
   const categoryOptions = useMemo(() => {
@@ -363,11 +366,7 @@ export const RestaurantDetails: React.FC = () => {
   }, [menuItems, selectedCategory, searchQuery, vegOnly, nonVegOnly, categories]);
 
   if (isLoading) {
-    return (
-      <div className="min-h-[70vh] flex flex-col items-center justify-center space-y-4">
-        <LoadingSpinner label="Loading restaurant and menu..." />
-      </div>
-    );
+    return <RestaurantDetailsSkeleton />;
   }
 
   if (loadError || !restaurant) {
@@ -382,7 +381,7 @@ export const RestaurantDetails: React.FC = () => {
         </div>
         <div className="flex gap-2 pt-2">
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => setRetryTrigger(prev => prev + 1)}
             className="px-4 py-2 bg-[#E85D3F] hover:bg-[#D04B2F] text-xs font-bold text-white rounded-xl transition-all cursor-pointer shadow-xs"
           >
             Retry

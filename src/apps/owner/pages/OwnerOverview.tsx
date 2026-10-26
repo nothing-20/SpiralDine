@@ -17,7 +17,7 @@ import { db } from '../../../config/firebase';
 import { createStaffInvitation } from '../../../services/staff/invitationService';
 import { useAuth } from '../../../context/AuthContext';
 import { IOrder } from '../../../types';
-import { formatPrice } from '../../../shared/utils/format';
+import { formatPrice, isTodayInTimezone, isYesterdayInTimezone } from '../../../shared/utils/format';
 import { isOrderActive } from '../../../shared/utils/orderUtils';
 import { isTableOccupied } from '../../../shared/domain/tables/types';
 import { intelligenceService } from '../../../shared/intelligence/services/intelligenceService';
@@ -33,6 +33,7 @@ import Card from '../../../components/ui/Card/Card';
 import Badge from '../../../components/ui/Badge/Badge';
 import Button from '../../../components/ui/Button/Button';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner/LoadingSpinner';
+import { DashboardMetricSkeleton } from '../../customer/components/CustomerSkeletons';
 import Modal from '../../../components/ui/Modal/Modal';
 import Input from '../../../components/ui/Input/Input';
 
@@ -485,31 +486,50 @@ export const OwnerOverview: React.FC = () => {
     compileIntel();
   }, [tenantId, orders.length, inventory.length]);
 
+  // Reconciled transactions: if firestore transactions collection is empty, reconcile paid orders from orders
+  const effectiveTransactions = useMemo(() => {
+    if (transactions.length > 0) return transactions;
+    return orders.map(o => ({
+      id: o.id,
+      orderId: o.id,
+      invoiceNumber: (o as any).orderNumber || `INV-${(o.id || '').slice(-6).toUpperCase()}`,
+      tableNumber: o.tableNumber || 'Walk-in',
+      createdAt: o.createdAt,
+      paymentStatus: (o.paymentStatus || 'pending').toLowerCase(),
+      orderStatus: o.status || 'PENDING',
+      subtotal: o.subtotal || 0,
+      tax: o.tax || 0,
+      discount: o.discount || 0,
+      total: o.total || (o as any).totalAmount || 0,
+      branchId: o.branchId || 'main',
+      items: o.items || []
+    }));
+  }, [transactions, orders]);
+
+  const todayStr = useMemo(() => new Date().toDateString(), []);
+
   // Canonical Paid Transactions filter (Excludes placed, preparing, ready, served unpaid, cancelled, refunded)
   const paidTransactions = useMemo(() => {
-    return transactions.filter(t => {
+    return effectiveTransactions.filter(t => {
       const status = (t.paymentStatus || '').toLowerCase();
-      const isPaid = status === 'paid' || status === 'completed' || status === 'settled';
-      const isRefundedOrVoid = status === 'refunded' || status === 'voided' || status === 'failed';
+      const oStatus = (t.orderStatus || (t as any).status || '').toUpperCase();
+      const isPaid = status === 'paid' || status === 'completed' || status === 'settled' || oStatus === 'COMPLETED' || oStatus === 'SERVED';
+      const isRefundedOrVoid = status === 'refunded' || status === 'voided' || status === 'failed' || oStatus === 'CANCELLED' || oStatus === 'REJECTED';
       const hasValidTotal = typeof t.total === 'number' && t.total > 0;
       return isPaid && !isRefundedOrVoid && hasValidTotal;
     });
-  }, [transactions]);
+  }, [effectiveTransactions]);
 
-  // Revenue computations derived strictly from confirmed transaction settlements
-  const todayStr = new Date().toDateString();
+  // Revenue computations derived strictly from confirmed transaction settlements today
   const todaySales = useMemo(() => {
     return paidTransactions
-      .filter(t => t.createdAt && new Date(t.createdAt).toDateString() === todayStr)
+      .filter(t => isTodayInTimezone(t.createdAt))
       .reduce((sum, t) => sum + (t.total || 0), 0);
-  }, [paidTransactions, todayStr]);
+  }, [paidTransactions]);
 
   const yesterdaySales = useMemo(() => {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toDateString();
     return paidTransactions
-      .filter(t => t.createdAt && new Date(t.createdAt).toDateString() === yesterdayStr)
+      .filter(t => isYesterdayInTimezone(t.createdAt))
       .reduce((sum, t) => sum + (t.total || 0), 0);
   }, [paidTransactions]);
 
@@ -519,8 +539,8 @@ export const OwnerOverview: React.FC = () => {
   }, [todaySales, yesterdaySales]);
 
   const todayCompletedOrdersCount = useMemo(() => {
-    return paidTransactions.filter(t => t.createdAt && new Date(t.createdAt).toDateString() === todayStr).length;
-  }, [paidTransactions, todayStr]);
+    return paidTransactions.filter(t => isTodayInTimezone(t.createdAt)).length;
+  }, [paidTransactions]);
 
   const averageOrderValue = useMemo(() => {
     if (todayCompletedOrdersCount === 0) return 0;
@@ -1527,8 +1547,32 @@ export const OwnerOverview: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="h-64 flex flex-col items-center justify-center space-y-4">
-        <LoadingSpinner label="Compiling Spiral Dine Executive Dashboard..." />
+      <div className="space-y-6 text-left select-none text-[#17202A]">
+        {/* Skeleton Executive Banner */}
+        <div className="bg-white p-6 rounded-2xl border border-[#E5E0D9] shadow-sm animate-pulse space-y-3">
+          <div className="w-28 h-3 bg-slate-200 rounded-full" />
+          <div className="w-72 h-7 bg-slate-200 rounded-lg" />
+          <div className="w-96 max-w-full h-4 bg-slate-200 rounded" />
+        </div>
+
+        {/* 5 Macro KPI Metric Skeletons */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          {[1, 2, 3, 4, 5].map(idx => (
+            <DashboardMetricSkeleton key={idx} />
+          ))}
+        </div>
+
+        {/* Main Section Skeletons */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 h-72 bg-white rounded-2xl border border-[#E5E0D9] p-6 animate-pulse">
+            <div className="w-48 h-5 bg-slate-200 rounded mb-4" />
+            <div className="w-full h-48 bg-slate-100 rounded-xl" />
+          </div>
+          <div className="h-72 bg-white rounded-2xl border border-[#E5E0D9] p-6 animate-pulse">
+            <div className="w-36 h-5 bg-slate-200 rounded mb-4" />
+            <div className="w-full h-48 bg-slate-100 rounded-xl" />
+          </div>
+        </div>
       </div>
     );
   }

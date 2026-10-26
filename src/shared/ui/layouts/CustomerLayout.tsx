@@ -148,6 +148,14 @@ export const CustomerLayout: React.FC = () => {
     };
   }, []);
 
+  // Ensure body has customer warm cream background class while on customer routes
+  useEffect(() => {
+    document.body.classList.add('customer-theme-bg');
+    return () => {
+      document.body.classList.remove('customer-theme-bg');
+    };
+  }, []);
+
   // Close notifications and scanner on route changes
   useEffect(() => {
     setIsNotificationOpen(false);
@@ -160,26 +168,31 @@ export const CustomerLayout: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen w-full bg-[#FCFAF7] flex flex-col font-sans antialiased relative select-none">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#FFFFFF] flex flex-col font-sans antialiased relative select-none">
       
-      {/* Ambient warm background glow */}
-      <div className="absolute top-0 left-1/4 w-[500px] h-[300px] rounded-full bg-[#F3E8DF]/60 blur-[100px] pointer-events-none z-0" />
+      {/* Ambient soft green background glow constrained to viewport */}
+      <div className="absolute top-0 left-1/4 w-[500px] max-w-[70vw] h-[300px] rounded-full bg-[#F0FDF4]/80 blur-[100px] pointer-events-none z-0" />
 
       {/* TOP APP BAR */}
-      <header className="bg-[#FCFAF7]/95 border-b border-[#F3E8DF] sticky top-0 z-40 backdrop-blur-md px-4 py-3 shrink-0 flex items-center justify-between md:px-8 relative z-10 shadow-xs">
+      <header className="bg-white/95 border-b border-[#E5E7EB] sticky top-0 z-40 backdrop-blur-md px-2 min-[360px]:px-4 md:px-6 lg:px-8 py-2 sm:py-2.5 sm:py-3 shrink-0 flex items-center justify-between relative z-10 shadow-xs w-full max-w-full min-w-0">
         
         {/* LEFT: Branding & Logo & Desktop Navigation */}
-        <div className="flex items-center space-x-6 shrink-0">
-          <div className="flex items-center space-x-2.5 cursor-pointer" onClick={() => navigate('/customer/home')}>
-            <div className="w-9 h-9 bg-[#C85A3F] rounded-xl flex items-center justify-center shadow-md shadow-[#C85A3F]/20">
-              <span className="text-white font-display font-extrabold text-xl">S</span>
+        <div className="flex items-center gap-1.5 min-[340px]:gap-2 sm:gap-3 md:gap-5 min-w-0">
+          <div className="flex items-center space-x-1.5 sm:space-x-2 cursor-pointer shrink-0" onClick={() => navigate('/customer/home')}>
+            <div className="w-7 h-7 min-[340px]:w-8 min-[340px]:h-8 sm:w-9 sm:h-9 bg-[#F0FDF4] border border-[#E5E7EB] rounded-xl flex items-center justify-center shadow-xs shrink-0">
+              <Utensils className="w-3.5 h-3.5 min-[340px]:w-4 min-[340px]:h-4 sm:w-5 sm:h-5 text-[#16A34A]" />
             </div>
-            <div>
-              <h1 className="text-sm font-display font-extrabold text-[#202124] tracking-tight">Spiral <span className="text-[#C85A3F]">Dine</span></h1>
+            <div className="min-w-0 hidden min-[220px]:block">
+              <h1 className="text-[11px] min-[320px]:text-xs sm:text-sm font-poppins font-extrabold text-[#111827] tracking-tight leading-tight whitespace-nowrap">
+                Spiral <span className="text-[#16A34A]">Dine</span>
+              </h1>
+              <p className="text-[9px] font-medium text-[#6B7280] hidden lg:block leading-none truncate">
+                Good Food Brings People Together
+              </p>
             </div>
           </div>
 
-          {/* Location Context Pill - Primary Location Selector */}
+          {/* Location Context Pill - Primary Location Selector (adaptive: visible at >= 420px, on smaller screens the Customer Home page has dedicated location selector) */}
           <button 
             type="button"
             onClick={() => {
@@ -190,43 +203,43 @@ export const CustomerLayout: React.FC = () => {
                 window.dispatchEvent(new Event('open_location_modal'));
               }
             }}
-            className="flex items-center space-x-1.5 bg-[#F3E8DF] border border-[#E5DCD5] px-3.5 py-1.5 rounded-full text-xs text-[#202124] font-medium shadow-xs cursor-pointer hover:border-[#C85A3F]/50 hover:bg-[#F3E8DF]/80 transition-all group"
+            className="hidden min-[420px]:flex items-center space-x-1 sm:space-x-1.5 bg-[#F0FDF4] border border-[#E5E7EB] px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full text-xs text-[#111827] font-medium shadow-xs cursor-pointer hover:border-[#16A34A]/50 hover:bg-[#F0FDF4]/90 transition-all group shrink min-w-0 max-w-[140px] sm:max-w-[180px] md:max-w-none"
             title="Click to choose dining location"
           >
-            <MapPin className="w-3.5 h-3.5 text-[#C85A3F] shrink-0" />
-            <span className="font-bold text-[#202124] group-hover:text-[#C85A3F] transition-colors">{currentCityLabel}</span>
-            <ChevronDown className="w-3 h-3 text-[#756B64] group-hover:text-[#C85A3F] transition-colors shrink-0" />
+            <MapPin className="w-3.5 h-3.5 text-[#16A34A] shrink-0" />
+            <span className="font-bold text-[#111827] group-hover:text-[#16A34A] transition-colors truncate text-[11px] sm:text-xs">{currentCityLabel}</span>
+            <ChevronDown className="w-3 h-3 text-[#6B7280] group-hover:text-[#16A34A] transition-colors shrink-0" />
           </button>
 
-          {/* Desktop Navigation links */}
-          <nav className="hidden md:flex items-center space-x-1">
+          {/* Desktop Navigation links - Adaptive spacing for tablets and desktops */}
+          <nav className="hidden md:flex items-center space-x-0.5 lg:space-x-1 min-w-0">
             <NavLink
               to="/customer/home"
-              className={({ isActive }) => `px-4 py-1.5 rounded-full text-xs font-extrabold transition-all ${isActive ? 'text-[#C85A3F] bg-[#F3E8DF] shadow-xs' : 'text-[#756B64] hover:text-[#202124]'}`}
+              className={({ isActive }) => `px-2.5 lg:px-4 py-1.5 rounded-full text-[11px] lg:text-xs font-poppins font-extrabold transition-all whitespace-nowrap ${isActive ? 'text-[#16A34A] bg-[#F0FDF4] shadow-xs' : 'text-[#6B7280] hover:text-[#111827]'}`}
             >
               Home
             </NavLink>
             <NavLink
               to="/customer/explore"
-              className={({ isActive }) => `px-4 py-1.5 rounded-full text-xs font-extrabold transition-all ${isActive ? 'text-[#C85A3F] bg-[#F3E8DF] shadow-xs' : 'text-[#756B64] hover:text-[#202124]'}`}
+              className={({ isActive }) => `px-2.5 lg:px-4 py-1.5 rounded-full text-[11px] lg:text-xs font-poppins font-extrabold transition-all whitespace-nowrap ${isActive ? 'text-[#16A34A] bg-[#F0FDF4] shadow-xs' : 'text-[#6B7280] hover:text-[#111827]'}`}
             >
               Explore
             </NavLink>
             <NavLink
               to="/customer/orders"
-              className={({ isActive }) => `px-4 py-1.5 rounded-full text-xs font-extrabold transition-all ${isActive ? 'text-[#C85A3F] bg-[#F3E8DF] shadow-xs' : 'text-[#756B64] hover:text-[#202124]'}`}
+              className={({ isActive }) => `px-2.5 lg:px-4 py-1.5 rounded-full text-[11px] lg:text-xs font-poppins font-extrabold transition-all whitespace-nowrap ${isActive ? 'text-[#16A34A] bg-[#F0FDF4] shadow-xs' : 'text-[#6B7280] hover:text-[#111827]'}`}
             >
               My Orders
             </NavLink>
             <NavLink
               to="/customer/booking"
-              className={({ isActive }) => `px-4 py-1.5 rounded-full text-xs font-extrabold transition-all ${isActive ? 'text-[#C85A3F] bg-[#F3E8DF] shadow-xs' : 'text-[#756B64] hover:text-[#202124]'}`}
+              className={({ isActive }) => `px-2.5 lg:px-4 py-1.5 rounded-full text-[11px] lg:text-xs font-poppins font-extrabold transition-all whitespace-nowrap ${isActive ? 'text-[#16A34A] bg-[#F0FDF4] shadow-xs' : 'text-[#6B7280] hover:text-[#111827]'}`}
             >
               Book Table
             </NavLink>
             <NavLink
               to="/customer/profile"
-              className={({ isActive }) => `px-4 py-1.5 rounded-full text-xs font-extrabold transition-all ${isActive ? 'text-[#C85A3F] bg-[#F3E8DF] shadow-xs' : 'text-[#756B64] hover:text-[#202124]'}`}
+              className={({ isActive }) => `px-2.5 lg:px-4 py-1.5 rounded-full text-[11px] lg:text-xs font-poppins font-extrabold transition-all whitespace-nowrap ${isActive ? 'text-[#16A34A] bg-[#F0FDF4] shadow-xs' : 'text-[#6B7280] hover:text-[#111827]'}`}
             >
               Profile
             </NavLink>
@@ -234,33 +247,33 @@ export const CustomerLayout: React.FC = () => {
         </div>
 
         {/* RIGHT: Cart access, Notifications bell, Profile Avatar, and Desktop QR trigger */}
-        <div className="flex items-center space-x-2 md:space-x-3 shrink-0">
+        <div className="flex items-center gap-1 min-[340px]:gap-1.5 sm:gap-2 md:gap-3 shrink-0">
           
           {/* Desktop QR Scan button */}
           <button
             type="button"
             onClick={() => setIsQrScannerOpen(true)}
-            className="hidden md:flex px-4 py-2 bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold text-xs rounded-full transition-all shadow-md shadow-[#C85A3F]/20 items-center gap-1.5 cursor-pointer"
+            className="hidden xl:flex px-4 py-2 bg-[#16A34A] hover:bg-[#166534] text-white font-poppins font-extrabold text-xs rounded-full transition-all shadow-md shadow-[#16A34A]/20 items-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
             <QrCode className="w-3.5 h-3.5" />
             <span>QR Scan</span>
           </button>
 
-          {/* Cart Access Button (Mobile & Desktop with Live Item Count Badge) */}
+          {/* Cart Access Button */}
           <button
             type="button"
             onClick={() => navigate('/customer/cart')}
             aria-label={`Shopping Cart, ${totalCartCount} ${totalCartCount === 1 ? 'item' : 'items'}`}
-            className={`p-2.5 rounded-full text-[#756B64] hover:text-[#202124] transition-all border relative cursor-pointer ${
+            className={`p-1.5 min-[340px]:p-2 sm:p-2.5 rounded-full text-[#6B7280] hover:text-[#111827] transition-all border relative cursor-pointer ${
               location.pathname === '/customer/cart'
-                ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F]'
-                : 'bg-white border-[#E5DCD5] hover:border-[#C85A3F]/40'
+                ? 'bg-[#F0FDF4] border-[#16A34A] text-[#16A34A]'
+                : 'bg-white border-[#E5E7EB] hover:border-[#16A34A]/40'
             }`}
             title="View Cart"
           >
-            <ShoppingBag className="w-4 h-4" />
+            <ShoppingBag className="w-3.5 h-3.5 min-[340px]:w-4 min-[340px]:h-4" />
             {totalCartCount > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-[#C85A3F] text-white text-[10px] font-black rounded-full flex items-center justify-center shadow-xs">
+              <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] min-[340px]:min-w-[18px] min-[340px]:h-[18px] px-0.5 min-[340px]:px-1 bg-[#F97316] text-white text-[9px] min-[340px]:text-[10px] font-black rounded-full flex items-center justify-center shadow-xs">
                 {totalCartCount > 99 ? '99+' : totalCartCount}
               </span>
             )}
@@ -272,48 +285,48 @@ export const CustomerLayout: React.FC = () => {
               type="button"
               onClick={() => setIsNotificationOpen(!isNotificationOpen)}
               aria-label={`Notifications, ${unreadCount} unread`}
-              className={`p-2.5 rounded-full text-[#756B64] hover:text-[#202124] transition-all border cursor-pointer ${
+              className={`p-1.5 min-[340px]:p-2 sm:p-2.5 rounded-full text-[#6B7280] hover:text-[#111827] transition-all border cursor-pointer ${
                 isNotificationOpen 
-                  ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F]' 
-                  : 'bg-white border-[#E5DCD5] hover:border-[#C85A3F]/40'
+                  ? 'bg-[#F0FDF4] border-[#16A34A] text-[#16A34A]' 
+                  : 'bg-white border-[#E5E7EB] hover:border-[#16A34A]/40'
               }`}
             >
-              <Bell className="w-4 h-4" />
+              <Bell className="w-3.5 h-3.5 min-[340px]:w-4 min-[340px]:h-4" />
               {unreadCount > 0 && (
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#C85A3F] rounded-full animate-pulse" />
+                <span className="absolute top-1 right-1 min-[340px]:top-1.5 min-[340px]:right-1.5 w-1.5 h-1.5 min-[340px]:w-2 min-[340px]:h-2 bg-[#F97316] rounded-full animate-pulse" />
               )}
             </button>
 
             {/* Notification dropdown panel */}
             {isNotificationOpen && (
-              <div className="absolute right-0 mt-2 w-72 sm:w-80 bg-white border border-[#E5DCD5] rounded-2xl shadow-xl z-50 text-left overflow-hidden">
-                <div className="p-3.5 border-b border-[#F3E8DF] bg-[#F3E8DF]/50 flex items-center justify-between">
+              <div className="absolute right-0 mt-2 w-72 sm:w-80 max-w-[calc(100vw-1.5rem)] bg-white border border-[#E5E7EB] rounded-2xl shadow-xl z-50 text-left overflow-hidden">
+                <div className="p-3.5 border-b border-[#E5E7EB] bg-[#F0FDF4]/60 flex items-center justify-between">
                   <div>
-                    <h4 className="text-xs font-extrabold text-[#202124]">Notifications</h4>
-                    <span className="text-[9px] text-[#756B64] font-semibold">{unreadCount} unread logs</span>
+                    <h4 className="text-xs font-poppins font-extrabold text-[#111827]">Notifications</h4>
+                    <span className="text-[9px] text-[#6B7280] font-semibold">{unreadCount} unread logs</span>
                   </div>
                   {notifications.length > 0 && (
                     <button 
                       type="button"
                       onClick={markAllRead}
-                      className="text-[9px] text-[#C85A3F] font-bold hover:underline cursor-pointer"
+                      className="text-[9px] text-[#16A34A] font-bold hover:underline cursor-pointer"
                     >
                       Clear All
                     </button>
                   )}
                 </div>
 
-                <div className="max-h-72 overflow-y-auto divide-y divide-[#F3E8DF]">
+                <div className="max-h-72 overflow-y-auto divide-y divide-[#F0FDF4]">
                   {notifications.length === 0 ? (
-                    <div className="p-6 text-center text-xs text-[#756B64] font-medium">
+                    <div className="p-6 text-center text-xs text-[#6B7280] font-medium">
                       No notifications yet.
                     </div>
                   ) : (
                     notifications.map(n => (
-                      <div key={n.id} className="p-3.5 hover:bg-[#F3E8DF]/40 transition-colors">
-                        <h5 className="text-xs font-bold text-[#202124]">{n.title}</h5>
-                        <p className="text-[10.5px] text-[#756B64] mt-0.5">{n.desc}</p>
-                        <span className="text-[8.5px] text-[#756B64]/70 mt-1 block">
+                      <div key={n.id} className="p-3.5 hover:bg-[#F0FDF4]/50 transition-colors">
+                        <h5 className="text-xs font-bold text-[#111827]">{n.title}</h5>
+                        <p className="text-[10.5px] text-[#6B7280] mt-0.5">{n.desc}</p>
+                        <span className="text-[8.5px] text-[#6B7280]/70 mt-1 block">
                           {n.timestamp}
                         </span>
                       </div>
@@ -329,74 +342,108 @@ export const CustomerLayout: React.FC = () => {
             type="button"
             onClick={() => navigate('/customer/profile')}
             aria-label="Customer Profile"
-            className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-extrabold transition-all border cursor-pointer ${
+            className={`w-7 h-7 min-[340px]:w-8 min-[340px]:h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-[10px] min-[340px]:text-xs font-poppins font-extrabold transition-all border cursor-pointer shrink-0 ${
               location.pathname === '/customer/profile'
-                ? 'bg-[#C85A3F] text-white border-[#C85A3F]'
-                : 'bg-[#F3E8DF] text-[#C85A3F] border-[#E5DCD5] hover:border-[#C85A3F]/40'
+                ? 'bg-[#16A34A] text-white border-[#16A34A]'
+                : 'bg-[#F0FDF4] text-[#16A34A] border-[#E5E7EB] hover:border-[#16A34A]/40'
             }`}
           >
-            {(user?.displayName || user?.email || 'GC').substring(0, 2).toUpperCase()}
+            {(user?.displayName || user?.email || (user?.isAnonymous ? 'GD' : 'U')).substring(0, 2).toUpperCase()}
           </button>
 
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-6 pb-28 md:pb-8 md:px-8 relative bg-[#FCFAF7] w-full max-w-7xl mx-auto z-10">
+      <main className="flex-1 overflow-x-hidden px-3 sm:px-4 pt-3 sm:pt-4 pb-24 md:pb-8 md:px-8 relative bg-[#FFFFFF] w-full max-w-7xl mx-auto z-10 min-w-0">
         <Outlet />
       </main>
 
-      {/* MOBILE BOTTOM NAVIGATION BAR (md:hidden) FIXED TO BOTTOM VIEWPORT WITH SAFE-AREA INSET SUPPORT */}
+      {/* MOBILE BOTTOM NAVIGATION BAR (md:hidden) WITH 5 PRESERVED DESTINATIONS AND CENTERED SCAN QR BUTTON */}
       <nav 
         aria-label="Mobile Navigation"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
-        className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-[#FCFAF7]/95 border-t border-[#F3E8DF] backdrop-blur-md flex items-center justify-around px-2 shadow-lg"
+        className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/98 border-t border-[#E5E7EB] backdrop-blur-md flex items-center justify-between px-1 min-[340px]:px-2 shadow-lg h-16 w-full max-w-full min-w-0"
       >
-        {/* 1. QR SCANNER */}
-        <button
-          type="button"
-          onClick={() => setIsQrScannerOpen(true)}
-          aria-label="Scan Table QR Code"
-          className="flex flex-col items-center justify-center flex-1 h-14 text-[#C85A3F] hover:text-[#A94332] transition-transform active:scale-95 cursor-pointer"
-        >
-          <div className="w-8 h-8 bg-[#C85A3F] text-white rounded-full flex items-center justify-center shadow-md shadow-[#C85A3F]/30 border border-[#C85A3F]">
-            <QrCode className="w-4.5 h-4.5" />
-          </div>
-          <span className="text-[8.5px] font-extrabold font-sans mt-0.5">QR Scanner</span>
-        </button>
-
-        {/* 2. HOME */}
+        {/* 1. HOME */}
         <NavLink
           to="/customer/home"
-          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 h-14 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
+          aria-label="Home"
+          title="Home"
+          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 min-w-0 h-full transition-all ${isActive ? 'text-[#16A34A]' : 'text-[#6B7280] hover:text-[#111827]'}`}
         >
-          <Coffee className="w-5 h-5 mb-0.5" />
-          <span className="text-[8.5px] font-extrabold font-sans">Home</span>
+          {({ isActive }) => (
+            <>
+              <div className={`p-1 rounded-full ${isActive ? 'bg-[#F0FDF4]' : ''}`}>
+                <Coffee className="w-4 h-4 min-[340px]:w-5 min-[340px]:h-5 shrink-0" />
+              </div>
+              <span className={`text-[9px] min-[340px]:text-[10px] font-medium font-sans mt-0.5 truncate max-w-full hidden min-[260px]:block ${isActive ? 'font-bold text-[#16A34A]' : ''}`}>Home</span>
+            </>
+          )}
         </NavLink>
 
-        {/* 3. CART WITH LIVE COUNT BADGE */}
+        {/* 2. EXPLORE */}
         <NavLink
-          to="/customer/cart"
-          aria-label={`Shopping Cart, ${totalCartCount} ${totalCartCount === 1 ? 'item' : 'items'}`}
-          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 h-14 transition-all relative ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
+          to="/customer/explore"
+          aria-label="Explore"
+          title="Explore"
+          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 min-w-0 h-full transition-all ${isActive ? 'text-[#16A34A]' : 'text-[#6B7280] hover:text-[#111827]'}`}
         >
-          <div className="relative">
-            <ShoppingBag className="w-5 h-5 mb-0.5" />
-            {totalCartCount > 0 && (
-              <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 bg-[#C85A3F] text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-xs">
-                {totalCartCount > 99 ? '99+' : totalCartCount}
-              </span>
-            )}
-          </div>
-          <span className="text-[8.5px] font-extrabold font-sans">Cart</span>
+          {({ isActive }) => (
+            <>
+              <div className={`p-1 rounded-full ${isActive ? 'bg-[#F0FDF4]' : ''}`}>
+                <Compass className="w-4 h-4 min-[340px]:w-5 min-[340px]:h-5 shrink-0" />
+              </div>
+              <span className={`text-[9px] min-[340px]:text-[10px] font-medium font-sans mt-0.5 truncate max-w-full hidden min-[260px]:block ${isActive ? 'font-bold text-[#16A34A]' : ''}`}>Explore</span>
+            </>
+          )}
         </NavLink>
+
+        {/* 3. CENTRAL SCAN QR ACTION */}
+        <div className="flex flex-col items-center justify-center flex-1 min-w-0 h-full">
+          <button
+            type="button"
+            onClick={() => setIsQrScannerOpen(true)}
+            aria-label="Scan Table QR Code"
+            title="Scan Table QR Code"
+            className="w-10 h-10 min-[340px]:w-11 min-[340px]:h-11 bg-[#16A34A] hover:bg-[#166534] text-white rounded-full flex items-center justify-center shadow-md shadow-[#16A34A]/30 border-2 border-white transition-transform active:scale-95 cursor-pointer shrink-0"
+          >
+            <QrCode className="w-5 h-5 min-[340px]:w-5.5 min-[340px]:h-5.5 shrink-0" />
+          </button>
+          <span className="text-[9px] min-[340px]:text-[10px] font-bold text-[#16A34A] font-sans mt-0.5 truncate max-w-full hidden min-[260px]:block">Scan QR</span>
+        </div>
 
         {/* 4. ORDERS */}
         <NavLink
           to="/customer/orders"
-          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 h-14 transition-all ${isActive ? 'text-[#C85A3F]' : 'text-[#756B64] hover:text-[#202124]'}`}
+          aria-label="Orders"
+          title="Orders"
+          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 min-w-0 h-full transition-all ${isActive ? 'text-[#16A34A]' : 'text-[#6B7280] hover:text-[#111827]'}`}
         >
-          <Utensils className="w-5 h-5 mb-0.5" />
-          <span className="text-[8.5px] font-extrabold font-sans">Orders</span>
+          {({ isActive }) => (
+            <>
+              <div className={`p-1 rounded-full ${isActive ? 'bg-[#F0FDF4]' : ''}`}>
+                <Utensils className="w-4 h-4 min-[340px]:w-5 min-[340px]:h-5 shrink-0" />
+              </div>
+              <span className={`text-[9px] min-[340px]:text-[10px] font-medium font-sans mt-0.5 truncate max-w-full hidden min-[260px]:block ${isActive ? 'font-bold text-[#16A34A]' : ''}`}>Orders</span>
+            </>
+          )}
+        </NavLink>
+
+        {/* 5. PROFILE */}
+        <NavLink
+          to="/customer/profile"
+          aria-label="Profile"
+          title="Profile"
+          className={({ isActive }) => `flex flex-col items-center justify-center flex-1 min-w-0 h-full transition-all ${isActive ? 'text-[#16A34A]' : 'text-[#6B7280] hover:text-[#111827]'}`}
+        >
+          {({ isActive }) => (
+            <>
+              <div className={`p-1 rounded-full ${isActive ? 'bg-[#F0FDF4]' : ''}`}>
+                <User className="w-4 h-4 min-[340px]:w-5 min-[340px]:h-5 shrink-0" />
+              </div>
+              <span className={`text-[9px] min-[340px]:text-[10px] font-medium font-sans mt-0.5 truncate max-w-full hidden min-[260px]:block ${isActive ? 'font-bold text-[#16A34A]' : ''}`}>Profile</span>
+            </>
+          )}
         </NavLink>
       </nav>
 
@@ -411,3 +458,4 @@ export const CustomerLayout: React.FC = () => {
 };
 
 export default CustomerLayout;
+

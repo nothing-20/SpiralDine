@@ -31,3 +31,5 @@ plugins {
 
 rootProject.name = "SpiralDine Print Bridge"
 include(":app")
+include(":customer")
+include(":owner")

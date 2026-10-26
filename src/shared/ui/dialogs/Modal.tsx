@@ -65,10 +65,10 @@ export const Modal: React.FC<IModalProps> = ({
     max: 'max-w-[95vw]'
   };
 
-  const isLight = variant === 'light';
+  const isLight = variant === 'light' || !!className?.includes('bg-white') || !!className?.includes('bg-[#F');
 
   const modalNode = (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 md:p-6 overflow-hidden">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 min-[340px]:p-3 sm:p-4 md:p-6 overflow-hidden">
       {/* Background Overlay */}
       <div 
         className={cn(
@@ -84,9 +84,9 @@ export const Modal: React.FC<IModalProps> = ({
         aria-modal="true"
         aria-labelledby={title && !hideHeader ? "modal-dialog-title" : undefined}
         className={cn(
-          "w-full shadow-2xl relative z-10 flex flex-col max-h-[min(90vh,860px)] animate-in fade-in zoom-in-95 duration-200 overflow-hidden",
+          "w-full shadow-2xl relative z-10 flex flex-col max-h-[min(90vh,860px)] animate-in fade-in zoom-in-95 duration-200 overflow-hidden min-w-0",
           isLight
-            ? "bg-white border border-[#D8DDD6] rounded-3xl text-[#202820]"
+            ? "bg-white border border-[#D8DDD6] rounded-2xl sm:rounded-3xl text-[#202820]"
             : "bg-slate-900 border border-slate-800 backdrop-blur-md rounded-2xl text-slate-100",
           sizeClasses[size] || 'max-w-lg',
           className
@@ -95,14 +95,14 @@ export const Modal: React.FC<IModalProps> = ({
         {/* Fixed Header (omitted if hideHeader is true or title is explicitly empty) */}
         {!hideHeader && title !== '' && (
           <div className={cn(
-            "flex items-center justify-between px-5 sm:px-6 py-4 shrink-0",
+            "flex items-center justify-between px-3 min-[340px]:px-5 sm:px-6 py-3 min-[340px]:py-4 shrink-0 min-w-0 gap-2",
             isLight
               ? "border-b border-[#D8DDD6] bg-[#FAF8F4]"
               : "border-b border-slate-800/60"
           )}>
             <h3 id="modal-dialog-title" className={cn(
-              "font-display font-extrabold text-base sm:text-lg pr-3",
-              isLight ? "text-[#202820]" : "text-textPearl"
+              "font-display font-extrabold text-sm min-[340px]:text-base sm:text-lg min-w-0 flex-1 truncate pr-1",
+              isLight ? "text-[#18201D]" : "text-textPearl"
             )}>
               {title || 'Dialog'}
             </h3>
@@ -110,21 +110,21 @@ export const Modal: React.FC<IModalProps> = ({
               type="button"
               onClick={onClose}
               className={cn(
-                "w-9 h-9 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl transition-all cursor-pointer",
+                "w-8 h-8 min-w-[32px] min-h-[32px] sm:w-9 sm:h-9 sm:min-w-[36px] sm:min-h-[36px] flex items-center justify-center rounded-xl transition-all cursor-pointer shrink-0",
                 isLight 
                   ? "text-[#5F675F] hover:text-[#202820] hover:bg-[#F3E8DF]/60" 
                   : "text-mutedAsh hover:text-textPearl hover:bg-slate-800/80"
               )}
               aria-label={closeAriaLabel}
             >
-              <X className="w-4.5 h-4.5" />
+              <X className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
             </button>
           </div>
         )}
 
         {/* Scrollable Content Body */}
         <div className={cn(
-          "flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-5 overscroll-contain",
+          "flex-1 min-h-0 overflow-y-auto px-3 min-[340px]:px-5 sm:px-6 py-3.5 min-[340px]:py-5 overscroll-contain min-w-0",
           isLight ? "text-[#202820] bg-white" : "text-sm text-slate-300",
           contentClassName
         )}>
@@ -134,7 +134,7 @@ export const Modal: React.FC<IModalProps> = ({
         {/* Fixed Footer */}
         {footer && (
           <div className={cn(
-            "flex items-center justify-end px-5 sm:px-6 py-3.5 shrink-0",
+            "flex items-center justify-end px-3 min-[340px]:px-5 sm:px-6 py-3 shrink-0 min-w-0",
             isLight
               ? "border-t border-[#D8DDD6] bg-[#FAF8F4]"
               : "border-t border-slate-800/60 bg-slate-900/50"

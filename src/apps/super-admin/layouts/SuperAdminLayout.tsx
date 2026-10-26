@@ -16,7 +16,8 @@ import {
   LogOut, 
   Menu, 
   X,
-  ShieldAlert
+  ShieldAlert,
+  MessageSquare
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -35,10 +36,11 @@ const navItems: INavItem[] = [
   { to: '/super-admin/staff', label: 'Staff', icon: ChefHat },
   { to: '/super-admin/orders', label: 'Orders', icon: Receipt },
   { to: '/super-admin/payments', label: 'Payments', icon: CreditCard },
+  { to: '/super-admin/support', label: 'Support Tickets', icon: MessageSquare },
   { to: '/super-admin/reports', label: 'Reports', icon: FileSpreadsheet, badge: 'Soon' },
-  { to: '/super-admin/analytics', label: 'Platform Analytics', icon: TrendingUp, badge: 'Soon' },
-  { to: '/super-admin/audit-logs', label: 'Audit Logs', icon: ShieldAlert, badge: 'Soon' },
-  { to: '/super-admin/settings', label: 'Settings', icon: Settings, badge: 'Soon' },
+  { to: '/super-admin/analytics', label: 'Platform Analytics', icon: TrendingUp },
+  { to: '/super-admin/audit-logs', label: 'Audit Logs', icon: ShieldAlert },
+  { to: '/super-admin/settings', label: 'Settings', icon: Settings },
 ];
 
 export const SuperAdminLayout: React.FC = () => {

@@ -21,6 +21,13 @@ const PricingPage = React.lazy(() => import('../features/public-pages/PricingPag
 const AboutPage = React.lazy(() => import('../features/public-pages/AboutPage'));
 const ContactPage = React.lazy(() => import('../features/public-pages/ContactPage'));
 const NotFoundPage = React.lazy(() => import('../features/public-pages/NotFoundPage'));
+const PrivacyPage = React.lazy(() => import('../features/public-pages/PrivacyPage'));
+const TermsPage = React.lazy(() => import('../features/public-pages/TermsPage'));
+const RefundPolicyPage = React.lazy(() => import('../features/public-pages/RefundPolicyPage'));
+const FAQPage = React.lazy(() => import('../features/public-pages/FAQPage'));
+const CookiePolicyPage = React.lazy(() => import('../features/public-pages/CookiePolicyPage'));
+const AccessibilityPage = React.lazy(() => import('../features/public-pages/AccessibilityPage'));
+const AccountDeletionPage = React.lazy(() => import('../features/public-pages/AccountDeletionPage'));
 
 // Authentication
 const LoginForm = React.lazy(() => import('../features/auth/components/LoginForm'));
@@ -57,6 +64,30 @@ const OwnerBranchTransfers = React.lazy(() => import('../apps/owner/pages/OwnerB
 const OwnerAuditLogs = React.lazy(() => import('../apps/owner/pages/OwnerAuditLogs'));
 const OwnerPromotions = React.lazy(() => import('../apps/owner/pages/OwnerPromotions'));
 
+// Unified Responsive Owner Layout and Page Switchers
+const ResponsiveOwnerLayout = React.lazy(() => import('../apps/owner/layouts/ResponsiveOwnerLayout'));
+import {
+  ResponsiveOwnerDashboard,
+  ResponsiveOwnerOrders,
+  ResponsiveOwnerOrderDetails,
+  ResponsiveOwnerMenu,
+  ResponsiveOwnerMenuAdd,
+  ResponsiveOwnerMenuEdit,
+  ResponsiveOwnerMenuCategories,
+  ResponsiveOwnerBusiness,
+  ResponsiveOwnerAnalytics,
+  ResponsiveOwnerTables,
+  ResponsiveOwnerStaff,
+  ResponsiveOwnerPromotions,
+  ResponsiveOwnerInventory,
+  ResponsiveOwnerBilling,
+  ResponsiveOwnerMore,
+  ResponsiveOwnerSettings,
+  ResponsiveOwnerLogin,
+  LegacyOrderRedirect,
+  LegacyMenuEditRedirect
+} from '../apps/owner/pages/ResponsiveOwnerPages';
+
 // Kitchen
 const KitchenQueue = React.lazy(() => import('../apps/owner/kitchen/KitchenQueue'));
 const KitchenInventoryPage = React.lazy(() => import('../apps/owner/kitchen/KitchenInventoryPage'));
@@ -91,6 +122,10 @@ const SuperAdminCustomers = React.lazy(() => import('../apps/super-admin/pages/S
 const SuperAdminStaff = React.lazy(() => import('../apps/super-admin/pages/SuperAdminStaff'));
 const SuperAdminOrders = React.lazy(() => import('../apps/super-admin/pages/SuperAdminOrders'));
 const SuperAdminPayments = React.lazy(() => import('../apps/super-admin/pages/SuperAdminPayments'));
+const SuperAdminSupport = React.lazy(() => import('../apps/super-admin/pages/SuperAdminSupport'));
+const SuperAdminAnalytics = React.lazy(() => import('../apps/super-admin/pages/SuperAdminAnalytics'));
+const SuperAdminAuditLogs = React.lazy(() => import('../apps/super-admin/pages/SuperAdminAuditLogs'));
+const SuperAdminSettings = React.lazy(() => import('../apps/super-admin/pages/SuperAdminSettings'));
 const SuperAdminComingSoon = React.lazy(() => import('../apps/super-admin/pages/SuperAdminComingSoon'));
 
 // Customer
@@ -247,6 +282,18 @@ export const AppRoutes: React.FC = () => {
         <Route path="/pricing" element={<PricingPage />} />
         <Route path="/about" element={<AboutPage />} />
         <Route path="/contact" element={<ContactPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/privacy-policy" element={<PrivacyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/terms-of-service" element={<TermsPage />} />
+        <Route path="/refund-policy" element={<RefundPolicyPage />} />
+        <Route path="/cancellation-policy" element={<RefundPolicyPage />} />
+        <Route path="/cookie-policy" element={<CookiePolicyPage />} />
+        <Route path="/accessibility" element={<AccessibilityPage />} />
+        <Route path="/account-deletion" element={<AccountDeletionPage />} />
+        <Route path="/faq" element={<FAQPage />} />
+        <Route path="/help" element={<FAQPage />} />
+        <Route path="/support" element={<FAQPage />} />
         <Route path="/customer" element={<CustomerWelcomeRoute />} />
         <Route path="/customer/dashboard" element={<Navigate to="/customer/home" replace />} />
         <Route path="/customer/restaurant/:tenantId/menu" element={<CustomerMenu />} />
@@ -299,8 +346,9 @@ export const AppRoutes: React.FC = () => {
         {/* 2. Public Auth sub-routes gated by PublicGuard redirect interceptor */}
         <Route element={<PublicGuard />}>
           <Route element={<AuthLayout />}>
-            <Route path="/login" element={<LoginForm />} />
-            <Route path="/owner/login" element={<LoginForm />} />
+            <Route path="/login" element={<ResponsiveOwnerLogin />} />
+            <Route path="/owner/login" element={<ResponsiveOwnerLogin />} />
+            <Route path="/owner/mobile/login" element={<Navigate to="/login" replace />} />
             <Route path="/staff/login" element={<StaffLogin />} />
             <Route path="/register" element={<RegisterForm />} />
             <Route path="/forgot-password" element={<ForgotPasswordForm />} />
@@ -316,22 +364,34 @@ export const AppRoutes: React.FC = () => {
         {/* 4. Protected B2B Restaurant Staff & Owner routes gated by Workspace Validation */}
         <Route element={<OwnerGuard />}>
           <Route element={<WorkspaceGuard />}>
-            <Route element={<DashboardLayout />}>
-              {/* Owner Dashboards - Canonical /owner/* and legacy /dashboard/owner/* routes */}
-              <Route element={<RoleGuard allowedRoles={['owner', 'admin']} />}>
+            {/* Unified Responsive Owner Portal (Adapts automatically to Phone, Tablet, Laptop, and Desktop Viewports) */}
+            <Route element={<RoleGuard allowedRoles={['owner', 'admin']} />}>
+              <Route element={<ResponsiveOwnerLayout />}>
+                {/* Canonical Owner Routes */}
                 <Route path="/owner" element={<Navigate to="/owner/dashboard" replace />} />
-                <Route path="/owner/dashboard" element={<OwnerOverview />} />
-                <Route path="/owner/menu" element={<MenuManagement />} />
-                <Route path="/owner/staff" element={<OwnerStaffManager />} />
-                <Route path="/owner/tables" element={<OwnerTablesManager />} />
-                <Route path="/owner/billing" element={<OwnerBilling />} />
-                <Route path="/owner/inventory" element={<OwnerInventoryManager />} />
+                <Route path="/owner/dashboard" element={<ResponsiveOwnerDashboard />} />
+                <Route path="/owner/orders" element={<ResponsiveOwnerOrders />} />
+                <Route path="/owner/orders/:orderId" element={<ResponsiveOwnerOrderDetails />} />
+                <Route path="/owner/menu" element={<ResponsiveOwnerMenu />} />
+                <Route path="/owner/menu/add" element={<ResponsiveOwnerMenuAdd />} />
+                <Route path="/owner/menu/edit/:itemId" element={<ResponsiveOwnerMenuEdit />} />
+                <Route path="/owner/menu/categories" element={<ResponsiveOwnerMenuCategories />} />
+                <Route path="/owner/categories" element={<ResponsiveOwnerMenuCategories />} />
+                <Route path="/owner/business" element={<ResponsiveOwnerBusiness />} />
+                <Route path="/owner/analytics" element={<ResponsiveOwnerAnalytics />} />
+                <Route path="/owner/tables" element={<ResponsiveOwnerTables />} />
+                <Route path="/owner/staff" element={<ResponsiveOwnerStaff />} />
+                <Route path="/owner/promotions" element={<ResponsiveOwnerPromotions />} />
+                <Route path="/owner/inventory" element={<ResponsiveOwnerInventory />} />
                 <Route path="/owner/inventory/purchase-orders" element={<OwnerInventoryManager />} />
-                <Route path="/owner/analytics" element={<OwnerAnalytics />} />
+                <Route path="/owner/billing" element={<ResponsiveOwnerBilling />} />
+                <Route path="/owner/more" element={<ResponsiveOwnerMore />} />
+                <Route path="/owner/settings" element={<ResponsiveOwnerSettings />} />
+
+                {/* Additional Desktop Owner Workspaces (Accessible and reflowed on all devices) */}
                 <Route path="/owner/automation" element={<OwnerAutomationCenter />} />
                 <Route path="/owner/strategy" element={<OwnerStrategyCenter />} />
                 <Route path="/owner/intelligence" element={<OwnerIntelligence />} />
-                <Route path="/owner/settings" element={<OwnerSettings />} />
                 <Route path="/owner/restaurants" element={<OwnerRestaurants />} />
                 <Route path="/owner/reservations" element={<OwnerReservations />} />
                 <Route path="/owner/customers" element={<OwnerCustomers />} />
@@ -342,34 +402,56 @@ export const AppRoutes: React.FC = () => {
                 <Route path="/owner/reports" element={<OwnerReports />} />
                 <Route path="/owner/branch-transfers" element={<OwnerBranchTransfers />} />
                 <Route path="/owner/audit-logs" element={<OwnerAuditLogs />} />
-                <Route path="/owner/promotions" element={<OwnerPromotions />} />
 
-                <Route path="/dashboard/owner" element={<OwnerOverview />} />
-                <Route path="/dashboard/owner/menu" element={<MenuManagement />} />
-                <Route path="/dashboard/owner/staff" element={<OwnerStaffManager />} />
-                <Route path="/dashboard/owner/tables" element={<OwnerTablesManager />} />
-                <Route path="/dashboard/owner/billing" element={<OwnerBilling />} />
-                <Route path="/dashboard/owner/inventory" element={<OwnerInventoryManager />} />
-                <Route path="/dashboard/owner/inventory/purchase-orders" element={<OwnerInventoryManager />} />
-                <Route path="/dashboard/owner/analytics" element={<OwnerAnalytics />} />
-                <Route path="/dashboard/owner/automation" element={<OwnerAutomationCenter />} />
-                <Route path="/dashboard/owner/strategy" element={<OwnerStrategyCenter />} />
-                <Route path="/dashboard/owner/intelligence" element={<OwnerIntelligence />} />
-                <Route path="/dashboard/owner/settings" element={<OwnerSettings />} />
-                <Route path="/dashboard/owner/restaurants" element={<OwnerRestaurants />} />
-                <Route path="/dashboard/owner/reservations" element={<OwnerReservations />} />
-                <Route path="/dashboard/owner/customers" element={<OwnerCustomers />} />
-                <Route path="/dashboard/owner/feedback" element={<OwnerFeedback />} />
-                <Route path="/dashboard/owner/reviews" element={<OwnerReviews />} />
-                <Route path="/dashboard/owner/marketing" element={<OwnerMarketing />} />
-                <Route path="/dashboard/owner/alerts" element={<OwnerAlerts />} />
-                <Route path="/dashboard/owner/reports" element={<OwnerReports />} />
-                <Route path="/dashboard/owner/branch-transfers" element={<OwnerBranchTransfers />} />
-                <Route path="/dashboard/owner/audit-logs" element={<OwnerAuditLogs />} />
-                <Route path="/dashboard/owner/promotions" element={<OwnerPromotions />} />
+                {/* Legacy /dashboard/owner/* aliases -> redirect to canonical /owner/* */}
+                <Route path="/dashboard/owner" element={<Navigate to="/owner/dashboard" replace />} />
+                <Route path="/dashboard/owner/menu" element={<Navigate to="/owner/menu" replace />} />
+                <Route path="/dashboard/owner/staff" element={<Navigate to="/owner/staff" replace />} />
+                <Route path="/dashboard/owner/tables" element={<Navigate to="/owner/tables" replace />} />
+                <Route path="/dashboard/owner/billing" element={<Navigate to="/owner/billing" replace />} />
+                <Route path="/dashboard/owner/inventory" element={<Navigate to="/owner/inventory" replace />} />
+                <Route path="/dashboard/owner/inventory/purchase-orders" element={<Navigate to="/owner/inventory/purchase-orders" replace />} />
+                <Route path="/dashboard/owner/analytics" element={<Navigate to="/owner/analytics" replace />} />
+                <Route path="/dashboard/owner/automation" element={<Navigate to="/owner/automation" replace />} />
+                <Route path="/dashboard/owner/strategy" element={<Navigate to="/owner/strategy" replace />} />
+                <Route path="/dashboard/owner/intelligence" element={<Navigate to="/owner/intelligence" replace />} />
+                <Route path="/dashboard/owner/settings" element={<Navigate to="/owner/settings" replace />} />
+                <Route path="/dashboard/owner/restaurants" element={<Navigate to="/owner/restaurants" replace />} />
+                <Route path="/dashboard/owner/reservations" element={<Navigate to="/owner/reservations" replace />} />
+                <Route path="/dashboard/owner/customers" element={<Navigate to="/owner/customers" replace />} />
+                <Route path="/dashboard/owner/feedback" element={<Navigate to="/owner/feedback" replace />} />
+                <Route path="/dashboard/owner/reviews" element={<Navigate to="/owner/reviews" replace />} />
+                <Route path="/dashboard/owner/marketing" element={<Navigate to="/owner/marketing" replace />} />
+                <Route path="/dashboard/owner/alerts" element={<Navigate to="/owner/alerts" replace />} />
+                <Route path="/dashboard/owner/reports" element={<Navigate to="/owner/reports" replace />} />
+                <Route path="/dashboard/owner/branch-transfers" element={<Navigate to="/owner/branch-transfers" replace />} />
+                <Route path="/dashboard/owner/audit-logs" element={<Navigate to="/owner/audit-logs" replace />} />
+                <Route path="/dashboard/owner/promotions" element={<Navigate to="/owner/promotions" replace />} />
               </Route>
-              
-              {/* Branch Manager Dashboard */}
+
+              {/* Backward-compatible legacy /owner/mobile/* redirects */}
+              <Route path="/owner/mobile" element={<Navigate to="/owner/dashboard" replace />} />
+              <Route path="/owner/mobile/home" element={<Navigate to="/owner/dashboard" replace />} />
+              <Route path="/owner/mobile/orders" element={<Navigate to="/owner/orders" replace />} />
+              <Route path="/owner/mobile/orders/:orderId" element={<LegacyOrderRedirect />} />
+              <Route path="/owner/mobile/menu" element={<Navigate to="/owner/menu" replace />} />
+              <Route path="/owner/mobile/menu/add" element={<Navigate to="/owner/menu/add" replace />} />
+              <Route path="/owner/mobile/menu/edit/:itemId" element={<LegacyMenuEditRedirect />} />
+              <Route path="/owner/mobile/categories" element={<Navigate to="/owner/categories" replace />} />
+              <Route path="/owner/mobile/business" element={<Navigate to="/owner/business" replace />} />
+              <Route path="/owner/mobile/analytics" element={<Navigate to="/owner/analytics" replace />} />
+              <Route path="/owner/mobile/tables" element={<Navigate to="/owner/tables" replace />} />
+              <Route path="/owner/mobile/staff" element={<Navigate to="/owner/staff" replace />} />
+              <Route path="/owner/mobile/promotions" element={<Navigate to="/owner/promotions" replace />} />
+              <Route path="/owner/mobile/inventory" element={<Navigate to="/owner/inventory" replace />} />
+              <Route path="/owner/mobile/billing" element={<Navigate to="/owner/billing" replace />} />
+              <Route path="/owner/mobile/more" element={<Navigate to="/owner/more" replace />} />
+              <Route path="/owner/mobile/settings" element={<Navigate to="/owner/settings" replace />} />
+              <Route path="/owner/mobile/*" element={<Navigate to="/owner/dashboard" replace />} />
+            </Route>
+
+            {/* Existing Protected Staff Dashboard Layout (Kitchen, Waiter, Manager, Cashier, Reception) */}
+            <Route element={<DashboardLayout />}>
               <Route element={<RoleGuard allowedRoles={['owner', 'admin', 'manager']} />}>
                 <Route path="/dashboard/manager" element={<ManagerDashboard />} />
               </Route>
@@ -437,10 +519,11 @@ export const AppRoutes: React.FC = () => {
             <Route path="/super-admin/staff" element={<SuperAdminStaff />} />
             <Route path="/super-admin/orders" element={<SuperAdminOrders />} />
             <Route path="/super-admin/payments" element={<SuperAdminPayments />} />
+            <Route path="/super-admin/support" element={<SuperAdminSupport />} />
             <Route path="/super-admin/reports" element={<SuperAdminComingSoon title="Platform Reports" description="Comprehensive cross-tenant financial, operational, and inventory performance reports." />} />
-            <Route path="/super-admin/analytics" element={<SuperAdminComingSoon title="Platform Analytics" description="System-wide performance benchmarks, tenant retention, MRR, and platform metrics." />} />
-            <Route path="/super-admin/audit-logs" element={<SuperAdminComingSoon title="Security Audit Logs" description="Immutable security audit trail of privileged administrative events and access." />} />
-            <Route path="/super-admin/settings" element={<SuperAdminComingSoon title="Platform Settings" description="Global platform configuration, system feature flags, and global gateway settings." />} />
+            <Route path="/super-admin/analytics" element={<SuperAdminAnalytics />} />
+            <Route path="/super-admin/audit-logs" element={<SuperAdminAuditLogs />} />
+            <Route path="/super-admin/settings" element={<SuperAdminSettings />} />
           </Route>
         </Route>
 

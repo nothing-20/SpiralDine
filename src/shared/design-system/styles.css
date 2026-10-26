@@ -1,6 +1,7 @@
 :root {
   --font-sans: 'Inter', sans-serif;
   --font-display: 'Outfit', sans-serif;
+  --font-poppins: 'Poppins', sans-serif;
 
   /* Spacing Scale */
   --spacing-4: 0.25rem;  /* 4px */

@@ -61,39 +61,60 @@ export const CurrencyProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return;
     }
 
-    const docRef = doc(db, 'tenants', resolvedTenantId);
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const curr = data.settings?.currency || data.currency || data.currencyCode || detected.currency;
-        const config = SUPPORTED_CURRENCIES[curr] || {
-          code: curr,
-          locale: data.locale || detected.locale,
-          symbol: data.currencySymbol || data.settings?.currencySymbol || getCurrencySymbol(curr)
-        };
-        setCurrency(curr);
-        setCurrencySymbol(config.symbol);
-        setLocale(config.locale);
-        
-        // Sync to vanilla TS formatters
-        setGlobalCurrencyConfig(curr, config.locale);
+    const applyCurrencyData = (data: any) => {
+      const curr = data.settings?.currency || data.currency || data.currencyCode || 'INR';
+      const config = SUPPORTED_CURRENCIES[curr] || {
+        code: curr,
+        locale: data.locale || 'en-IN',
+        symbol: data.currencySymbol || data.settings?.currencySymbol || getCurrencySymbol(curr)
+      };
+      setCurrency(curr);
+      setCurrencySymbol(config.symbol);
+      setLocale(config.locale);
+      setGlobalCurrencyConfig(curr, config.locale);
+    };
+
+    let unsubRest: (() => void) | null = null;
+    const tenantDocRef = doc(db, 'tenants', resolvedTenantId);
+    const unsubTenant = onSnapshot(tenantDocRef, (tenantSnap) => {
+      if (tenantSnap.exists()) {
+        applyCurrencyData(tenantSnap.data());
       } else {
-        const def = detectDefaultCountryAndCurrency();
-        setCurrency(def.currency);
-        setCurrencySymbol(def.symbol);
-        setLocale(def.locale);
-        setGlobalCurrencyConfig(def.currency, def.locale);
+        // Fallback to restaurants/{resolvedTenantId}
+        const restDocRef = doc(db, 'restaurants', resolvedTenantId);
+        unsubRest = onSnapshot(restDocRef, (restSnap) => {
+          if (restSnap.exists()) {
+            applyCurrencyData(restSnap.data());
+          } else {
+            const def = detectDefaultCountryAndCurrency();
+            setCurrency(def.currency);
+            setCurrencySymbol(def.symbol);
+            setLocale(def.locale);
+            setGlobalCurrencyConfig(def.currency, def.locale);
+          }
+        }, (err) => {
+          console.warn("Failed to sync currency from restaurants collection:", err);
+          const def = detectDefaultCountryAndCurrency();
+          setCurrency(def.currency);
+          setCurrencySymbol(def.symbol);
+          setLocale(def.locale);
+          setGlobalCurrencyConfig(def.currency, def.locale);
+        });
       }
     }, (err) => {
-      console.error("Failed to sync currency settings from Firestore:", err);
-      const def = detectDefaultCountryAndCurrency();
-      setCurrency(def.currency);
-      setCurrencySymbol(def.symbol);
-      setLocale(def.locale);
-      setGlobalCurrencyConfig(def.currency, def.locale);
+      console.warn("Failed to sync currency from tenants collection, checking restaurants:", err);
+      const restDocRef = doc(db, 'restaurants', resolvedTenantId);
+      unsubRest = onSnapshot(restDocRef, (restSnap) => {
+        if (restSnap.exists()) {
+          applyCurrencyData(restSnap.data());
+        }
+      });
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubTenant();
+      if (unsubRest) unsubRest();
+    };
   }, [user?.tenantId, location.pathname, location.search]);
 
   const formatCurrency = (value: number): string => {

@@ -157,6 +157,7 @@ export const OwnerReservations: React.FC = () => {
       (snapshot) => {
         const list: IReservationRecord[] = [];
         snapshot.forEach((docSnap) => {
+          if (docSnap.id.startsWith('LOCK_')) return;
           list.push({ id: docSnap.id, ...docSnap.data() } as IReservationRecord);
         });
 
@@ -343,6 +344,18 @@ export const OwnerReservations: React.FC = () => {
       };
 
       await updateDoc(doc(db, 'restaurants', targetTenant, 'reservations', res.id), updateData);
+
+      // Synchronize customer profile records and release lock if cancelled
+      if (res.customerId) {
+        updateDoc(doc(db, 'customers', res.customerId, 'reservations', res.id), updateData).catch(() => {});
+        updateDoc(doc(db, 'users', res.customerId, 'reservations', res.id), updateData).catch(() => {});
+      }
+      if (newStatus === 'Cancelled' && (res.tableId || res.tableNumber) && res.date && res.time) {
+        const cleanTimeKey = res.time.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+        const tId = res.tableId || res.tableNumber;
+        const lockDocId = `LOCK_${tId}_${res.date}_${cleanTimeKey}`;
+        updateDoc(doc(db, 'restaurants', targetTenant, 'reservations', lockDocId), updateData).catch(() => {});
+      }
 
       await logAuditEvent({
         userId: user?.uid || '',
@@ -538,9 +551,9 @@ export const OwnerReservations: React.FC = () => {
                       </span>
                     </div>
 
-                    {res.specialNotes && (
+                    {(res.specialNotes || (res as any).specialRequests) && (
                       <p className="text-[11px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded mt-1.5 inline-block">
-                        Note: {res.specialNotes}
+                        Note: {res.specialNotes || (res as any).specialRequests}
                       </p>
                     )}
                   </div>

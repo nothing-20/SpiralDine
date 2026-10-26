@@ -56,7 +56,7 @@ export const StaffLogin: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
-    console.log('[AUTH Staff Login] Login started for:', cleanEmail);
+    console.log('[AUTH Staff Login] Login started');
     if (!validate()) return;
 
     setIsLoading(true);
@@ -72,8 +72,7 @@ export const StaffLogin: React.FC = () => {
       const fUser = credentials.user;
 
       console.log('[AUTH Staff Login] Firebase Auth success:', {
-        uid: fUser.uid,
-        email: fUser.email
+        uid: fUser.uid
       });
 
       // 2. Authoritative profile resolution

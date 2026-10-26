@@ -391,9 +391,15 @@ export const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
         </div>
 
         {/* User profile details */}
-        <div className={`flex items-center space-x-3 pl-3 border-l ${
+        <div 
+          onClick={() => {
+            if (isOwner) navigate('/owner/settings');
+          }}
+          className={`flex items-center space-x-3 pl-3 border-l ${isOwner ? 'cursor-pointer hover:opacity-85 transition-opacity' : ''} ${
           isLightHeader ? 'border-[#E5E0D9]' : 'border-slate-800/60'
-        }`}>
+        }`}
+          title={isOwner ? "Account Settings & Profile" : undefined}
+        >
           <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${
             isOwner 
               ? 'bg-[#12352D] text-white border border-[#12352D]' 
@@ -403,13 +409,13 @@ export const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
           }`}>
             {user?.displayName 
               ? user.displayName.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase() 
-              : (user?.email ? user.email.slice(0, 2).toUpperCase() : (isOwner ? 'OW' : isKitchen ? 'KS' : (isWaiter ? 'SC' : <User className="w-4 h-4" />)))}
+              : (user?.email ? user.email.slice(0, 2).toUpperCase() : (isOwner ? 'OW' : isKitchen ? 'KS' : (isWaiter ? 'WT' : <User className="w-4 h-4" />)))}
           </div>
           <div className="hidden md:flex flex-col text-left">
             <span className={`text-xs font-bold truncate max-w-[120px] ${
               isLightHeader ? 'text-[#17202A]' : 'text-textPearl'
             }`}>
-              {user?.displayName || user?.email?.split('@')[0] || (isOwner ? 'Owner' : isKitchen ? 'Kitchen Staff' : (isWaiter ? 'Sri Charan' : 'User'))}
+              {user?.displayName || user?.email?.split('@')[0] || (isOwner ? 'Owner' : isKitchen ? 'Kitchen Staff' : (isWaiter ? 'Staff Waiter' : 'User'))}
             </span>
             <span className={`text-[9px] uppercase font-extrabold tracking-widest ${
               isOwner ? 'text-[#C9533B]' : isLightService ? 'text-[#5F6762]' : 'text-primary'

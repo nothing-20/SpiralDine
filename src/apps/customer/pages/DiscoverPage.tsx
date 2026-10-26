@@ -768,7 +768,7 @@ const DiscoverPageInner: React.FC = () => {
 
       {/* 6. Main Content: Loading, Error, Empty State, or Restaurant Grid */}
       {isLoading && restaurantsList.length === 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
           {[1, 2, 3, 4, 5, 6].map((n) => (
             <div key={n} className="bg-white border border-[#E5DCD5] rounded-3xl overflow-hidden p-4 space-y-4 animate-pulse">
               <div className="h-44 bg-[#F3E8DF] rounded-2xl w-full" />
@@ -826,7 +826,7 @@ const DiscoverPageInner: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
           {filteredRestaurants.map((r) => {
             const isFav = favourites.includes(r.id);
             const hasValidRating = typeof r.rating === 'number' && !isNaN(r.rating);

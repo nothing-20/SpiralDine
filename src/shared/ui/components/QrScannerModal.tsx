@@ -424,35 +424,35 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="qr-scanner-title"
-      className="fixed inset-0 z-50 bg-[#202124]/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-200"
+      className="fixed inset-0 z-50 bg-[#202124]/80 backdrop-blur-md flex items-center justify-center p-2 min-[340px]:p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-200"
     >
-      <div className="relative w-full max-w-sm bg-[#FCFAF7] border border-[#E5DCD5] rounded-3xl shadow-2xl p-5 sm:p-6 text-center overflow-hidden flex flex-col items-center">
+      <div className="relative w-full max-w-sm bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl sm:rounded-3xl shadow-2xl p-3.5 min-[340px]:p-5 sm:p-6 text-center overflow-hidden flex flex-col items-center min-w-0">
         {/* Close Button */}
         <button
           type="button"
           onClick={onClose}
           aria-label="Close QR scanner"
-          className="absolute top-4 right-4 p-2 bg-white/90 hover:bg-[#F3E8DF] border border-[#E5DCD5] rounded-full text-[#756B64] hover:text-[#202124] transition-colors cursor-pointer shadow-xs z-20"
+          className="absolute top-3 right-3 sm:top-4 sm:right-4 p-1.5 sm:p-2 bg-white/90 hover:bg-[#F3E8DF] border border-[#E5DCD5] rounded-full text-[#756B64] hover:text-[#202124] transition-colors cursor-pointer shadow-xs z-20"
         >
-          <X className="w-4.5 h-4.5" />
+          <X className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
         </button>
 
         {/* Header */}
-        <div className="space-y-1 mb-4 pt-1 w-full">
+        <div className="space-y-1 mb-3 sm:mb-4 pt-1 w-full min-w-0">
           <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#F3E8DF] text-[#C85A3F] text-[10px] font-extrabold uppercase tracking-wider mb-1">
             <ScanLine className="w-3.5 h-3.5" />
             <span>Live Table Scanner</span>
           </div>
-          <h3 id="qr-scanner-title" className="text-base font-extrabold text-[#202124]">
+          <h3 id="qr-scanner-title" className="text-sm sm:text-base font-extrabold text-[#202124] truncate px-6">
             Scan Table QR Code
           </h3>
-          <p className="text-xs text-[#756B64] font-medium max-w-xs mx-auto">
+          <p className="text-[11px] sm:text-xs text-[#756B64] font-medium max-w-xs mx-auto">
             {scanHint}
           </p>
         </div>
 
         {/* Viewfinder Window */}
-        <div className="relative w-64 h-64 sm:w-68 sm:h-68 rounded-2xl overflow-hidden bg-black border-2 border-[#C85A3F]/80 shadow-inner flex items-center justify-center">
+        <div className="relative w-full max-w-[260px] aspect-square rounded-2xl overflow-hidden bg-black border-2 border-[#C85A3F]/80 shadow-inner flex items-center justify-center">
           {/* Live Video Feed */}
           <video
             ref={videoRef}
@@ -570,19 +570,19 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
               <label htmlFor="manual-table-code" className="text-[11px] font-bold text-[#756B64] block">
                 Restaurant & Table Code (e.g. bawarchi-restaurant/12 or table URL)
               </label>
-              <div className="flex gap-2">
+              <div className="flex flex-col min-[300px]:flex-row gap-2">
                 <input
                   id="manual-table-code"
                   type="text"
                   value={manualInput}
                   onChange={(e) => setManualInput(e.target.value)}
                   placeholder="restaurant-id/table-number"
-                  className="flex-1 px-3 py-2 text-xs bg-white border border-[#E5DCD5] rounded-xl text-[#202124] focus:outline-none focus:ring-2 focus:ring-[#C85A3F]/50 font-mono"
+                  className="flex-1 min-w-0 px-3 py-2 text-xs bg-white border border-[#E5DCD5] rounded-xl text-[#202124] focus:outline-none focus:ring-2 focus:ring-[#C85A3F]/50 font-mono"
                 />
                 <button
                   type="submit"
                   disabled={!manualInput.trim()}
-                  className="px-3.5 py-2 bg-[#C85A3F] hover:bg-[#A94332] disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shrink-0"
+                  className="px-3.5 py-2 bg-[#C85A3F] hover:bg-[#A94332] disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shrink-0 text-center"
                 >
                   Open Table
                 </button>

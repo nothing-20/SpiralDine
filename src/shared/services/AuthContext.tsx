@@ -114,7 +114,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
                   console.log('[AUTH Context] Profile loaded via snapshot (' + (isCustomerProfile ? 'customers' : 'users') + '):', {
                     uid: resolvedUser.uid,
-                    email: resolvedUser.email,
                     role: resolvedUser.role,
                     tenantId: resolvedUser.tenantId
                   });

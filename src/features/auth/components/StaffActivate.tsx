@@ -253,7 +253,7 @@ export const StaffActivate: React.FC = () => {
         // 5. Verify email match if email provided
         const storedEmail = (data.email || '').trim().toLowerCase();
         if (cleanEmail && storedEmail && cleanEmail !== storedEmail) {
-          console.warn('[StaffActivate] Email mismatch:', { cleanEmail, storedEmail });
+          console.warn('[StaffActivate] Email mismatch between invitation link and database record');
           setErrorCode('EMAIL_MISMATCH');
           setErrorMessage(`The email address in the link (${cleanEmail}) does not match this invitation record.`);
           setStep('error');

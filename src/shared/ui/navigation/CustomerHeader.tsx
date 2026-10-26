@@ -175,19 +175,19 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
 
   return (
     <>
-      <header className="bg-[#FCFAF7]/95 border-b border-[#E5DCD5] sticky top-0 z-40 backdrop-blur-md px-4 py-3 shrink-0 flex items-center justify-between md:px-8 relative shadow-xs">
+      <header className="bg-white/95 border-b border-[#E5E7EB] sticky top-0 z-40 backdrop-blur-md px-2 min-[360px]:px-4 md:px-6 py-2 sm:py-2.5 sm:py-3 shrink-0 flex items-center justify-between relative shadow-xs max-w-full min-w-0">
         {/* LEFT: Branding & Navigation */}
-        <div className="flex items-center space-x-5 lg:space-x-6 shrink-0">
+        <div className="flex items-center gap-1.5 min-[340px]:gap-2 sm:gap-3 lg:gap-5 min-w-0">
           <div
-            className="flex items-center space-x-2.5 cursor-pointer select-none"
+            className="flex items-center space-x-1.5 sm:space-x-2 cursor-pointer select-none shrink-0"
             onClick={() => navigate('/customer/home')}
           >
-            <div className="w-9 h-9 bg-[#C85A3F] rounded-xl flex items-center justify-center shadow-md shadow-[#C85A3F]/20">
-              <span className="text-white font-display font-extrabold text-xl">S</span>
+            <div className="w-7 h-7 min-[340px]:w-8 min-[340px]:h-8 sm:w-9 sm:h-9 bg-[#F0FDF4] border border-[#E5E7EB] rounded-xl flex items-center justify-center shadow-xs shrink-0">
+              <Utensils className="w-3.5 h-3.5 min-[340px]:w-4 min-[340px]:h-4 sm:w-5 sm:h-5 text-[#16A34A]" />
             </div>
-            <div>
-              <h1 className="text-sm font-display font-extrabold text-[#202124] tracking-tight">
-                Spiral <span className="text-[#C85A3F]">Dine</span>
+            <div className="min-w-0 hidden min-[220px]:block">
+              <h1 className="text-[11px] min-[320px]:text-xs sm:text-sm font-poppins font-extrabold text-[#111827] tracking-tight leading-tight whitespace-nowrap">
+                Spiral <span className="text-[#16A34A]">Dine</span>
               </h1>
             </div>
           </div>
@@ -205,25 +205,25 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
                 window.dispatchEvent(new Event('open_location_modal'));
               }
             }}
-            className="hidden sm:flex items-center space-x-1.5 bg-[#F3E8DF] border border-[#E5DCD5] px-3.5 py-1.5 rounded-full text-xs text-[#202124] font-medium shadow-xs cursor-pointer hover:border-[#C85A3F]/50 hover:bg-[#F3E8DF]/80 transition-all group"
+            className="hidden min-[420px]:flex items-center space-x-1 sm:space-x-1.5 bg-[#F0FDF4] border border-[#E5E7EB] px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full text-xs text-[#111827] font-medium shadow-xs cursor-pointer hover:border-[#16A34A]/50 hover:bg-[#F0FDF4]/90 transition-all group min-w-0 max-w-[140px] md:max-w-none"
             title="Click to choose dining location"
           >
-            <MapPin className="w-3.5 h-3.5 text-[#C85A3F] shrink-0" />
-            <span className="font-bold text-[#202124] group-hover:text-[#C85A3F] transition-colors">
+            <MapPin className="w-3.5 h-3.5 text-[#16A34A] shrink-0" />
+            <span className="font-bold text-[#111827] group-hover:text-[#16A34A] transition-colors truncate text-[11px] sm:text-xs">
               {currentCityLabel}
             </span>
-            <ChevronDown className="w-3 h-3 text-[#756B64] group-hover:text-[#C85A3F] transition-colors shrink-0" />
+            <ChevronDown className="w-3 h-3 text-[#6B7280] group-hover:text-[#16A34A] transition-colors shrink-0" />
           </button>
 
           {/* Desktop Navigation Links */}
-          <nav className="hidden md:flex items-center space-x-1">
+          <nav className="hidden md:flex items-center space-x-0.5 lg:space-x-1 min-w-0">
             <NavLink
               to="/customer/home"
               className={({ isActive }) =>
-                `px-3.5 py-1.5 rounded-full text-xs font-extrabold transition-all ${
+                `px-2.5 lg:px-3.5 py-1.5 rounded-full text-[11px] lg:text-xs font-poppins font-extrabold transition-all whitespace-nowrap ${
                   isActive
-                    ? 'text-[#C85A3F] bg-[#F3E8DF] shadow-xs'
-                    : 'text-[#756B64] hover:text-[#202124]'
+                    ? 'text-[#16A34A] bg-[#F0FDF4] shadow-xs'
+                    : 'text-[#6B7280] hover:text-[#111827]'
                 }`
               }
             >
@@ -232,10 +232,10 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
             <NavLink
               to="/customer/explore"
               className={({ isActive }) =>
-                `px-3.5 py-1.5 rounded-full text-xs font-extrabold transition-all ${
+                `px-2.5 lg:px-3.5 py-1.5 rounded-full text-[11px] lg:text-xs font-poppins font-extrabold transition-all whitespace-nowrap ${
                   isActive
-                    ? 'text-[#C85A3F] bg-[#F3E8DF] shadow-xs'
-                    : 'text-[#756B64] hover:text-[#202124]'
+                    ? 'text-[#16A34A] bg-[#F0FDF4] shadow-xs'
+                    : 'text-[#6B7280] hover:text-[#111827]'
                 }`
               }
             >
@@ -244,10 +244,10 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
             <NavLink
               to="/customer/orders"
               className={({ isActive }) =>
-                `px-3.5 py-1.5 rounded-full text-xs font-extrabold transition-all ${
+                `px-2.5 lg:px-3.5 py-1.5 rounded-full text-[11px] lg:text-xs font-poppins font-extrabold transition-all whitespace-nowrap ${
                   isActive
-                    ? 'text-[#C85A3F] bg-[#F3E8DF] shadow-xs'
-                    : 'text-[#756B64] hover:text-[#202124]'
+                    ? 'text-[#16A34A] bg-[#F0FDF4] shadow-xs'
+                    : 'text-[#6B7280] hover:text-[#111827]'
                 }`
               }
             >
@@ -256,10 +256,10 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
             <NavLink
               to="/customer/booking"
               className={({ isActive }) =>
-                `px-3.5 py-1.5 rounded-full text-xs font-extrabold transition-all ${
+                `px-2.5 lg:px-3.5 py-1.5 rounded-full text-[11px] lg:text-xs font-poppins font-extrabold transition-all whitespace-nowrap ${
                   isActive
-                    ? 'text-[#C85A3F] bg-[#F3E8DF] shadow-xs'
-                    : 'text-[#756B64] hover:text-[#202124]'
+                    ? 'text-[#16A34A] bg-[#F0FDF4] shadow-xs'
+                    : 'text-[#6B7280] hover:text-[#111827]'
                 }`
               }
             >
@@ -268,10 +268,10 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
             <NavLink
               to="/customer/profile"
               className={({ isActive }) =>
-                `px-3.5 py-1.5 rounded-full text-xs font-extrabold transition-all ${
+                `px-2.5 lg:px-3.5 py-1.5 rounded-full text-[11px] lg:text-xs font-poppins font-extrabold transition-all whitespace-nowrap ${
                   isActive
-                    ? 'text-[#C85A3F] bg-[#F3E8DF] shadow-xs'
-                    : 'text-[#756B64] hover:text-[#202124]'
+                    ? 'text-[#16A34A] bg-[#F0FDF4] shadow-xs'
+                    : 'text-[#6B7280] hover:text-[#111827]'
                 }`
               }
             >
@@ -281,14 +281,14 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
         </div>
 
         {/* RIGHT: Table Context / QR Scan / Notifications / Profile */}
-        <div className="flex items-center space-x-2.5 sm:space-x-3 shrink-0">
+        <div className="flex items-center gap-1 min-[340px]:gap-1.5 sm:gap-2.5 shrink-0">
           {/* Active Table Context Pill (if dining context exists) */}
           {tableNumber && (
-            <div className="flex items-center space-x-1.5 bg-[#2E8B57]/10 border border-[#2E8B57]/30 text-[#2E8B57] px-3 py-1 rounded-full text-xs font-bold">
-              <Layers className="w-3.5 h-3.5" />
-              <span>Table {tableNumber}</span>
+            <div className="flex items-center space-x-1 sm:space-x-1.5 bg-[#F0FDF4] border border-[#16A34A]/30 text-[#16A34A] px-2 sm:px-3 py-1 rounded-full text-[11px] sm:text-xs font-bold min-w-0">
+              <Layers className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">Table {tableNumber}</span>
               {restaurantName && (
-                <span className="hidden sm:inline text-[11px] font-semibold text-[#202124]">
+                <span className="hidden sm:inline text-[11px] font-semibold text-[#111827] truncate max-w-[100px] md:max-w-[140px]">
                   · {restaurantName}
                 </span>
               )}
@@ -298,7 +298,7 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
           {/* QR Scan Button */}
           <button
             onClick={() => setIsQrScannerOpen(true)}
-            className="hidden sm:flex px-3.5 py-1.5 bg-[#C85A3F] hover:bg-[#A94332] text-white font-extrabold text-xs rounded-full transition-all shadow-md shadow-[#C85A3F]/20 items-center gap-1.5 cursor-pointer"
+            className="hidden xl:flex px-3.5 py-1.5 bg-[#16A34A] hover:bg-[#166534] text-white font-poppins font-extrabold text-xs rounded-full transition-all shadow-md shadow-[#16A34A]/20 items-center gap-1.5 cursor-pointer whitespace-nowrap"
           >
             <QrCode className="w-3.5 h-3.5" />
             <span>QR Scan</span>
@@ -308,48 +308,48 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
           <div className="relative" ref={notificationRef}>
             <button
               onClick={() => setIsNotificationOpen(!isNotificationOpen)}
-              className={`p-2 rounded-full text-[#756B64] hover:text-[#202124] transition-all border ${
+              className={`p-1.5 min-[340px]:p-2 rounded-full text-[#6B7280] hover:text-[#111827] transition-all border ${
                 isNotificationOpen
-                  ? 'bg-[#F3E8DF] border-[#C85A3F] text-[#C85A3F]'
-                  : 'bg-white border-[#E5DCD5] hover:border-[#C85A3F]/40'
+                  ? 'bg-[#F0FDF4] border-[#16A34A] text-[#16A34A]'
+                  : 'bg-white border-[#E5E7EB] hover:border-[#16A34A]/40'
               }`}
               aria-label="View notifications"
             >
-              <Bell className="w-4 h-4" />
+              <Bell className="w-3.5 h-3.5 min-[340px]:w-4 min-[340px]:h-4" />
               {unreadCount > 0 && (
-                <span className="absolute top-1 right-1 w-2 h-2 bg-[#C85A3F] rounded-full animate-pulse" />
+                <span className="absolute top-1 right-1 min-[340px]:top-1.5 min-[340px]:right-1.5 w-1.5 h-1.5 min-[340px]:w-2 min-[340px]:h-2 bg-[#F97316] rounded-full animate-pulse" />
               )}
             </button>
 
             {/* Notification Dropdown */}
             {isNotificationOpen && (
-              <div className="absolute right-0 mt-2 w-72 sm:w-80 bg-white border border-[#E5DCD5] rounded-2xl shadow-xl z-50 text-left overflow-hidden">
-                <div className="p-3.5 border-b border-[#F3E8DF] bg-[#F3E8DF]/50 flex items-center justify-between">
+              <div className="absolute right-0 mt-2 w-72 sm:w-80 max-w-[calc(100vw-1.5rem)] bg-white border border-[#E5E7EB] rounded-2xl shadow-xl z-50 text-left overflow-hidden">
+                <div className="p-3.5 border-b border-[#E5E7EB] bg-[#F0FDF4]/60 flex items-center justify-between">
                   <div>
-                    <h4 className="text-xs font-extrabold text-[#202124]">Notifications</h4>
-                    <span className="text-[9px] text-[#756B64] font-semibold">{unreadCount} unread logs</span>
+                    <h4 className="text-xs font-poppins font-extrabold text-[#111827]">Notifications</h4>
+                    <span className="text-[9px] text-[#6B7280] font-semibold">{unreadCount} unread logs</span>
                   </div>
                   {notifications.length > 0 && (
                     <button
                       onClick={markAllRead}
-                      className="text-[9px] text-[#C85A3F] font-bold hover:underline"
+                      className="text-[9px] text-[#16A34A] font-bold hover:underline"
                     >
                       Clear All
                     </button>
                   )}
                 </div>
 
-                <div className="max-h-72 overflow-y-auto divide-y divide-[#F3E8DF]">
+                <div className="max-h-72 overflow-y-auto divide-y divide-[#F0FDF4]">
                   {notifications.length === 0 ? (
-                    <div className="p-6 text-center text-xs text-[#756B64] font-medium">
+                    <div className="p-6 text-center text-xs text-[#6B7280] font-medium">
                       No notifications yet.
                     </div>
                   ) : (
                     notifications.map((n) => (
-                      <div key={n.id} className="p-3.5 hover:bg-[#F3E8DF]/40 transition-colors">
-                        <h5 className="text-xs font-bold text-[#202124]">{n.title}</h5>
-                        <p className="text-[10.5px] text-[#756B64] mt-0.5">{n.desc}</p>
-                        <span className="text-[8.5px] text-[#756B64]/70 mt-1 block">
+                      <div key={n.id} className="p-3.5 hover:bg-[#F0FDF4]/50 transition-colors">
+                        <h5 className="text-xs font-bold text-[#111827]">{n.title}</h5>
+                        <p className="text-[10.5px] text-[#6B7280] mt-0.5">{n.desc}</p>
+                        <span className="text-[8.5px] text-[#6B7280]/70 mt-1 block">
                           {n.timestamp}
                         </span>
                       </div>
@@ -363,14 +363,14 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
           {/* Profile Avatar Trigger */}
           <button
             onClick={() => navigate('/customer/profile')}
-            className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs font-extrabold transition-all border ${
+            className={`w-7 h-7 min-[340px]:w-8 min-[340px]:h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-[10px] min-[340px]:text-xs font-poppins font-extrabold transition-all border ${
               location.pathname === '/customer/profile'
-                ? 'bg-[#C85A3F] text-white border-[#C85A3F]'
-                : 'bg-[#F3E8DF] text-[#C85A3F] border-[#E5DCD5] hover:border-[#C85A3F]/40'
+                ? 'bg-[#16A34A] text-white border-[#16A34A]'
+                : 'bg-[#F0FDF4] text-[#16A34A] border-[#E5E7EB] hover:border-[#16A34A]/40'
             }`}
             aria-label="View profile"
           >
-            {(user?.displayName || user?.email || 'GC').substring(0, 2).toUpperCase()}
+            {(user?.displayName || user?.email || (user?.isAnonymous ? 'GD' : 'U')).substring(0, 2).toUpperCase()}
           </button>
         </div>
       </header>

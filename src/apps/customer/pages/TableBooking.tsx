@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, deleteDoc, updateDoc, onSnapshot, query, where, runTransaction } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { 
@@ -88,6 +88,41 @@ function formatDisplayDate(dateStr: string): string {
   }
 }
 
+export function parseTimeToMinutes(timeStr: string): number {
+  if (!timeStr) return -1;
+  const cleaned = timeStr.trim().toUpperCase();
+  const isPm = cleaned.includes('PM');
+  const isAm = cleaned.includes('AM');
+  const parts = cleaned.replace(/[APM\s]/g, '').split(':');
+  if (parts.length < 2) return -1;
+  let hours = parseInt(parts[0], 10);
+  const minutes = parseInt(parts[1], 10);
+  if (isNaN(hours) || isNaN(minutes)) return -1;
+  if (isPm && hours < 12) hours += 12;
+  if (isAm && hours === 12) hours = 0;
+  return hours * 60 + minutes;
+}
+
+export function formatMinutesTo12Hour(minutes: number): string {
+  let hours = Math.floor(minutes / 60) % 24;
+  const mins = minutes % 60;
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+  return `${hours}:${mins < 10 ? '0' : ''}${mins} ${ampm}`;
+}
+
+export interface ITableOption {
+  id: string;
+  tableNumber: string;
+  tableName?: string;
+  capacity: number;
+  section?: string;
+  zone?: string;
+  isActive: boolean;
+  status: string;
+}
+
 const DEFAULT_BOOKING_CONFIG = {
   supportsSeatPreference: false,
   supportedSeatZones: [] as string[],
@@ -118,8 +153,17 @@ export const TableBooking: React.FC = () => {
     return tomorrow.toISOString().split('T')[0];
   });
   const [selectedTime, setSelectedTime] = useState<string>('');
+  const [isCustomTime, setIsCustomTime] = useState<boolean>(false);
+  const [customTimeInput, setCustomTimeInput] = useState<string>('19:30');
+  const [customTimeError, setCustomTimeError] = useState<string | null>(null);
   const [seatingPreference, setSeatingPreference] = useState<string>('');
   const [specialNotes, setSpecialNotes] = useState<string>('');
+
+  // Step E: Table Selection States
+  const [restaurantTables, setRestaurantTables] = useState<ITableOption[]>([]);
+  const [selectedTable, setSelectedTable] = useState<ITableOption | null>(null);
+  const [isLoadingTables, setIsLoadingTables] = useState(false);
+  const [existingReservationsForDate, setExistingReservationsForDate] = useState<any[]>([]);
 
   // Editing existing booking states
   const [isModifying, setIsModifying] = useState(false);
@@ -300,6 +344,9 @@ export const TableBooking: React.FC = () => {
           if (!isNaN(p)) numReviews = p;
         }
 
+        const openTime = data.businessHours?.openingTime || data.openingHours || data.openingTime || '09:00';
+        const closeTime = data.businessHours?.closingTime || data.closingHours || data.closingTime || '22:00';
+
         list.push({
           id: tenantId,
           name: data.restaurantName || data.name || 'Restaurant',
@@ -318,7 +365,9 @@ export const TableBooking: React.FC = () => {
           availableTimeSlots: availableSlots,
           supportedSeatZones: supportedZones,
           supportsSeatPreference: supportsSeatPref,
-          maxGuests
+          maxGuests,
+          openingTime: openTime,
+          closingTime: closeTime
         });
         index++;
       });
@@ -360,11 +409,84 @@ export const TableBooking: React.FC = () => {
     );
   }, [allRestaurants, searchQuery]);
 
-  // Set default slot when restaurant selected
+  // Real-time table synchronization from restaurants/{tenantId}/tables
+  useEffect(() => {
+    if (!selectedRest?.id) {
+      setRestaurantTables([]);
+      setSelectedTable(null);
+      return;
+    }
+
+    setIsLoadingTables(true);
+    const tablesCol = collection(db, 'restaurants', selectedRest.id, 'tables');
+    const unsub = onSnapshot(tablesCol, (snap) => {
+      const list: ITableOption[] = [];
+      snap.forEach(d => {
+        const data = d.data();
+        const cap = Number(data.seatingCapacity || data.capacity || 4);
+        const num = String(data.tableNumber || data.number || d.id).replace(/^TBL-/i, '');
+        list.push({
+          id: d.id,
+          tableNumber: num,
+          tableName: data.tableName || data.name || `Table ${num}`,
+          capacity: isNaN(cap) || cap <= 0 ? 4 : cap,
+          section: data.section || data.zone || 'Main Dining',
+          zone: data.zone || data.section || '',
+          isActive: data.isActive !== false,
+          status: data.status || 'Available'
+        });
+      });
+      list.sort((a, b) => {
+        const numA = parseInt(a.tableNumber, 10);
+        const numB = parseInt(b.tableNumber, 10);
+        if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+        return a.tableNumber.localeCompare(b.tableNumber);
+      });
+      setRestaurantTables(list);
+      setIsLoadingTables(false);
+    }, (err) => {
+      console.warn('[TableBooking] Error fetching tables:', err);
+      setIsLoadingTables(false);
+    });
+
+    return () => unsub();
+  }, [selectedRest?.id]);
+
+  // Real-time reservations query for chosen restaurant & date to evaluate slot conflicts
+  useEffect(() => {
+    if (!selectedRest?.id || !bookDate) {
+      setExistingReservationsForDate([]);
+      return;
+    }
+
+    const resCol = collection(db, 'restaurants', selectedRest.id, 'reservations');
+    const q = query(resCol, where('date', '==', bookDate));
+    const unsub = onSnapshot(q, (snap) => {
+      const list: any[] = [];
+      snap.forEach(d => {
+        if (d.id.startsWith('LOCK_')) return;
+        const data = d.data();
+        const s = (data.status || '').toLowerCase();
+        if (s !== 'cancelled' && s !== 'rejected') {
+          list.push({ ...data, id: d.id });
+        }
+      });
+      setExistingReservationsForDate(list);
+    }, (err) => {
+      console.warn('[TableBooking] Error fetching date reservations:', err);
+    });
+
+    return () => unsub();
+  }, [selectedRest?.id, bookDate]);
+
+  // Set default slot and clear table selection when restaurant selected
   const handleSelectRestaurant = (rest: any) => {
     setSelectedRest(rest);
+    setSelectedTable(null);
     setImgError(false);
     setGuestsCount(2);
+    setIsCustomTime(false);
+    setCustomTimeError(null);
     if (rest.availableTimeSlots && rest.availableTimeSlots.length > 0) {
       setSelectedTime(rest.availableTimeSlots[0]);
     } else {
@@ -377,7 +499,42 @@ export const TableBooking: React.FC = () => {
     }
   };
 
-  // Submit Reservation
+  const handleCustomTimeChange = (timeValue: string) => {
+    setCustomTimeInput(timeValue);
+    if (!timeValue) {
+      setCustomTimeError('Please enter a time');
+      return;
+    }
+    const mins = parseTimeToMinutes(timeValue);
+    if (mins < 0) {
+      setCustomTimeError('Invalid time format');
+      return;
+    }
+    const openMins = parseTimeToMinutes(selectedRest?.openingTime || '09:00');
+    const closeMins = parseTimeToMinutes(selectedRest?.closingTime || '22:00');
+    if (openMins >= 0 && closeMins >= 0 && (mins < openMins || mins > closeMins)) {
+      setCustomTimeError(`Restaurant operates between ${formatMinutesTo12Hour(openMins)} and ${formatMinutesTo12Hour(closeMins)}`);
+      return;
+    }
+    if (bookDate === todayStr) {
+      const now = new Date();
+      const currentMins = now.getHours() * 60 + now.getMinutes();
+      if (mins <= currentMins) {
+        setCustomTimeError('Selected time has already passed for today');
+        return;
+      }
+    }
+    setCustomTimeError(null);
+    setSelectedTime(formatMinutesTo12Hour(mins));
+  };
+
+  const handleSelectStandardSlot = (slot: string) => {
+    setIsCustomTime(false);
+    setCustomTimeError(null);
+    setSelectedTime(slot);
+  };
+
+  // Submit Reservation with Atomic Double-Booking Protection
   const handleSubmitBooking = async (e?: React.FormEvent) => {
     if (e) {
       e.preventDefault();
@@ -387,19 +544,30 @@ export const TableBooking: React.FC = () => {
       showFeedback('Please select a restaurant first.', 'error');
       return;
     }
-    if (!selectedTime) {
-      showFeedback('Please select an available time slot.', 'error');
-      return;
-    }
     if (!bookDate) {
       showFeedback('Please select a booking date.', 'error');
+      return;
+    }
+    if (isCustomTime && customTimeError) {
+      showFeedback(customTimeError, 'error');
+      return;
+    }
+    if (!selectedTime) {
+      showFeedback('Please select an available time slot or custom time.', 'error');
+      return;
+    }
+    if (!selectedTable) {
+      showFeedback('Please select an available table.', 'error');
       return;
     }
 
     setIsSubmitting(true);
     try {
+      const cleanTimeKey = selectedTime.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      const lockDocId = `LOCK_${selectedTable.id}_${bookDate}_${cleanTimeKey}`;
       const bookingId = isModifying && modifyingBookingId ? modifyingBookingId : `RES-${Math.floor(100000 + Math.random() * 900000)}`;
       const notifId = `NOT-${Math.floor(100000 + Math.random() * 900000)}`;
+      const nowIso = new Date().toISOString();
       
       const bookingPayload = {
         id: bookingId,
@@ -413,34 +581,84 @@ export const TableBooking: React.FC = () => {
         date: bookDate,
         time: selectedTime,
         guests: guestsCount,
-        seatingPreference: selectedRest.supportsSeatPreference ? seatingPreference : '',
+        tableId: selectedTable.id,
+        tableNumber: selectedTable.tableNumber,
+        assignedTableId: selectedTable.id,
+        assignedTableNumber: selectedTable.tableNumber,
+        seatingPreference: selectedRest.supportsSeatPreference ? seatingPreference : (selectedTable.section || ''),
         specialNotes: (specialNotes || '').trim(),
+        specialRequests: (specialNotes || '').trim(),
         status: isModifying ? 'Modified' : 'Pending',
         directions: `${selectedRest.landmark ? `Near ${selectedRest.landmark}, ` : ''}${selectedRest.address || formatLocalityCity(selectedRest.area, selectedRest.city)}`,
         lat: selectedRest.latitude || null,
         lng: selectedRest.longitude || null,
-        createdAt: new Date().toISOString()
+        createdAt: nowIso,
+        updatedAt: nowIso
       };
 
-      // 1. Write booking details to Customer Profile Reservations History (both customers/{uid} and users/{uid})
+      // Atomic conflict validation and double-booking slot locking
+      await runTransaction(db, async (transaction) => {
+        const tableRef = doc(db, 'restaurants', selectedRest.id, 'tables', selectedTable.id);
+        const lockRef = doc(db, 'restaurants', selectedRest.id, 'reservations', lockDocId);
+
+        const [tableSnap, lockSnap] = await Promise.all([
+          transaction.get(tableRef),
+          transaction.get(lockRef)
+        ]);
+
+        if (!tableSnap.exists()) {
+          throw new Error(`Table ${selectedTable.tableNumber} is no longer available.`);
+        }
+        const tData = tableSnap.data();
+        if (tData.isActive === false || (tData.status && tData.status.toLowerCase() === 'disabled')) {
+          throw new Error(`Table ${selectedTable.tableNumber} is currently disabled.`);
+        }
+        const cap = Number(tData.seatingCapacity || tData.capacity || 4);
+        if (guestsCount > cap) {
+          throw new Error(`Table ${selectedTable.tableNumber} capacity (${cap} seats) is insufficient for ${guestsCount} guests.`);
+        }
+
+        if (lockSnap.exists()) {
+          const lData = lockSnap.data();
+          const lStatus = (lData?.status || 'Pending').toLowerCase();
+          if (lStatus !== 'cancelled' && lStatus !== 'rejected' && lData?.bookingId !== bookingId) {
+            throw new Error(`Table ${selectedTable.tableNumber} is already booked for ${selectedTime}. Please choose another table.`);
+          }
+        }
+
+        // 1. Acquire atomic slot lock
+        transaction.set(lockRef, {
+          id: lockDocId,
+          bookingId,
+          restaurantId: selectedRest.id,
+          tableId: selectedTable.id,
+          tableNumber: selectedTable.tableNumber,
+          date: bookDate,
+          time: selectedTime,
+          status: isModifying ? 'Modified' : 'Pending',
+          customerId: user?.uid || 'guest-uid',
+          createdAt: nowIso
+        });
+
+        // 2. Write canonical restaurant reservation
+        const restResRef = doc(db, 'restaurants', selectedRest.id, 'reservations', bookingId);
+        transaction.set(restResRef, bookingPayload);
+      });
+
+      // 3. Write booking details to Customer Profile Reservations History (both customers/{uid} and users/{uid})
       if (user?.uid) {
         await Promise.allSettled([
           setDoc(doc(db, 'customers', user.uid, 'reservations', bookingId), bookingPayload),
           setDoc(doc(db, 'users', user.uid, 'reservations', bookingId), bookingPayload)
         ]);
       }
-      
-      // 2. Write booking details to Restaurant central reservations collection
-      try {
-        await setDoc(doc(db, 'restaurants', selectedRest.id, 'reservations', bookingId), bookingPayload);
-      } catch (restErr) {
-        console.warn('[TableBooking] Primary restaurants reservations write warning, trying fallback:', restErr);
-        try {
-          await setDoc(doc(db, 'tenants', selectedRest.id, 'reservations', bookingId), bookingPayload);
-        } catch (_) {}
-      }
 
-      // 3. Generate Central Booking Notification for Dashboards (non-blocking)
+      // 4. Fallback tenant write for legacy readers
+      try {
+        await setDoc(doc(db, 'tenants', selectedRest.id, 'reservations', bookingId), bookingPayload);
+      } catch (_) {}
+
+      // 5. Generate Central Booking Notification for Dashboards (non-blocking)
       try {
         const notificationPayload = {
           id: notifId,
@@ -450,6 +668,7 @@ export const TableBooking: React.FC = () => {
           guests: guestsCount,
           date: bookDate,
           time: selectedTime,
+          tableNumber: selectedTable.tableNumber,
           restaurantName: selectedRest.name,
           restaurantId: selectedRest.id,
           branchName: 'Main Branch',
@@ -457,7 +676,7 @@ export const TableBooking: React.FC = () => {
           specialNotes: (specialNotes || '').trim(),
           bookingStatus: isModifying ? 'Modified' : 'Pending',
           notificationStatus: 'unread',
-          timestamp: new Date().toISOString()
+          timestamp: nowIso
         };
         
         await setDoc(doc(db, 'restaurants', selectedRest.id, 'notifications', notifId), notificationPayload);
@@ -465,7 +684,7 @@ export const TableBooking: React.FC = () => {
         console.warn('[TableBooking] Notification write warning (non-fatal):', notifErr);
       }
 
-      // 4. Save to local storage for persistent guest/customer reservation history
+      // 6. Save to local storage for persistent guest/customer reservation history
       try {
         const localKey = 'spiral_dine_customer_reservations';
         const existing = JSON.parse(localStorage.getItem(localKey) || '[]');
@@ -480,7 +699,7 @@ export const TableBooking: React.FC = () => {
       });
 
       setBookingConfirmed(bookingPayload);
-      showFeedback(isModifying ? 'Reservation successfully updated!' : 'Reservation successfully requested!', 'success');
+      showFeedback(isModifying ? 'Reservation successfully updated!' : 'Reservation successfully confirmed!', 'success');
       setIsModifying(false);
       setModifyingBookingId('');
     } catch (e: any) {
@@ -548,6 +767,11 @@ export const TableBooking: React.FC = () => {
           updateDoc(doc(db, 'restaurants', res.restaurantId, 'reservations', res.id), cancelPayload),
           updateDoc(doc(db, 'tenants', res.restaurantId, 'reservations', res.id), cancelPayload)
         ]);
+        if (res.tableId && res.date && res.time) {
+          const cleanTimeKey = res.time.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+          const lockDocId = `LOCK_${res.tableId}_${res.date}_${cleanTimeKey}`;
+          updateDoc(doc(db, 'restaurants', res.restaurantId, 'reservations', lockDocId), cancelPayload).catch(() => {});
+        }
       }
 
       // 3. Update localStorage
@@ -587,27 +811,43 @@ export const TableBooking: React.FC = () => {
     showFeedback('Form loaded. Update your reservation details.', 'success');
   };
 
-  // Cancel Reservation
+  // Cancel Reservation (Preserves record and releases atomic lock)
   const handleCancelBooking = async () => {
     if (!bookingConfirmed) return;
     try {
-      // Delete in both customer and tenant collections
-      if (user?.uid) {
-        await deleteDoc(doc(db, 'customers', user.uid, 'reservations', bookingConfirmed.id)).catch(() => {});
-        await deleteDoc(doc(db, 'users', user.uid, 'reservations', bookingConfirmed.id)).catch(() => {});
-      }
-      await deleteDoc(doc(db, 'restaurants', bookingConfirmed.restaurantId, 'reservations', bookingConfirmed.id)).catch(() => {});
-      await deleteDoc(doc(db, 'tenants', bookingConfirmed.restaurantId, 'reservations', bookingConfirmed.id)).catch(() => {});
+      const cancelPayload = { 
+        status: 'Cancelled', 
+        cancelledAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
 
-      // Remove from local storage
+      if (user?.uid) {
+        await Promise.allSettled([
+          updateDoc(doc(db, 'customers', user.uid, 'reservations', bookingConfirmed.id), cancelPayload),
+          updateDoc(doc(db, 'users', user.uid, 'reservations', bookingConfirmed.id), cancelPayload)
+        ]);
+      }
+      if (bookingConfirmed.restaurantId) {
+        await Promise.allSettled([
+          updateDoc(doc(db, 'restaurants', bookingConfirmed.restaurantId, 'reservations', bookingConfirmed.id), cancelPayload),
+          updateDoc(doc(db, 'tenants', bookingConfirmed.restaurantId, 'reservations', bookingConfirmed.id), cancelPayload)
+        ]);
+        if (bookingConfirmed.tableId && bookingConfirmed.date && bookingConfirmed.time) {
+          const cleanTimeKey = bookingConfirmed.time.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+          const lockDocId = `LOCK_${bookingConfirmed.tableId}_${bookingConfirmed.date}_${cleanTimeKey}`;
+          updateDoc(doc(db, 'restaurants', bookingConfirmed.restaurantId, 'reservations', lockDocId), cancelPayload).catch(() => {});
+        }
+      }
+
+      // Update in local storage
       try {
         const localKey = 'spiral_dine_customer_reservations';
         const existing = JSON.parse(localStorage.getItem(localKey) || '[]');
-        const updated = existing.filter((item: any) => item.id !== bookingConfirmed.id);
+        const updated = existing.map((item: any) => item.id === bookingConfirmed.id ? { ...item, ...cancelPayload } : item);
         localStorage.setItem(localKey, JSON.stringify(updated));
       } catch (_) {}
 
-      setCustomerReservations(prev => prev.filter((item: any) => item.id !== bookingConfirmed.id));
+      setCustomerReservations(prev => prev.map((item: any) => item.id === bookingConfirmed.id ? { ...item, ...cancelPayload } : item));
       showFeedback('Reservation booking cancelled.', 'success');
       setBookingConfirmed(null);
       setSelectedRest(null);
@@ -706,6 +946,12 @@ export const TableBooking: React.FC = () => {
             <span>Selected Time</span>
             <span className="font-extrabold text-[#202124]">{bookingConfirmed.time}</span>
           </div>
+          {bookingConfirmed.tableNumber && (
+            <div className="flex justify-between items-center">
+              <span>Reserved Table</span>
+              <span className="font-extrabold text-[#202124]">Table #{bookingConfirmed.tableNumber}</span>
+            </div>
+          )}
           {bookingConfirmed.seatingPreference && (
             <div className="flex justify-between items-center">
               <span>Seating Preference</span>
@@ -910,51 +1156,51 @@ export const TableBooking: React.FC = () => {
                       </div>
 
                       {/* 4 Detail Badges */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
                         {/* 1. Date & Time */}
-                        <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl p-3 space-y-1">
+                        <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl p-2.5 sm:p-3 space-y-1 min-w-0">
                           <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider flex items-center gap-1">
                             <Calendar className="w-3 h-3 text-[#C85A3F]" />
                             <span>Date & Time</span>
                           </span>
-                          <p className="text-xs font-extrabold text-[#202124]">
+                          <p className="text-xs font-extrabold text-[#202124] truncate">
                             {formatDisplayDate(res.date)}
                           </p>
-                          <p className="text-[11px] font-bold text-[#C85A3F]">
+                          <p className="text-[11px] font-bold text-[#C85A3F] truncate">
                             {res.time}
                           </p>
                         </div>
 
                         {/* 2. Party Size */}
-                        <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl p-3 space-y-1">
+                        <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl p-2.5 sm:p-3 space-y-1 min-w-0">
                           <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider flex items-center gap-1">
                             <Users className="w-3 h-3 text-[#C85A3F]" />
                             <span>Party Size</span>
                           </span>
-                          <p className="text-xs font-extrabold text-[#202124]">
+                          <p className="text-xs font-extrabold text-[#202124] truncate">
                             {res.guests || 2} {Number(res.guests) === 1 ? 'Guest' : 'Guests'}
                           </p>
-                          <p className="text-[11px] text-[#756B64] font-medium">
+                          <p className="text-[11px] text-[#756B64] font-medium truncate">
                             {res.seatingPreference ? `${res.seatingPreference} Seating` : 'Reserved Table'}
                           </p>
                         </div>
 
                         {/* 3. Table Assigned */}
-                        <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl p-3 space-y-1">
+                        <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl p-2.5 sm:p-3 space-y-1 min-w-0">
                           <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider flex items-center gap-1">
                             <LayoutGrid className="w-3 h-3 text-[#C85A3F]" />
                             <span>Assigned Table</span>
                           </span>
-                          <p className="text-xs font-extrabold text-[#202124]">
+                          <p className="text-xs font-extrabold text-[#202124] truncate">
                             {res.assignedTableNumber ? `Table ${res.assignedTableNumber}` : (res.assignedTableId || 'Allocated on arrival')}
                           </p>
-                          <p className="text-[11px] text-[#756B64] font-medium">
+                          <p className="text-[11px] text-[#756B64] font-medium truncate">
                             {res.assignedTableNumber ? 'Table Assigned' : 'Host allocates upon arrival'}
                           </p>
                         </div>
 
                         {/* 4. Staff Waiter */}
-                        <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl p-3 space-y-1">
+                        <div className="bg-[#FCFAF7] border border-[#E5DCD5] rounded-2xl p-2.5 sm:p-3 space-y-1 min-w-0">
                           <span className="text-[10px] font-extrabold text-[#756B64] uppercase tracking-wider flex items-center gap-1">
                             <UserCheck className="w-3 h-3 text-[#C85A3F]" />
                             <span>Staff Waiter</span>
@@ -962,7 +1208,7 @@ export const TableBooking: React.FC = () => {
                           <p className="text-xs font-extrabold text-[#202124] truncate">
                             {res.assignedWaiterName || 'Unassigned'}
                           </p>
-                          <p className="text-[11px] text-[#756B64] font-medium">
+                          <p className="text-[11px] text-[#756B64] font-medium truncate">
                             {res.assignedWaiterName ? 'Dedicated Server' : 'Floor service team'}
                           </p>
                         </div>
@@ -1002,7 +1248,7 @@ export const TableBooking: React.FC = () => {
                           </button>
                         </div>
 
-                        <div className="flex items-center gap-2 ml-auto">
+                        <div className="flex items-center gap-2 w-full xs:w-auto xs:ml-auto justify-end pt-1 xs:pt-0">
                           {isSeated && (
                             <button
                               type="button"
@@ -1271,7 +1517,7 @@ export const TableBooking: React.FC = () => {
                 })}
 
                 {/* Fine-tune +/- Stepper */}
-                <div className="flex items-center ml-auto bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl p-1 gap-2">
+                <div className="flex items-center w-full xs:w-auto xs:ml-auto justify-between xs:justify-start bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl p-1 gap-2 mt-1 xs:mt-0">
                   <button 
                     type="button" 
                     onClick={() => setGuestsCount(g => Math.max(1, g - 1))}
@@ -1325,40 +1571,89 @@ export const TableBooking: React.FC = () => {
               </div>
             </div>
 
-            {/* 3. SELECT TIME SLOT */}
+            {/* 3. SELECT TIME SLOT & CUSTOM TIME */}
             <div className="space-y-2.5">
-              <div>
-                <label className="text-xs font-extrabold uppercase tracking-wider text-[#202124] flex items-center gap-1.5">
-                  <Clock className="w-4 h-4 text-[#C85A3F]" />
-                  <span>Select Time Slot</span>
-                </label>
-                <p className="text-[11px] text-[#756B64] font-medium mt-0.5">Choose an available time</p>
+              <div className="flex justify-between items-baseline">
+                <div>
+                  <label className="text-xs font-extrabold uppercase tracking-wider text-[#202124] flex items-center gap-1.5">
+                    <Clock className="w-4 h-4 text-[#C85A3F]" />
+                    <span>Select Time Slot</span>
+                  </label>
+                  <p className="text-[11px] text-[#756B64] font-medium mt-0.5">Choose an available slot or enter a custom time</p>
+                </div>
+                {selectedTime && (
+                  <span className="text-xs font-extrabold text-[#C85A3F] bg-[#F3E8DF] px-2.5 py-0.5 rounded-lg">
+                    {selectedTime}
+                  </span>
+                )}
               </div>
 
-              {(!selectedRest.availableTimeSlots || selectedRest.availableTimeSlots.length === 0) ? (
-                <div className="p-4 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl text-center space-y-1">
-                  <p className="text-xs font-extrabold text-[#202124]">No available time slots for this date.</p>
-                  <p className="text-[11px] text-[#756B64]">Please choose another date for table reservation.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  {selectedRest.availableTimeSlots.map((slot: string) => {
-                    const isSelected = selectedTime === slot;
-                    return (
-                      <button
-                        key={slot}
-                        type="button"
-                        onClick={() => setSelectedTime(slot)}
-                        className={`py-3 px-3 text-xs font-extrabold rounded-xl border transition-all text-center cursor-pointer ${
-                          isSelected
-                            ? 'bg-[#C85A3F] border-[#C85A3F] text-white shadow-xs'
-                            : 'bg-[#FCFAF7] hover:bg-white border-[#E5DCD5] hover:border-[#C85A3F]/50 text-[#202124]'
-                        }`}
-                      >
-                        {slot}
-                      </button>
-                    );
-                  })}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                {(selectedRest.availableTimeSlots || []).map((slot: string) => {
+                  const isSelected = !isCustomTime && selectedTime === slot;
+                  return (
+                    <button
+                      key={slot}
+                      type="button"
+                      onClick={() => handleSelectStandardSlot(slot)}
+                      className={`py-3 px-3 text-xs font-extrabold rounded-xl border transition-all text-center cursor-pointer ${
+                        isSelected
+                          ? 'bg-[#C85A3F] border-[#C85A3F] text-white shadow-xs'
+                          : 'bg-[#FCFAF7] hover:bg-white border-[#E5DCD5] hover:border-[#C85A3F]/50 text-[#202124]'
+                      }`}
+                    >
+                      {slot}
+                    </button>
+                  );
+                })}
+                {/* Custom Time Selector Toggle Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCustomTime(true);
+                    if (customTimeInput) {
+                      handleCustomTimeChange(customTimeInput);
+                    }
+                  }}
+                  className={`py-3 px-3 text-xs font-extrabold rounded-xl border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 ${
+                    isCustomTime
+                      ? 'bg-[#C85A3F] border-[#C85A3F] text-white shadow-xs'
+                      : 'bg-[#FCFAF7] hover:bg-white border-[#E5DCD5] hover:border-[#C85A3F]/50 text-[#C85A3F]'
+                  }`}
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Custom Time</span>
+                </button>
+              </div>
+
+              {/* Custom Time Input & Live Bounds Validation Box */}
+              {isCustomTime && (
+                <div className="p-3.5 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl space-y-2 mt-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="text-xs font-extrabold text-[#202124] block">Set Preferred Dining Time</span>
+                      <span className="text-[10px] text-[#756B64]">
+                        Operating Hours: {selectedRest.openingTime || '09:00'} – {selectedRest.closingTime || '22:00'}
+                      </span>
+                    </div>
+                    <input 
+                      type="time" 
+                      value={customTimeInput}
+                      onChange={(e) => handleCustomTimeChange(e.target.value)}
+                      className="px-3 py-1.5 bg-white border border-[#E5DCD5] rounded-lg text-xs font-bold text-[#202124] focus:outline-none focus:border-[#C85A3F]"
+                    />
+                  </div>
+                  {customTimeError ? (
+                    <div className="text-[11px] font-bold text-red-600 flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      <span>{customTimeError}</span>
+                    </div>
+                  ) : (
+                    <div className="text-[11px] font-bold text-[#2E8B57] flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Valid time selected: {selectedTime}</span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1394,6 +1689,130 @@ export const TableBooking: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* STEP E: SELECT TABLE */}
+            <div className="space-y-2.5">
+              <div className="flex justify-between items-baseline">
+                <div>
+                  <label className="text-xs font-extrabold uppercase tracking-wider text-[#202124] flex items-center gap-1.5">
+                    <LayoutGrid className="w-4 h-4 text-[#C85A3F]" />
+                    <span>Select a Table</span>
+                    <span className="text-[10px] text-red-500 font-extrabold">*</span>
+                  </label>
+                  <p className="text-[11px] text-[#756B64] font-medium mt-0.5">
+                    Choose an available dining table configured at this venue
+                  </p>
+                </div>
+                {selectedTable && (
+                  <span className="text-xs font-extrabold text-[#2E8B57] bg-[#2E8B57]/10 border border-[#2E8B57]/20 px-2.5 py-0.5 rounded-lg flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Table #{selectedTable.tableNumber} Selected</span>
+                  </span>
+                )}
+              </div>
+
+              {isLoadingTables ? (
+                <div className="p-5 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl text-center flex items-center justify-center gap-2.5 text-xs text-[#756B64]">
+                  <div className="w-4 h-4 border-2 border-[#C85A3F] border-t-transparent rounded-full animate-spin" />
+                  <span>Loading venue table availability...</span>
+                </div>
+              ) : restaurantTables.length === 0 ? (
+                <div className="p-4 bg-[#FCFAF7] border border-[#E5DCD5] rounded-xl text-center space-y-1">
+                  <p className="text-xs font-extrabold text-[#202124]">No tables configured for this restaurant.</p>
+                  <p className="text-[11px] text-[#756B64]">Please contact the venue host or select another restaurant.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {restaurantTables.map((tbl) => {
+                    const cleanTime = (selectedTime || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+                    const isReserved = existingReservationsForDate.some(r => {
+                      const tableMatch = r.tableId === tbl.id || String(r.tableNumber) === tbl.tableNumber;
+                      if (!tableMatch) return false;
+                      const rTime = (r.time || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+                      if (cleanTime && rTime === cleanTime) return true;
+                      
+                      const selectedMins = parseTimeToMinutes(selectedTime);
+                      const resMins = parseTimeToMinutes(r.time);
+                      if (selectedMins >= 0 && resMins >= 0) {
+                        return Math.abs(selectedMins - resMins) < 90;
+                      }
+                      return false;
+                    });
+                    const hasCapacity = tbl.capacity >= guestsCount;
+                    const isSelectable = tbl.isActive && tbl.status !== 'Disabled' && hasCapacity && !isReserved;
+                    const isSelected = selectedTable?.id === tbl.id;
+
+                    return (
+                      <div
+                        key={tbl.id}
+                        onClick={() => {
+                          if (isSelectable) setSelectedTable(tbl);
+                        }}
+                        className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-[#F3E8DF] border-[#C85A3F] ring-1 ring-[#C85A3F] shadow-xs cursor-pointer'
+                            : isSelectable
+                            ? 'bg-[#FCFAF7] hover:bg-white border-[#E5DCD5] hover:border-[#C85A3F]/50 shadow-2xs cursor-pointer'
+                            : 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-black ${
+                              isSelected
+                                ? 'bg-[#C85A3F] text-white'
+                                : isSelectable
+                                ? 'bg-white border border-[#E5DCD5] text-[#202124]'
+                                : 'bg-slate-200 text-slate-500'
+                            }`}>
+                              #{tbl.tableNumber}
+                            </span>
+                            <div>
+                              <h5 className="text-xs font-extrabold text-[#202124]">{tbl.tableName || `Table ${tbl.tableNumber}`}</h5>
+                              <span className="text-[10px] text-[#756B64] font-medium">{tbl.section || 'Dining Area'}</span>
+                            </div>
+                          </div>
+                          <span className="text-[11px] font-extrabold text-[#756B64] flex items-center gap-1">
+                            <Users className="w-3 h-3 text-[#C85A3F]" />
+                            <span>{tbl.capacity} seats</span>
+                          </span>
+                        </div>
+
+                        <div className="pt-2.5 mt-2 border-t border-[#E5DCD5]/60 flex items-center justify-between text-[10px]">
+                          {isReserved ? (
+                            <span className="text-red-600 font-extrabold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                              <span>Booked at {selectedTime || 'this slot'}</span>
+                            </span>
+                          ) : !hasCapacity ? (
+                            <span className="text-amber-700 font-bold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                              <span>Max {tbl.capacity} (Need {guestsCount})</span>
+                            </span>
+                          ) : isSelected ? (
+                            <span className="text-[#C85A3F] font-extrabold flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Selected Table</span>
+                            </span>
+                          ) : (
+                            <span className="text-[#2E8B57] font-extrabold flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-[#2E8B57]" />
+                              <span>Available</span>
+                            </span>
+                          )}
+
+                          {isSelectable && !isSelected && (
+                            <span className="text-[#C85A3F] font-bold group-hover:underline">
+                              Select Table →
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             {/* 5. SPECIAL REQUESTS */}
             <div className="space-y-1.5">

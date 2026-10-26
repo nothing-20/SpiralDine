@@ -24,7 +24,14 @@ const firebaseConfig = {
 };
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-export const db = getFirestore(app);
+export const db = (() => {
+  try {
+    const { initializeFirestore } = require('firebase/firestore');
+    return initializeFirestore(app, { ignoreUndefinedProperties: true });
+  } catch (_) {
+    return getFirestore(app);
+  }
+})();
 export const auth = getAuth(app);
 
 let isAuthInitialized = false;

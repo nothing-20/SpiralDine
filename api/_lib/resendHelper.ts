@@ -80,7 +80,7 @@ export const sendMailWithLogging = async (
     return { success: true, id: response.data?.id };
   } catch (err: any) {
     const errMsg = err.message || 'Unknown Resend API error';
-    console.warn(`[Vercel API] Failed to send email to ${to} (${retriesLeft} retries remaining): ${errMsg}`);
+    console.warn(`[Vercel API] Failed to send email (${retriesLeft} retries remaining): ${errMsg}`);
 
     if (retriesLeft > 0) {
       await delay(RETRY_DELAY_MS);

@@ -6,8 +6,25 @@
 @tailwind utilities;
 
 @layer base {
+  html, body {
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  #root {
+    width: 100%;
+    max-width: 100%;
+    min-height: 100vh;
+  }
   body {
     @apply bg-background text-textPearl font-sans antialiased;
+  }
+  body.customer-theme-bg {
+    background-color: #FFFFFF !important;
+    color: #111827;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  .font-poppins {
+    font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
   select {
     color: #e2e8f0 !important;

@@ -426,8 +426,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       updatedAt: nowIso
     };
 
+    // Sanitize validatedOrder to remove any undefined fields before Firestore write
+    const sanitizedOrder: Record<string, any> = {};
+    for (const [key, value] of Object.entries(validatedOrder)) {
+      if (value !== undefined) {
+        sanitizedOrder[key] = value;
+      }
+    }
+
     // 8. Persist Order to Firestore
-    await setDoc(existingOrderRef, validatedOrder);
+    await setDoc(existingOrderRef, sanitizedOrder);
 
     // 8b. Record promotion redemption metric
     if (matchedPromotionId) {

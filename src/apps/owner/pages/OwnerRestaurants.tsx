@@ -65,11 +65,16 @@ interface IRestaurantWithStats extends ITenant {
 interface IBranchSummary {
   id: string;
   name: string;
+  code?: string;
   address?: string;
+  city?: string;
   managerName?: string;
   phone?: string;
   tableCount?: number;
+  tablesCount?: number;
   activeOrders?: number;
+  isDefault?: boolean;
+  isActive?: boolean;
 }
 
 export const OwnerRestaurants: React.FC = () => {
@@ -108,6 +113,20 @@ export const OwnerRestaurants: React.FC = () => {
 
   // Confirmation for status toggle
   const [statusDialogData, setStatusDialogData] = useState<{ id: string; name: string; currentStatus: string } | null>(null);
+
+  // Add / Edit Branch Modal state
+  const [isBranchModalOpen, setIsBranchModalOpen] = useState<boolean>(false);
+  const [isEditingBranch, setIsEditingBranch] = useState<boolean>(false);
+  const [editingBranchId, setEditingBranchId] = useState<string>('');
+  const [branchTargetRestId, setBranchTargetRestId] = useState<string>('');
+  const [branchFormName, setBranchFormName] = useState<string>('');
+  const [branchFormCode, setBranchFormCode] = useState<string>('');
+  const [branchFormCity, setBranchFormCity] = useState<string>('');
+  const [branchFormAddress, setBranchFormAddress] = useState<string>('');
+  const [branchFormPhone, setBranchFormPhone] = useState<string>('');
+  const [branchFormManager, setBranchFormManager] = useState<string>('');
+  const [branchFormTables, setBranchFormTables] = useState<string>('12');
+  const [isSubmittingBranch, setIsSubmittingBranch] = useState<boolean>(false);
 
   // 1. Fetch authorized restaurants and employees
   useEffect(() => {
@@ -442,6 +461,98 @@ export const OwnerRestaurants: React.FC = () => {
     }
   };
 
+  // Open Branch Add Modal
+  const handleOpenAddBranch = (restId: string) => {
+    setIsEditingBranch(false);
+    setEditingBranchId('');
+    setBranchTargetRestId(restId);
+    setBranchFormName('');
+    setBranchFormCode('');
+    setBranchFormCity(selectedRestaurant?.city || '');
+    setBranchFormAddress('');
+    setBranchFormPhone('');
+    setBranchFormManager('');
+    setBranchFormTables('12');
+    setIsBranchModalOpen(true);
+  };
+
+  // Open Branch Edit Modal
+  const handleOpenEditBranch = (restId: string, b: IBranchSummary) => {
+    setIsEditingBranch(true);
+    setEditingBranchId(b.id);
+    setBranchTargetRestId(restId);
+    setBranchFormName(b.name || '');
+    setBranchFormCode(b.code || '');
+    setBranchFormCity(b.city || selectedRestaurant?.city || '');
+    setBranchFormAddress(b.address || '');
+    setBranchFormPhone(b.phone || '');
+    setBranchFormManager(b.managerName || '');
+    setBranchFormTables((b.tablesCount || b.tableCount || 10).toString());
+    setIsBranchModalOpen(true);
+  };
+
+  // Submit Add / Edit Branch
+  const handleSubmitBranch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!branchFormName.trim()) {
+      toast.error('Branch name is required');
+      return;
+    }
+    const targetRest = branchTargetRestId || selectedRestaurant?.id;
+    if (!targetRest) return;
+
+    setIsSubmittingBranch(true);
+    try {
+      const bId = isEditingBranch ? editingBranchId : `branch-${Date.now().toString(36)}`;
+      const payload: any = {
+        id: bId,
+        name: branchFormName.trim(),
+        code: branchFormCode.trim(),
+        city: branchFormCity.trim(),
+        address: branchFormAddress.trim(),
+        phone: branchFormPhone.trim(),
+        managerName: branchFormManager.trim(),
+        tablesCount: parseInt(branchFormTables, 10) || 10,
+        tableCount: parseInt(branchFormTables, 10) || 10,
+        isActive: true,
+        updatedAt: new Date().toISOString()
+      };
+      if (!isEditingBranch) {
+        payload.createdAt = new Date().toISOString();
+        payload.isDefault = branches.length === 0;
+      }
+
+      await setDoc(doc(db, 'restaurants', targetRest, 'branches', bId), payload, { merge: true });
+
+      await logAuditEvent({
+        userId: user?.uid || '',
+        userEmail: user?.email || '',
+        userName: user?.displayName || 'Owner',
+        userRole: user?.role || 'owner',
+        tenantId: targetRest,
+        restaurantName: selectedRestaurant?.name || '',
+        module: 'Restaurants',
+        action: isEditingBranch ? 'UPDATE' : 'CREATE',
+        targetEntity: `Branch ${payload.name} (${bId})`
+      });
+
+      toast.success(isEditingBranch ? 'Branch details updated' : 'Branch created successfully');
+      setIsBranchModalOpen(false);
+
+      setBranches(prev => {
+        if (isEditingBranch) {
+          return prev.map(item => item.id === bId ? { ...item, ...payload } : item);
+        }
+        return [...prev, payload];
+      });
+    } catch (err: any) {
+      console.error('Save branch error:', err);
+      toast.error(err.message || 'Failed to save branch');
+    } finally {
+      setIsSubmittingBranch(false);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-12 select-none">
       {/* ── Top Header & KPI Summary ── */}
@@ -752,7 +863,18 @@ export const OwnerRestaurants: React.FC = () => {
                 <h4 className="text-xs font-bold text-[#17202A] uppercase tracking-wider">
                   Associated Branches & Sections
                 </h4>
-                <span className="text-[11px] text-[#6B7280]">{branches.length} registered</span>
+                <div className="flex items-center space-x-2">
+                  <span className="text-[11px] text-[#6B7280]">{branches.length} registered</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => selectedRestaurant && handleOpenAddBranch(selectedRestaurant.id)}
+                    className="text-xs h-7 px-2.5 flex items-center space-x-1 border-[#C9533B] text-[#C9533B] hover:bg-[#C9533B]/10 rounded-lg"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Branch</span>
+                  </Button>
+                </div>
               </div>
 
               {isLoadingDetails ? (
@@ -766,10 +888,30 @@ export const OwnerRestaurants: React.FC = () => {
                   {branches.map(b => (
                     <div key={b.id} className="p-3 rounded-xl border border-[#E5E7EB] flex items-center justify-between">
                       <div>
-                        <p className="text-xs font-bold text-[#17202A]">{b.name}</p>
-                        <p className="text-[11px] text-[#6B7280]">{b.address || 'Address pending'}</p>
+                        <div className="flex items-center space-x-2">
+                          <p className="text-xs font-bold text-[#17202A]">{b.name}</p>
+                          {b.code && (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 text-[#6B7280]">
+                              {b.code}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-[#6B7280]">{b.address || b.city || 'Address pending'}</p>
+                        {b.managerName && (
+                          <p className="text-[10px] text-[#6B7280]">Mgr: {b.managerName}</p>
+                        )}
                       </div>
-                      <Badge variant="neutral">{b.tableCount || 0} tables</Badge>
+                      <div className="flex items-center space-x-2">
+                        <Badge variant="neutral">{(b.tablesCount || b.tableCount || 0)} tables</Badge>
+                        <button
+                          type="button"
+                          onClick={() => selectedRestaurant && handleOpenEditBranch(selectedRestaurant.id, b)}
+                          className="p-1 rounded text-[#6B7280] hover:text-[#17202A] hover:bg-gray-100"
+                          title="Edit Branch"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -913,6 +1055,98 @@ export const OwnerRestaurants: React.FC = () => {
               </Button>
             </div>
           </div>
+        </Modal>
+      )}
+
+      {/* ── Add / Edit Branch Modal ── */}
+      {isBranchModalOpen && (
+        <Modal
+          isOpen={isBranchModalOpen}
+          onClose={() => setIsBranchModalOpen(false)}
+          title={isEditingBranch ? 'Edit Branch Details' : 'Add New Branch'}
+        >
+          <form onSubmit={handleSubmitBranch} className="space-y-4 p-1">
+            <div>
+              <label className="block text-xs font-bold text-[#17202A] mb-1">Branch Name *</label>
+              <Input
+                value={branchFormName}
+                onChange={(e) => setBranchFormName(e.target.value)}
+                placeholder="e.g. Madhapur Express Hub"
+                required
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-[#17202A] mb-1">Branch Code</label>
+                <Input
+                  value={branchFormCode}
+                  onChange={(e) => setBranchFormCode(e.target.value)}
+                  placeholder="e.g. BR-01"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-[#17202A] mb-1">City</label>
+                <Input
+                  value={branchFormCity}
+                  onChange={(e) => setBranchFormCity(e.target.value)}
+                  placeholder="e.g. Hyderabad"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-[#17202A] mb-1">Address</label>
+              <Input
+                value={branchFormAddress}
+                onChange={(e) => setBranchFormAddress(e.target.value)}
+                placeholder="e.g. Ground Floor, Cyber Towers"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-[#17202A] mb-1">Manager Name</label>
+                <Input
+                  value={branchFormManager}
+                  onChange={(e) => setBranchFormManager(e.target.value)}
+                  placeholder="e.g. Ramesh Kumar"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-[#17202A] mb-1">Contact Phone</label>
+                <Input
+                  value={branchFormPhone}
+                  onChange={(e) => setBranchFormPhone(e.target.value)}
+                  placeholder="e.g. +91 9876543210"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-[#17202A] mb-1">Seating Tables Count</label>
+              <Input
+                type="number"
+                value={branchFormTables}
+                onChange={(e) => setBranchFormTables(e.target.value)}
+                placeholder="12"
+              />
+            </div>
+
+            <div className="pt-3 flex items-center justify-end space-x-2">
+              <Button variant="secondary" type="button" onClick={() => setIsBranchModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                type="submit"
+                disabled={isSubmittingBranch}
+                className="bg-[#C9533B] hover:bg-[#B34530] text-white"
+              >
+                {isSubmittingBranch ? 'Saving...' : (isEditingBranch ? 'Update Branch' : 'Create Branch')}
+              </Button>
+            </div>
+          </form>
         </Modal>
       )}
 

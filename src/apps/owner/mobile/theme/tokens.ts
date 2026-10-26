@@ -1,0 +1,38 @@
+export const mobileTokens = {
+  colors: {
+    primary: '#FF7518',
+    primaryHover: '#E05D07',
+    primaryLight: '#FFF4EE',
+    primarySubtle: '#FFE8DC',
+    darkBrown: '#63351F',
+    darkBrownHover: '#4D2918',
+    darkBrownLight: '#FAF4F0',
+    background: '#F7F7F7',
+    card: '#FFFFFF',
+    textPrimary: '#202124',
+    textSecondary: '#707070',
+    textMuted: '#9E9E9E',
+    border: '#EBEBEB',
+    borderLight: '#F0F0F0',
+    success: '#16A34A',
+    successBg: '#DCFCE7',
+    warning: '#D97706',
+    warningBg: '#FEF3C7',
+    danger: '#DC2626',
+    dangerBg: '#FEE2E2',
+    info: '#2563EB',
+    infoBg: '#DBEAFE',
+  },
+  shadows: {
+    card: '0 2px 8px -2px rgba(0, 0, 0, 0.05), 0 1px 4px -1px rgba(0, 0, 0, 0.03)',
+    float: '0 8px 24px -4px rgba(255, 117, 24, 0.25)',
+    nav: '0 -2px 12px rgba(0, 0, 0, 0.06)',
+  },
+  radius: {
+    sm: '0.5rem',
+    md: '0.75rem',
+    lg: '1rem',
+    xl: '1.25rem',
+    full: '9999px',
+  }
+};

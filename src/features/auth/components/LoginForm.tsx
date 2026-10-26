@@ -200,7 +200,7 @@ export const LoginForm: React.FC = () => {
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
-    console.log('[AUTH Owner Login] Email form submitted for:', cleanEmail);
+    console.log('[AUTH Owner Login] Email form submitted');
     if (!validateEmailForm()) return;
 
     setIsLoadingEmail(true);

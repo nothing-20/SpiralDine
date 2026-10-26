@@ -11,6 +11,7 @@ import AppRoutes from './routes/AppRoutes';
 import { ToastContainer } from './components/ui/Toast/Toast';
 import { Toaster } from 'react-hot-toast';
 import ErrorBoundary from './shared/ui/feedback/ErrorBoundary';
+import CookieConsentBanner from './shared/ui/feedback/CookieConsentBanner';
 
 export const App: React.FC = () => {
   return (
@@ -26,6 +27,9 @@ export const App: React.FC = () => {
                       {/* Master Application Routing */}
                       <AppRoutes />
                       
+                      {/* Cookie Consent & Privacy Preference Management */}
+                      <CookieConsentBanner />
+
                       {/* Global toast notification system overlay */}
                       <ToastContainer />
                       <Toaster position="top-center" toastOptions={{ duration: 4000 }} />

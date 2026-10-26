@@ -2,12 +2,11 @@ import { ZodSchema } from 'zod';
 
 /**
  * A lightweight custom Zod resolver for React Hook Form.
+ * Safe diagnostics only: Never logs sensitive input values or data payloads.
  */
 export const zodResolver = (schema: ZodSchema<any>) => async (values: any) => {
-  console.log('[Resolver] Start validating values:', values);
   try {
     const data = schema.parse(values);
-    console.log('[Resolver] Validation Passed:', data);
     return {
       values: data,
       errors: {},
@@ -22,8 +21,6 @@ export const zodResolver = (schema: ZodSchema<any>) => async (values: any) => {
       };
       return acc;
     }, {});
-    
-    console.warn('[Resolver] Validation Failed Errors:', errors);
 
     return {
       values: {},

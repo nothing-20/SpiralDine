@@ -356,7 +356,7 @@ export const CustomerLogin: React.FC = () => {
   // ---------------------------------------------------------------------------
   const onEmailSubmit = async (data: TLoginForm) => {
     const cleanEmail = data.email.trim().toLowerCase();
-    console.log('[AUTH Customer Login] Email attempt started for:', cleanEmail);
+    console.log('[AUTH Customer Login] Email authentication attempt started');
     setIsSubmittingEmail(true);
     setErrorState(null);
 
@@ -364,31 +364,57 @@ export const CustomerLogin: React.FC = () => {
       const credentials = await authService.signInWithEmail(cleanEmail, data.password, true);
       const fUser = credentials.user;
 
-      const profile = await resolveAuthenticatedUser(fUser);
-
-      if (!profile || profile.role !== 'customer') {
-        console.warn('[AUTH Customer Login] Rejecting non-customer account:', profile?.role);
-        await authService.signOutUser();
-        const mismatchMsg = 'This account does not have access to the Customer Portal. Please sign in via the Staff or Owner portal.';
-        setErrorState({
-          message: mismatchMsg,
-          showRegister: false
-        });
-        addToast(mismatchMsg, 'error');
-        setIsSubmittingEmail(false);
-        return;
+      // 1. Verify this UID is not a restaurant owner or staff account
+      const staffUserSnap = await getDoc(doc(db, 'users', fUser.uid));
+      if (staffUserSnap.exists()) {
+        const staffData = staffUserSnap.data();
+        if (staffData.role && staffData.role !== 'customer') {
+          console.warn('[AUTH Customer Login] Owner/Staff tried customer portal:', staffData.role);
+          await authService.signOutUser();
+          const mismatchMsg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
+          setErrorState({
+            message: mismatchMsg,
+            showRegister: false
+          });
+          addToast(mismatchMsg, 'error');
+          setIsSubmittingEmail(false);
+          return;
+        }
       }
 
-      if (profile.status && profile.status !== 'active') {
-        console.warn('[AUTH Customer Login] Customer account suspended:', profile.status);
-        await authService.signOutUser();
-        setErrorState({
-          message: 'Your diner account has been suspended. Please contact support.',
-          showRegister: false
+      // 2. Check or provision customer profile in customers/{uid}
+      const custDocRef = doc(db, 'customers', fUser.uid);
+      const custSnap = await getDoc(custDocRef);
+
+      if (custSnap.exists()) {
+        const custData = custSnap.data();
+        if (custData.status && custData.status !== 'active') {
+          console.warn('[AUTH Customer Login] Customer account suspended:', custData.status);
+          await authService.signOutUser();
+          setErrorState({
+            message: 'Your diner account has been suspended. Please contact support.',
+            showRegister: false
+          });
+          addToast('Your diner account is suspended.', 'error');
+          setIsSubmittingEmail(false);
+          return;
+        }
+      } else {
+        // First-time or migrated email diner: auto-provision standard customer profile
+        console.log('[AUTH Customer Login] Auto-provisioning diner profile for UID:', fUser.uid);
+        await setDoc(custDocRef, {
+          uid: fUser.uid,
+          fullName: fUser.displayName || cleanEmail.split('@')[0] || 'Spiral Diner',
+          displayName: fUser.displayName || cleanEmail.split('@')[0] || 'Spiral Diner',
+          email: fUser.email || cleanEmail,
+          role: 'customer',
+          tenantId: null,
+          phoneNumber: fUser.phoneNumber || '',
+          walletBalance: 0,
+          loyaltyPoints: 0,
+          status: 'active',
+          createdAt: new Date().toISOString()
         });
-        addToast('Your diner account is suspended.', 'error');
-        setIsSubmittingEmail(false);
-        return;
       }
 
       addToast('Signed in successfully!', 'success');

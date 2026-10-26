@@ -47,7 +47,7 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
   const cleanEmail = (fUser.email || '').trim().toLowerCase();
   const userDocRef = doc(db, 'users', fUser.uid);
 
-  console.log('[AUTH ROLE RESOLVER] Resolving profile for UID:', fUser.uid, 'Email:', cleanEmail);
+  console.log('[AUTH ROLE RESOLVER] Resolving profile for UID:', fUser.uid);
 
   // Check Firebase Auth Custom Claims first for authoritative Super Admin privilege
   try {
@@ -160,7 +160,7 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
       const resolved: IResolvedUserProfile = {
         uid: fUser.uid,
         email: cleanEmail || data.email || '',
-        displayName: data.fullName || data.name || data.displayName || fUser.displayName || 'Restaurant Owner',
+        displayName: data.fullName || data.name || data.displayName || fUser.displayName || cleanEmail.split('@')[0] || 'Authorized Owner',
         role: (data.role || 'owner') as TUserRole,
         tenantId: data.tenantId || data.restaurantId || ownerSnap.id,
         branchId: data.branchId || '',
@@ -195,7 +195,7 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
       const resolved: IResolvedUserProfile = {
         uid: fUser.uid,
         email: cleanEmail || tData.email || '',
-        displayName: tData.ownerName || tData.name || fUser.displayName || 'Restaurant Owner',
+        displayName: tData.ownerName || tData.name || fUser.displayName || cleanEmail.split('@')[0] || 'Authorized Owner',
         role: 'owner',
         tenantId: tDoc.id,
         branchId: '',
@@ -227,7 +227,7 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
       const resolved: IResolvedUserProfile = {
         uid: fUser.uid,
         email: cleanEmail || rData.email || '',
-        displayName: rData.ownerName || rData.name || fUser.displayName || 'Restaurant Owner',
+        displayName: rData.ownerName || rData.name || fUser.displayName || cleanEmail.split('@')[0] || 'Authorized Owner',
         role: 'owner',
         tenantId: rDoc.id,
         branchId: '',
@@ -258,6 +258,12 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
 
     if (!snapUid.empty) {
       empData = snapUid.docs[0].data();
+    } else if (cleanEmail) {
+      const qEmail = query(empRef, where('email', '==', cleanEmail));
+      const snapEmail = await getDocs(qEmail);
+      if (!snapEmail.empty) {
+        empData = snapEmail.docs[0].data();
+      }
     }
   } catch (empErr: any) {
     console.warn('[AUTH ROLE RESOLVER] Employee lookup by UID failed:', empErr);
@@ -269,7 +275,7 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
     const profileDoc: IResolvedUserProfile = {
       uid: fUser.uid,
       email: cleanEmail || empData.email || '',
-      displayName: empData.fullName || empData.name || fUser.displayName || 'Staff Member',
+      displayName: empData.fullName || empData.name || fUser.displayName || cleanEmail.split('@')[0] || 'Staff Member',
       role: empData.role as TUserRole,
       tenantId: empData.tenantId || '',
       branchId: empData.branchId || '',

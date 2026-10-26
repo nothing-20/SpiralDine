@@ -137,6 +137,7 @@ export const OrderTracking: React.FC = () => {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [elapsedMinutes, setElapsedMinutes] = useState(0);
   const [hasCopiedOrderId, setHasCopiedOrderId] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   // UI / Modal States
   const [isRequestAlertOpen, setIsRequestAlertOpen] = useState(false);
@@ -306,13 +307,15 @@ export const OrderTracking: React.FC = () => {
   useEffect(() => {
     const effectiveTenant = order?.tenantId || resolvedTenantId || tenantId;
     const currentSessionId = (order as any)?.sessionId || (session as any)?.sessionId;
-    if (!effectiveTenant || !currentSessionId || currentSessionId === 'GUEST-SESSION' || !String(currentSessionId).startsWith('SES-')) {
+    const effectiveCustomerId = (order as any)?.customerId || user?.uid;
+    if (!effectiveTenant || !currentSessionId || currentSessionId === 'GUEST-SESSION' || !String(currentSessionId).startsWith('SES-') || !effectiveCustomerId) {
       if (order) setConsolidatedOrder(order);
       return;
     }
 
     const q = query(
       collection(db, 'restaurants', effectiveTenant, 'orders'),
+      where('customerId', '==', effectiveCustomerId),
       where('sessionId', '==', currentSessionId)
     );
 
@@ -363,6 +366,10 @@ export const OrderTracking: React.FC = () => {
 
     const initializeTracking = async () => {
       try {
+        // Guarantee authentic user session before attaching Firestore listener
+        await ensureGuestAuth();
+        if (!isSubscribed) return;
+
         // A. Resolve Tenant / Restaurant ID (handling slugs vs document IDs)
         let effectiveTenantId = tenantId;
         let tenantDoc = await getDoc(doc(db, 'tenants', effectiveTenantId));
@@ -464,46 +471,53 @@ export const OrderTracking: React.FC = () => {
 
             setIsLoading(false);
           } else {
-            // Document not found directly: attempt fallback lookup (fuzzy, transposed chars, case-insensitive)
+            // Secure fallback: look up within the authenticated user's own orders only
             try {
-              const ordersCol = collection(db, 'restaurants', effectiveTenantId, 'orders');
-              const recentSnap = await getDocs(ordersCol);
-              let matchedDoc: any = null;
-              const targetNorm = orderId.trim().toUpperCase();
+              const effectiveUid = user?.uid;
+              if (effectiveUid) {
+                const qOwner = query(
+                  collection(db, 'restaurants', effectiveTenantId, 'orders'),
+                  where('customerId', '==', effectiveUid),
+                  limit(20)
+                );
+                const ownerSnap = await getDocs(qOwner);
+                let matchedDoc: any = null;
+                const targetNorm = orderId.trim().toUpperCase();
 
-              for (const d of recentSnap.docs) {
-                const curId = d.id.trim().toUpperCase();
-                const dataId = (d.data().orderId || '').trim().toUpperCase();
+                for (const d of ownerSnap.docs) {
+                  const curId = d.id.trim().toUpperCase();
+                  const dataId = (d.data().orderId || '').trim().toUpperCase();
 
-                if (curId === targetNorm || dataId === targetNorm) {
-                  matchedDoc = d;
-                  break;
-                }
-
-                if (curId.length === targetNorm.length && curId.startsWith('ORD-')) {
-                  let diffs = 0;
-                  for (let i = 0; i < curId.length; i++) {
-                    if (curId[i] !== targetNorm[i]) diffs++;
-                  }
-                  if (diffs <= 2) {
+                  if (curId === targetNorm || dataId === targetNorm) {
                     matchedDoc = d;
                     break;
                   }
-                }
-              }
 
-              if (matchedDoc && isSubscribed) {
-                const resolvedData = matchedDoc.data();
-                setOrder({ id: matchedDoc.id, ...resolvedData });
-                if (resolvedData.createdAt) {
-                  const diffMs = Date.now() - getTimestampMs(resolvedData.createdAt);
-                  setElapsedMinutes(Math.max(0, Math.floor(diffMs / 60000)));
+                  if (curId.length === targetNorm.length && curId.startsWith('ORD-')) {
+                    let diffs = 0;
+                    for (let i = 0; i < curId.length; i++) {
+                      if (curId[i] !== targetNorm[i]) diffs++;
+                    }
+                    if (diffs <= 2) {
+                      matchedDoc = d;
+                      break;
+                    }
+                  }
                 }
-                if ((resolvedData.paymentStatus || '').toLowerCase() === 'paid') {
-                  setPaymentCompleted(true);
+
+                if (matchedDoc && isSubscribed) {
+                  const resolvedData = matchedDoc.data();
+                  setOrder({ id: matchedDoc.id, ...resolvedData });
+                  if (resolvedData.createdAt) {
+                    const diffMs = Date.now() - getTimestampMs(resolvedData.createdAt);
+                    setElapsedMinutes(Math.max(0, Math.floor(diffMs / 60000)));
+                  }
+                  if ((resolvedData.paymentStatus || '').toLowerCase() === 'paid') {
+                    setPaymentCompleted(true);
+                  }
+                  setIsLoading(false);
+                  return;
                 }
-                setIsLoading(false);
-                return;
               }
             } catch (fallbackErr) {
               console.warn('[OrderTracking] Fallback order search warning:', fallbackErr);
@@ -556,7 +570,7 @@ export const OrderTracking: React.FC = () => {
       unsubOrderListener();
       unsubRequestsListener();
     };
-  }, [tenantId, orderId]);
+  }, [tenantId, orderId, user?.uid, retryCount]);
 
   // 3. Elapsed Timer increment interval
   useEffect(() => {
@@ -1029,7 +1043,11 @@ export const OrderTracking: React.FC = () => {
             <p className="text-xs text-[#756B64]">{loadError}</p>
             <div className="flex items-center justify-center gap-2 pt-2">
               <button
-                onClick={() => window.location.reload()}
+                onClick={() => {
+                  setLoadError(null);
+                  setIsLoading(true);
+                  setRetryCount(c => c + 1);
+                }}
                 className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white border border-[#E5DCD5] hover:border-[#C85A3F] text-[#202124] text-xs font-bold rounded-xl shadow-2xs transition-all cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
@@ -1068,7 +1086,11 @@ export const OrderTracking: React.FC = () => {
             </div>
             <div className="flex items-center justify-center gap-2 pt-2">
               <button
-                onClick={() => window.location.reload()}
+                onClick={() => {
+                  setLoadError(null);
+                  setIsLoading(true);
+                  setRetryCount(c => c + 1);
+                }}
                 className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-white border border-[#E5DCD5] hover:border-[#C85A3F] text-[#202124] text-xs font-bold rounded-xl shadow-2xs transition-all cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
