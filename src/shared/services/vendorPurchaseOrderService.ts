@@ -569,6 +569,7 @@ export const vendorPurchaseOrderService = {
       invoiceNumber?: string;
       invoiceDate?: string;
       notes?: string;
+      idempotencyKey?: string;
       items: Array<{
         ingredientId: string;
         quantityReceived: number;
@@ -586,7 +587,19 @@ export const vendorPurchaseOrderService = {
     const userName = user?.displayName || user?.name || user?.email || 'Kitchen Staff';
     const userRole = user?.role || 'kitchen';
 
+    // Formulate a stable receipt ID if idempotencyKey is provided
+    const cleanKey = receiptData.idempotencyKey ? receiptData.idempotencyKey.replace(/[^a-zA-Z0-9_-]/g, '') : '';
+    const receiptId = cleanKey ? `REC-${cleanKey}` : `REC-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    const receiptRef = doc(db, 'restaurants', tenantId, 'goodsReceipts', receiptId);
+
     return await runTransaction(db, async (transaction) => {
+      // 1. Check idempotency: if this exact receipt was already created and committed, return it safely
+      const existingReceiptSnap = await transaction.get(receiptRef);
+      if (existingReceiptSnap.exists()) {
+        console.warn(`[Idempotency Safeguard] Receipt ${receiptId} already recorded. Returning existing receipt.`);
+        return existingReceiptSnap.data() as IGoodsReceipt;
+      }
+
       const poSnap = await transaction.get(poRef);
       if (!poSnap.exists()) {
         throw new Error(`Purchase order ${poId} not found.`);
@@ -601,12 +614,13 @@ export const vendorPurchaseOrderService = {
       }
 
       const receiptNumber = `GRN-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 5).toUpperCase()}`;
-      const receiptId = `REC-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
       const receiptItems: IGoodsReceiptItem[] = [];
 
       // Create a map of items from PO
       const updatedPoItems: IPurchaseOrderItem[] = po.items.map(i => ({ ...i }));
       let totalQtyReceivedThisShipment = 0;
+      let totalReceivedValue = 0;
+      const discrepancyAlerts: string[] = [];
 
       for (const recItem of receiptData.items) {
         if (!recItem.quantityReceived || recItem.quantityReceived <= 0) {
@@ -622,9 +636,23 @@ export const vendorPurchaseOrderService = {
         const prevReceived = poItem.receivedQuantity || 0;
         const newReceived = prevReceived + recItem.quantityReceived;
 
+        // Check for over-delivery discrepancy
+        const remainingBeforeReceipt = Math.max(0, poItem.quantity - prevReceived);
+        let discrepancyNote = recItem.discrepancyReason || '';
+        if (recItem.quantityReceived > remainingBeforeReceipt) {
+          const excess = recItem.quantityReceived - remainingBeforeReceipt;
+          const note = `Over-delivered by ${excess} ${poItem.unit} (Total received: ${newReceived}/${poItem.quantity})`;
+          discrepancyNote = discrepancyNote ? `${discrepancyNote} | ${note}` : note;
+          discrepancyAlerts.push(`${poItem.ingredientName}: +${excess} ${poItem.unit} excess`);
+        }
+
         // Update PO item
         poItem.receivedQuantity = newReceived;
         totalQtyReceivedThisShipment += recItem.quantityReceived;
+
+        const unitPrice = poItem.unitPrice || 0;
+        const lineTotal = Math.round(recItem.quantityReceived * unitPrice);
+        totalReceivedValue += lineTotal;
 
         receiptItems.push({
           ingredientId: poItem.ingredientId,
@@ -634,9 +662,11 @@ export const vendorPurchaseOrderService = {
           quantityPreviouslyReceived: prevReceived,
           quantityReceived: recItem.quantityReceived,
           quantityRejected: recItem.quantityRejected || 0,
+          unitPrice,
+          lineTotal,
           batchNumber: recItem.batchNumber || '',
           expiryDate: recItem.expiryDate || '',
-          discrepancyReason: recItem.discrepancyReason || ''
+          discrepancyReason: discrepancyNote
         });
 
         // Read and update the ingredient stock inside the transaction
@@ -669,7 +699,7 @@ export const vendorPurchaseOrderService = {
 
           transaction.update(ingRef, ingUpdates);
 
-          // Log stock movement for the receipt
+          // Log authoritative stock movement for the receipt with financial metadata
           const movementId = `MVT-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
           const movementRef = doc(db, 'restaurants', tenantId, 'stockMovements', movementId);
 
@@ -682,6 +712,10 @@ export const vendorPurchaseOrderService = {
             previousStock: prevStock,
             newStock: targetStock,
             type: 'purchase',
+            unitPrice,
+            totalValue: lineTotal,
+            poNumber: po.poNumber,
+            receiptNumber,
             reason: `PO #${po.poNumber} Goods Receipt (${receiptData.invoiceNumber ? `Invoice: ${receiptData.invoiceNumber}` : receiptNumber})`,
             submittedBy: userId,
             submittedByName: userName,
@@ -703,11 +737,15 @@ export const vendorPurchaseOrderService = {
       const newStatus: PurchaseOrderStatus = isFullyDelivered ? 'DELIVERED' : 'PARTIALLY_RECEIVED';
 
       const auditLog = po.auditLog || [];
+      const notesDetails = discrepancyAlerts.length > 0 
+        ? `Goods Receipt ${receiptNumber} logged (+${totalQtyReceivedThisShipment} items, ${formatPrice(totalReceivedValue)}). Discrepancies noted: ${discrepancyAlerts.join(', ')}. Status: ${newStatus}.`
+        : `Goods Receipt ${receiptNumber} logged (+${totalQtyReceivedThisShipment} items, ${formatPrice(totalReceivedValue)}). Status: ${newStatus}.`;
+
       auditLog.push({
         action: 'RECEIPT',
         timestamp,
         performedBy: userName,
-        notes: `Goods Receipt ${receiptNumber} logged (+${totalQtyReceivedThisShipment} items). Status: ${newStatus}.`
+        notes: notesDetails
       });
 
       // Update PO
@@ -732,17 +770,162 @@ export const vendorPurchaseOrderService = {
         supplierInvoiceNumber: receiptData.invoiceNumber || '',
         invoiceDate: receiptData.invoiceDate || '',
         items: receiptItems,
+        totalReceivedValue,
+        idempotencyKey: cleanKey || receiptId,
         receivedAt: timestamp,
         receivedBy: userId,
         receivedByName: userName,
         notes: receiptData.notes || ''
       };
 
-      const receiptRef = doc(db, 'restaurants', tenantId, 'goodsReceipts', receiptId);
       transaction.set(receiptRef, goodsReceiptRecord);
 
       return goodsReceiptRecord;
     });
+  },
+
+  // ==========================================
+  // 5. INVENTORY VALUATION & PURCHASE ANALYTICS
+  // ==========================================
+
+  /**
+   * Authoritatively computes Kitchen Stock Value using validated current stock balances
+   * and unit purchase cost basis, with fallback to preferred catalog price when available.
+   */
+  calculateKitchenStockValue: (
+    ingredients: IStockIngredient[], 
+    supplierPrices?: ISupplierPrice[]
+  ): { 
+    totalValue: number; // in cents
+    valuedItemsCount: number; 
+    unvaluedItemsCount: number; 
+    isFullyValued: boolean;
+  } => {
+    let totalValue = 0;
+    let valuedItemsCount = 0;
+    let unvaluedItemsCount = 0;
+
+    for (const item of ingredients) {
+      const currentStock = Number(item.currentStock) || 0;
+      if (currentStock <= 0) continue; // Exclude out-of-stock items from valuation value
+
+      let unitPrice = Number(item.purchaseCost) || 0;
+
+      // Fallback: Check if negotiated price exists in supplier pricing catalog
+      if (unitPrice <= 0 && supplierPrices && supplierPrices.length > 0) {
+        const catalogPrice = supplierPrices.find(p => p.ingredientId === item.id && p.isPreferred)
+          || supplierPrices.find(p => p.ingredientId === item.id);
+        if (catalogPrice && catalogPrice.unitPrice > 0) {
+          unitPrice = catalogPrice.unitPrice;
+        }
+      }
+
+      if (unitPrice > 0) {
+        valuedItemsCount++;
+        totalValue += Math.round(currentStock * unitPrice);
+      } else {
+        unvaluedItemsCount++;
+      }
+    }
+
+    return {
+      totalValue,
+      valuedItemsCount,
+      unvaluedItemsCount,
+      isFullyValued: unvaluedItemsCount === 0
+    };
+  },
+
+  /**
+   * Returns date boundaries for standard Indian financial years (April 1 to March 31).
+   * e.g., FY 2026–27 starts 2026-04-01T00:00:00 and ends 2027-03-31T23:59:59.999.
+   */
+  getFinancialYearBoundaries: (targetStartYear?: number): {
+    startYear: number;
+    endYear: number;
+    label: string;
+    startDate: Date;
+    endDate: Date;
+    prevStartYear: number;
+    prevEndYear: number;
+    prevLabel: string;
+    prevStartDate: Date;
+    prevEndDate: Date;
+  } => {
+    const now = new Date();
+    // Default to current financial year: if month < 3 (Jan, Feb, Mar), start year is previous calendar year
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth(); // 0-indexed: 0 = Jan, 3 = April
+    const defaultStartYear = currentMonth >= 3 ? currentYear : currentYear - 1;
+
+    const startYear = targetStartYear !== undefined ? targetStartYear : defaultStartYear;
+    const endYear = startYear + 1;
+    const label = `FY ${startYear}–${String(endYear).slice(-2)}`;
+
+    // April 1 00:00:00 local time
+    const startDate = new Date(startYear, 3, 1, 0, 0, 0, 0);
+    // March 31 23:59:59.999 local time
+    const endDate = new Date(endYear, 2, 31, 23, 59, 59, 999);
+
+    const prevStartYear = startYear - 1;
+    const prevEndYear = startYear;
+    const prevLabel = `FY ${prevStartYear}–${String(prevEndYear).slice(-2)}`;
+    const prevStartDate = new Date(prevStartYear, 3, 1, 0, 0, 0, 0);
+    const prevEndDate = new Date(prevEndYear, 2, 31, 23, 59, 59, 999);
+
+    return {
+      startYear,
+      endYear,
+      label,
+      startDate,
+      endDate,
+      prevStartYear,
+      prevEndYear,
+      prevLabel,
+      prevStartDate,
+      prevEndDate
+    };
+  },
+
+  /**
+   * Calculates total goods receipt purchasing expenditure for a specified date interval.
+   * Leverages authoritative IGoodsReceipt documents or verified stockMovements.
+   */
+  calculatePurchasesForPeriod: (
+    receipts: IGoodsReceipt[],
+    movements: IStockMovement[],
+    startDate: Date,
+    endDate: Date
+  ): {
+    totalValue: number; // in cents
+    receiptCount: number;
+  } => {
+    const startMs = startDate.getTime();
+    const endMs = endDate.getTime();
+
+    // 1. Primary authoritative source: goodsReceipts collection
+    if (receipts && receipts.length > 0) {
+      const eligibleReceipts = receipts.filter(r => {
+        const time = new Date(r.receivedAt).getTime();
+        return !isNaN(time) && time >= startMs && time <= endMs;
+      });
+
+      const totalValue = eligibleReceipts.reduce((acc, r) => acc + (r.totalReceivedValue || 0), 0);
+      return { totalValue, receiptCount: eligibleReceipts.length };
+    }
+
+    // 2. Secondary authoritative fallback: verified stock movements of type 'purchase'
+    const eligibleMovements = movements.filter(m => {
+      const time = new Date(m.timestamp).getTime();
+      return m.type === 'purchase' && !isNaN(time) && time >= startMs && time <= endMs;
+    });
+
+    const totalValue = eligibleMovements.reduce((acc, m) => {
+      const val = m.totalValue !== undefined ? m.totalValue : (Math.abs(m.quantity) * (m.unitPrice || 0));
+      return acc + val;
+    }, 0);
+
+    return { totalValue, receiptCount: eligibleMovements.length };
   },
 
   // ==========================================

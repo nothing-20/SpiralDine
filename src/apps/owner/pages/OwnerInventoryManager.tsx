@@ -53,7 +53,17 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-import { IStockIngredient, IRecipe, IStockMovement, ISupplier, IPurchaseSuggestion, IWasteLog } from '../../../shared/domain/inventory/types';
+import { 
+  IStockIngredient, 
+  IRecipe, 
+  IStockMovement, 
+  ISupplier, 
+  IPurchaseSuggestion, 
+  IWasteLog,
+  IGoodsReceipt,
+  IPurchaseOrder,
+  ISupplierPrice
+} from '../../../shared/domain/inventory/types';
 import { useCurrency } from '../../../context/CurrencyContext';
 import { VendorDirectoryTab } from '../inventory/VendorDirectoryTab';
 import { PurchaseOrdersTab } from '../inventory/PurchaseOrdersTab';
@@ -81,6 +91,12 @@ export const OwnerInventoryManager: React.FC = () => {
   const [suggestions, setSuggestions] = useState<IPurchaseSuggestion[]>([]);
   const [wasteLogs, setWasteLogs] = useState<IWasteLog[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
+  const [goodsReceipts, setGoodsReceipts] = useState<IGoodsReceipt[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<IPurchaseOrder[]>([]);
+  const [supplierPrices, setSupplierPrices] = useState<ISupplierPrice[]>([]);
+  const [selectedFyStartYear, setSelectedFyStartYear] = useState<number>(() => {
+    return vendorPurchaseOrderService.getFinancialYearBoundaries().startYear;
+  });
   const [isLoading, setIsLoading] = useState(true);
 
   // Filter States
@@ -242,6 +258,34 @@ export const OwnerInventoryManager: React.FC = () => {
       setMenuItems(list);
     });
 
+    // Goods Receipts listener (authoritative received goods expenditure)
+    const unsubReceipts = onSnapshot(collection(db, 'restaurants', tenantId, 'goodsReceipts'), (snap) => {
+      const list: IGoodsReceipt[] = [];
+      snap.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as IGoodsReceipt);
+      });
+      list.sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime());
+      setGoodsReceipts(list);
+    });
+
+    // Purchase Orders listener
+    const unsubPOs = onSnapshot(collection(db, 'restaurants', tenantId, 'purchaseOrders'), (snap) => {
+      const list: IPurchaseOrder[] = [];
+      snap.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as IPurchaseOrder);
+      });
+      setPurchaseOrders(list);
+    });
+
+    // Supplier Prices listener
+    const unsubPrices = onSnapshot(collection(db, 'restaurants', tenantId, 'supplierPrices'), (snap) => {
+      const list: ISupplierPrice[] = [];
+      snap.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as ISupplierPrice);
+      });
+      setSupplierPrices(list);
+    });
+
     setIsLoading(false);
 
     return () => {
@@ -252,6 +296,9 @@ export const OwnerInventoryManager: React.FC = () => {
       unsubSuggestions();
       unsubWaste();
       unsubMenuItems();
+      unsubReceipts();
+      unsubPOs();
+      unsubPrices();
     };
   }, [tenantId]);
 
@@ -286,7 +333,9 @@ export const OwnerInventoryManager: React.FC = () => {
       (item.availableServings ?? 0) === 0
     ).length;
 
-    const value = ingredients.reduce((sum, item) => sum + (Number(item.currentStock) * (Number(item.purchaseCost) || 0)), 0);
+    // 1. Authoritative Kitchen Stock Value calculation
+    const stockValuation = vendorPurchaseOrderService.calculateKitchenStockValue(ingredients, supplierPrices);
+    const value = stockValuation.totalValue;
 
     const todayStr = new Date().toISOString().split('T')[0];
     const soonDate = new Date();
@@ -296,37 +345,70 @@ export const OwnerInventoryManager: React.FC = () => {
     const expired = ingredients.filter(i => i.expiryDate && i.expiryDate < todayStr).length;
     const expiringSoon = ingredients.filter(i => i.expiryDate && i.expiryDate >= todayStr && i.expiryDate <= soonStr).length;
 
-    // Total loss to spoilage/waste this week
+    // Total loss to spoilage/waste recorded
     const wasteCost = wasteLogs.reduce((sum, item) => sum + (item.valueLost || 0), 0);
 
-    // Advanced Operational Metrics
-    const todayConsumptionCount = movements
-      .filter(m => m.type === 'consumption' && new Date(m.timestamp).toDateString() === new Date().toDateString())
-      .reduce((sum, m) => sum + Math.abs(m.quantity), 0);
+    // Advanced Operational Metrics: Today's Consumption
+    const now = new Date();
+    const todayMovements = movements.filter(m => {
+      if (m.type !== 'consumption') return false;
+      const mDate = new Date(m.timestamp);
+      return mDate.toDateString() === now.toDateString();
+    });
 
-    const todayConsumptionVal = movements
-      .filter(m => m.type === 'consumption' && new Date(m.timestamp).toDateString() === new Date().toDateString())
-      .reduce((sum, m) => {
-        const ing = ingredients.find(i => i.id === m.ingredientId);
-        return sum + (Math.abs(m.quantity) * (ing?.purchaseCost || 0));
-      }, 0);
+    const todayConsumptionCount = todayMovements.reduce((sum, m) => sum + Math.abs(m.quantity), 0);
+    const todayConsumptionVal = todayMovements.reduce((sum, m) => {
+      const ing = ingredients.find(i => i.id === m.ingredientId);
+      const unitCost = ing?.purchaseCost || 0;
+      return sum + Math.round(Math.abs(m.quantity) * unitCost);
+    }, 0);
 
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0,0,0,0);
-    const startM = startOfMonth.getTime();
-    const monthlyPurchases = movements
-      .filter(m => m.type === 'purchase' && new Date(m.timestamp).getTime() >= startM)
-      .reduce((sum, m) => {
-        const ing = ingredients.find(i => i.id === m.ingredientId);
-        const cost = ing ? (ing.purchaseCost || 0) : 0;
-        return sum + (Math.abs(m.quantity) * cost);
-      }, 0);
+    // 2. Authoritative Monthly Purchases (Current Month)
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const monthlyStats = vendorPurchaseOrderService.calculatePurchasesForPeriod(
+      goodsReceipts,
+      movements,
+      startOfMonth,
+      endOfMonth
+    );
+    const monthlyPurchases = monthlyStats.totalValue;
+    const monthlyReceiptsCount = monthlyStats.receiptCount;
 
+    // 3. Authoritative Annual Purchases for Selected Financial Year
+    const fyBoundaries = vendorPurchaseOrderService.getFinancialYearBoundaries(selectedFyStartYear);
+    const annualStats = vendorPurchaseOrderService.calculatePurchasesForPeriod(
+      goodsReceipts,
+      movements,
+      fyBoundaries.startDate,
+      fyBoundaries.endDate
+    );
+    const prevAnnualStats = vendorPurchaseOrderService.calculatePurchasesForPeriod(
+      goodsReceipts,
+      movements,
+      fyBoundaries.prevStartDate,
+      fyBoundaries.prevEndDate
+    );
+
+    const annualPurchases = annualStats.totalValue;
+    const annualReceiptsCount = annualStats.receiptCount;
+    const prevAnnualPurchases = prevAnnualStats.totalValue;
+
+    // YoY % change (null if no previous year data to avoid misleading comparison)
+    const annualYoyChangePct = prevAnnualPurchases > 0
+      ? Math.round(((annualPurchases - prevAnnualPurchases) / prevAnnualPurchases) * 100)
+      : null;
+
+    // 4. Inventory Accuracy
     const adjustmentsCount = movements.filter(m => m.type === 'adjustment' || m.type === 'manual_correction').length;
-    const inventoryAccuracy = Math.max(70, 100 - (adjustmentsCount * 2));
+    const auditVerified = adjustmentsCount > 0 || movements.length > 0;
+    const inventoryAccuracy = auditVerified ? Math.max(70, 100 - (adjustmentsCount * 2)) : 100;
+    const accuracyStatus = !auditVerified ? 'Unverified' : `${inventoryAccuracy}%`;
 
-    const turnoverRatio = value > 0 ? Number(((wasteCost + Math.abs(todayConsumptionVal) * 30) / value).toFixed(2)) : 0.00;
+    // 5. Turnover Index: Cost of Goods Consumed (monthly annualized) / Kitchen Stock Value
+    const turnoverRatio = value > 0 
+      ? Number(((wasteCost + Math.abs(todayConsumptionVal) * 30) / value).toFixed(2)) 
+      : 0.00;
 
     return { 
       total, 
@@ -336,15 +418,25 @@ export const OwnerInventoryManager: React.FC = () => {
       lowBatch, 
       outBatch,
       value, 
+      stockValuation,
       expired, 
       expiringSoon, 
       wasteCost,
       todayConsumptionCount,
+      todayConsumptionVal,
       monthlyPurchases,
+      monthlyReceiptsCount,
+      annualPurchases,
+      annualReceiptsCount,
+      prevAnnualPurchases,
+      annualYoyChangePct,
+      fyLabel: fyBoundaries.label,
+      prevFyLabel: fyBoundaries.prevLabel,
       inventoryAccuracy,
+      accuracyStatus,
       turnoverRatio
     };
-  }, [ingredients, wasteLogs, menuItems, movements]);
+  }, [ingredients, wasteLogs, menuItems, movements, goodsReceipts, supplierPrices, selectedFyStartYear]);
 
   // Derived stock health alerts list for UI widgets
   const allLowStockAlerts = useMemo(() => {
@@ -1103,6 +1195,10 @@ export const OwnerInventoryManager: React.FC = () => {
               <div className="space-y-1">
                 <span className="text-[10px] text-[#7B8794] font-bold uppercase tracking-wider block">Kitchen Stock Value</span>
                 <strong className="text-xl font-mono text-[#17202A] font-extrabold">{formatPrice(stockMetrics.value)}</strong>
+                <span className="text-[10px] text-slate-500 font-medium block">
+                  {stockMetrics.stockValuation.valuedItemsCount} of {ingredients.length} items valued
+                  {stockMetrics.stockValuation.unvaluedItemsCount > 0 && ` (${stockMetrics.stockValuation.unvaluedItemsCount} unvalued)`}
+                </span>
               </div>
               <div className="p-3 bg-[#E8F5EF] border border-[#C6E7D8] rounded-2xl text-[#16845B]">
                 <TrendingUp className="w-6 h-6" />
@@ -1113,6 +1209,9 @@ export const OwnerInventoryManager: React.FC = () => {
               <div className="space-y-1">
                 <span className="text-[10px] text-[#7B8794] font-bold uppercase tracking-wider block">Low Stock Warnings</span>
                 <strong className="text-xl font-mono text-[#9A6200] font-extrabold">{stockMetrics.low + stockMetrics.critical}</strong>
+                <span className="text-[10px] text-amber-700 font-medium block">
+                  {stockMetrics.critical} critical • {stockMetrics.low} low
+                </span>
               </div>
               <div className="p-3 bg-[#FFF4DC] border border-[#FDE6B0] rounded-2xl text-[#D98B00]">
                 <AlertTriangle className="w-6 h-6" />
@@ -1123,6 +1222,7 @@ export const OwnerInventoryManager: React.FC = () => {
               <div className="space-y-1">
                 <span className="text-[10px] text-[#7B8794] font-bold uppercase tracking-wider block">Out of Stock</span>
                 <strong className="text-xl font-mono text-[#B92E2E] font-extrabold">{stockMetrics.out}</strong>
+                <span className="text-[10px] text-rose-700 font-medium block">Immediate reorder</span>
               </div>
               <div className="p-3 bg-[#FBEAE5] border border-[#F5CBC4] rounded-2xl text-[#D64545]">
                 <AlertOctagon className="w-6 h-6 animate-pulse" />
@@ -1133,6 +1233,7 @@ export const OwnerInventoryManager: React.FC = () => {
               <div className="space-y-1">
                 <span className="text-[10px] text-[#7B8794] font-bold uppercase tracking-wider block">Spoilage & Waste Lost</span>
                 <strong className="text-xl font-mono text-[#52606D] font-extrabold">{formatPrice(stockMetrics.wasteCost)}</strong>
+                <span className="text-[10px] text-slate-500 font-medium block">{wasteLogs.length} logged incident{wasteLogs.length === 1 ? '' : 's'}</span>
               </div>
               <div className="p-3 bg-[#F8F6F2] border border-[#E5E0D9] rounded-2xl text-[#7B8794]">
                 <Trash className="w-6 h-6" />
@@ -1140,30 +1241,81 @@ export const OwnerInventoryManager: React.FC = () => {
             </Card>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Card className="p-4 border-slate-850 bg-slate-900/15 flex items-center justify-between">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <Card className="p-4 border-slate-850 bg-slate-900/15 flex flex-col justify-between">
+              <div className="space-y-1">
+                <span className="text-[9px] text-slate-550 font-bold uppercase tracking-wider block">
+                  Monthly Purchases ({new Date().toLocaleString('default', { month: 'short' })})
+                </span>
+                <strong className="text-base font-mono text-textPearl font-bold block">
+                  {formatPrice(stockMetrics.monthlyPurchases)}
+                </strong>
+              </div>
+              <span className="text-[10px] text-slate-400 font-medium mt-2 block">
+                {stockMetrics.monthlyReceiptsCount} goods receipt{stockMetrics.monthlyReceiptsCount === 1 ? '' : 's'} checked in
+              </span>
+            </Card>
+
+            <Card className="p-4 border-slate-850 bg-slate-900/15 flex flex-col justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-1 mb-1">
+                  <span className="text-[9px] text-slate-550 font-bold uppercase tracking-wider block">
+                    Annual Purchases
+                  </span>
+                  <select
+                    value={selectedFyStartYear}
+                    onChange={e => setSelectedFyStartYear(Number(e.target.value))}
+                    className="text-[10px] font-bold bg-slate-800 text-slate-200 border border-slate-700 rounded-md px-1.5 py-0.5 focus:outline-none focus:border-[#16845B] cursor-pointer"
+                  >
+                    <option value={2026}>FY 2026–27</option>
+                    <option value={2025}>FY 2025–26</option>
+                    <option value={2024}>FY 2024–25</option>
+                  </select>
+                </div>
+                <strong className="text-base font-mono text-textPearl font-bold block">
+                  {formatPrice(stockMetrics.annualPurchases)}
+                </strong>
+              </div>
+              <div className="flex items-center justify-between text-[10px] mt-2">
+                <span className="text-slate-400">{stockMetrics.annualReceiptsCount} receipts</span>
+                {stockMetrics.annualYoyChangePct !== null ? (
+                  <span className={`font-bold ${stockMetrics.annualYoyChangePct <= 0 ? 'text-emerald-500' : 'text-amber-500'}`}>
+                    {stockMetrics.annualYoyChangePct > 0 ? `+${stockMetrics.annualYoyChangePct}%` : `${stockMetrics.annualYoyChangePct}%`} vs prev FY
+                  </span>
+                ) : (
+                  <span className="text-slate-500">Baseline FY</span>
+                )}
+              </div>
+            </Card>
+
+            <Card className="p-4 border-slate-850 bg-slate-900/15 flex flex-col justify-between">
               <div className="space-y-1">
                 <span className="text-[9px] text-slate-550 font-bold uppercase tracking-wider block">Today's Consumption</span>
-                <strong className="text-base font-mono text-textPearl font-bold">{stockMetrics.todayConsumptionCount} units</strong>
+                <strong className="text-base font-mono text-textPearl font-bold block">{stockMetrics.todayConsumptionCount} units</strong>
               </div>
+              <span className="text-[10px] text-slate-400 font-medium mt-2 block">
+                Cost value: {formatPrice(stockMetrics.todayConsumptionVal)}
+              </span>
             </Card>
-            <Card className="p-4 border-slate-850 bg-slate-900/15 flex items-center justify-between">
-              <div className="space-y-1">
-                <span className="text-[9px] text-slate-555 font-bold uppercase tracking-wider block">Monthly Purchases</span>
-                <strong className="text-base font-mono text-textPearl font-bold">{formatPrice(stockMetrics.monthlyPurchases)}</strong>
-              </div>
-            </Card>
-            <Card className="p-4 border-slate-850 bg-slate-900/15 flex items-center justify-between">
+
+            <Card className="p-4 border-slate-850 bg-slate-900/15 flex flex-col justify-between">
               <div className="space-y-1">
                 <span className="text-[9px] text-slate-555 font-bold uppercase tracking-wider block">Inventory Accuracy</span>
-                <strong className="text-base font-mono text-emerald-500 font-bold">{stockMetrics.inventoryAccuracy}%</strong>
+                <strong className="text-base font-mono text-emerald-500 font-bold block">{stockMetrics.accuracyStatus}</strong>
               </div>
+              <span className="text-[10px] text-slate-400 font-medium mt-2 block">
+                {movements.filter(m => m.type === 'adjustment' || m.type === 'manual_correction').length} adjustments recorded
+              </span>
             </Card>
-            <Card className="p-4 border-slate-850 bg-slate-900/15 flex items-center justify-between">
+
+            <Card className="p-4 border-slate-850 bg-slate-900/15 flex flex-col justify-between">
               <div className="space-y-1">
                 <span className="text-[9px] text-slate-555 font-bold uppercase tracking-wider block">Turnover Index</span>
-                <strong className="text-base font-mono text-textPearl font-bold">{stockMetrics.turnoverRatio}x</strong>
+                <strong className="text-base font-mono text-textPearl font-bold block">{stockMetrics.turnoverRatio}x</strong>
               </div>
+              <span className="text-[10px] text-slate-400 font-medium mt-2 block">
+                Annualized consumption / stock
+              </span>
             </Card>
           </div>
 

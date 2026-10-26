@@ -52,6 +52,10 @@ export interface IStockMovement {
   type: 'purchase' | 'consumption' | 'adjustment' | 'waste' | 'spoilage' | 'manual_correction' | 'refund_restock' | 'cancellation_restock';
   reason: string;
   valueLost?: number; // in cents (optional)
+  unitPrice?: number; // in cents (optional)
+  totalValue?: number; // in cents (quantity * unitPrice)
+  poNumber?: string;
+  receiptNumber?: string;
   submittedBy: string; // userId or "system"
   submittedByName: string; // userName or "System Automation"
   performedByRole?: string; // e.g. "kitchen", "owner", "admin"
@@ -176,6 +180,8 @@ export interface IGoodsReceiptItem {
   quantityPreviouslyReceived: number;
   quantityReceived: number;
   quantityRejected?: number;
+  unitPrice?: number; // in cents
+  lineTotal?: number; // in cents (quantityReceived * unitPrice)
   batchNumber?: string;
   expiryDate?: string;
   discrepancyReason?: string;
@@ -193,6 +199,8 @@ export interface IGoodsReceipt {
   supplierInvoiceNumber?: string;
   invoiceDate?: string;
   items: IGoodsReceiptItem[];
+  totalReceivedValue: number; // in cents
+  idempotencyKey?: string;
   receivedAt: string;
   receivedBy: string;
   receivedByName: string;

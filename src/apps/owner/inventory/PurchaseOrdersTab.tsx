@@ -342,7 +342,7 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
   // Submit Goods Receipt
   const handleSubmitReceipt = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tenantId || !receivePo) return;
+    if (!tenantId || !receivePo || isSubmitting) return;
 
     const validItems = receivingItems.filter(i => i.quantityReceived > 0);
     if (validItems.length === 0) {
@@ -351,11 +351,15 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
     }
 
     setIsSubmitting(true);
+    // Generate durable idempotency key per check-in action
+    const idempotencyKey = `po-${receivePo.id}-${Date.now()}`;
+
     try {
       const receipt = await vendorPurchaseOrderService.receivePurchaseOrderGoods(tenantId, receivePo.id, {
         invoiceNumber: invoiceNumber.trim(),
         invoiceDate,
         notes: receiptNotes.trim(),
+        idempotencyKey,
         items: validItems
       }, user);
 
@@ -573,23 +577,41 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                   const totalItems = row.items.length;
                   const totalQty = row.items.reduce((acc, i) => acc + i.quantity, 0);
                   const receivedQty = row.items.reduce((acc, i) => acc + (i.receivedQuantity || 0), 0);
-                  const percent = totalQty > 0 ? Math.min(100, Math.round((receivedQty / totalQty) * 100)) : 0;
+                  const isOverReceived = totalQty > 0 && receivedQty > totalQty;
+                  const percent = totalQty > 0 ? Math.round((receivedQty / totalQty) * 100) : 0;
+                  const progressBarWidth = Math.min(100, percent);
 
                   return (
-                    <div className="space-y-1.5 text-xs min-w-[140px]">
-                      <div className="flex justify-between text-[11px] font-bold text-slate-700">
-                        <span>{totalItems} item{totalItems === 1 ? '' : 's'}</span>
-                        <span>{percent}% received</span>
+                    <div className="space-y-1.5 text-xs min-w-[150px]">
+                      <div className="flex justify-between items-center text-[11px] font-bold">
+                        <span className="text-slate-700">{totalItems} item{totalItems === 1 ? '' : 's'}</span>
+                        {isOverReceived ? (
+                          <span className="text-amber-800 font-extrabold flex items-center gap-0.5">
+                            <AlertTriangle className="w-3 h-3 text-amber-600 inline shrink-0" />
+                            {percent}% (Over-received)
+                          </span>
+                        ) : (
+                          <span className={percent === 100 ? 'text-emerald-700 font-extrabold' : 'text-slate-700'}>
+                            {percent}% received
+                          </span>
+                        )}
                       </div>
                       <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
                         <div 
-                          className={`h-full transition-all ${percent === 100 ? 'bg-emerald-500' : 'bg-amber-500'}`} 
-                          style={{ width: `${percent}%` }}
+                          className={`h-full transition-all ${isOverReceived ? 'bg-amber-500' : percent === 100 ? 'bg-emerald-500' : 'bg-amber-500'}`} 
+                          style={{ width: `${progressBarWidth}%` }}
                         />
                       </div>
-                      <span className="text-[10px] text-slate-400 block">
-                        {receivedQty} / {totalQty} units
-                      </span>
+                      <div className="flex justify-between items-center text-[10px]">
+                        <span className="text-slate-500">
+                          {receivedQty} / {totalQty} units
+                        </span>
+                        {isOverReceived && (
+                          <span className="text-amber-700 font-bold">
+                            +{(receivedQty - totalQty).toFixed(1)} excess
+                          </span>
+                        )}
+                      </div>
                     </div>
                   );
                 }
@@ -963,9 +985,14 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                         <td className="p-2 font-bold text-slate-800">{item.ingredientName}</td>
                         <td className="p-2 text-center text-slate-700">{item.quantity} {item.unit}</td>
                         <td className="p-2 text-center">
-                          <span className={`font-bold ${(item.receivedQuantity || 0) >= item.quantity ? 'text-emerald-700' : 'text-amber-600'}`}>
+                          <span className={`font-bold ${(item.receivedQuantity || 0) > item.quantity ? 'text-amber-700' : (item.receivedQuantity || 0) >= item.quantity ? 'text-emerald-700' : 'text-amber-600'}`}>
                             {item.receivedQuantity || 0} {item.unit}
                           </span>
+                          {(item.receivedQuantity || 0) > item.quantity && (
+                            <span className="text-[9.5px] font-bold text-amber-700 block">
+                              (+{((item.receivedQuantity || 0) - item.quantity).toFixed(1)} excess)
+                            </span>
+                          )}
                         </td>
                         <td className="p-2 text-right font-mono text-slate-600">{formatPrice(item.unitPrice)}</td>
                         <td className="p-2 text-right font-mono font-bold text-slate-900">{formatPrice(item.lineTotal)}</td>
