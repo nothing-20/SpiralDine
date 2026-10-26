@@ -6,7 +6,9 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
-import { formatPrice } from '../../../shared/utils/format';
+import { formatAddress, formatPrice } from '../../../shared/utils/format';
+import { useRestaurant } from '../../../shared/services/RestaurantContext';
+import { restaurantService, IBranchItem } from '../../../shared/services/restaurantService';
 import { 
   IPurchaseOrder, 
   IPurchaseOrderItem, 
@@ -43,7 +45,10 @@ import {
   Trash2,
   Share2,
   Printer,
-  ChevronRight
+  ChevronRight,
+  MapPin,
+  Building2,
+  Edit3
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -59,12 +64,17 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
   onNavigateToSuppliers 
 }) => {
   const { user } = useAuth();
+  const { activeRestaurant } = useRestaurant();
   const tenantId = user?.tenantId;
 
   // Real-time collections
   const [purchaseOrders, setPurchaseOrders] = useState<IPurchaseOrder[]>([]);
   const [supplierPrices, setSupplierPrices] = useState<ISupplierPrice[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Authorized Branches
+  const [branches, setBranches] = useState<IBranchItem[]>([]);
+  const [isLoadingBranches, setIsLoadingBranches] = useState(false);
 
   // Search & Filter
   const [searchTerm, setSearchTerm] = useState('');
@@ -82,8 +92,18 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
   const [cancelPo, setCancelPo] = useState<IPurchaseOrder | null>(null);
   const [cancelReason, setCancelReason] = useState('');
 
+  // Edit Delivery Address Modal State (for fixing legacy/existing PO addresses)
+  const [isEditAddressOpen, setIsEditAddressOpen] = useState(false);
+  const [editAddressPo, setEditAddressPo] = useState<IPurchaseOrder | null>(null);
+  const [editDeliveryAddress, setEditDeliveryAddress] = useState('');
+  const [editBranchId, setEditBranchId] = useState('');
+  const [editBranchName, setEditBranchName] = useState('');
+  const [isUpdatingAddress, setIsUpdatingAddress] = useState(false);
+
   // Create Form State
   const [selectedSupplierId, setSelectedSupplierId] = useState('');
+  const [selectedBranchId, setSelectedBranchId] = useState('');
+  const [selectedBranchName, setSelectedBranchName] = useState('');
   const [orderItems, setOrderItems] = useState<Array<{
     ingredientId: string;
     ingredientName: string;
@@ -147,6 +167,22 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
     };
   }, [tenantId]);
 
+  // Load authorized branches for this tenant
+  useEffect(() => {
+    if (!tenantId) return;
+    setIsLoadingBranches(true);
+    restaurantService.getAuthorizedBranches(tenantId)
+      .then(bList => {
+        setBranches(bList);
+      })
+      .catch(err => {
+        console.warn('Failed to fetch branches', err);
+      })
+      .finally(() => {
+        setIsLoadingBranches(false);
+      });
+  }, [tenantId]);
+
   // Keep selectedPo updated if real-time PO changes
   useEffect(() => {
     if (selectedPo) {
@@ -178,10 +214,38 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
     return matchesSearch && po.status === statusFilter;
   });
 
+  // Switch Delivery Branch in Create Modal
+  const handleBranchChange = (branchId: string) => {
+    setSelectedBranchId(branchId);
+    const foundBranch = branches.find(b => b.id === branchId);
+    const bName = foundBranch?.name || 'Main Branch';
+    setSelectedBranchName(bName);
+
+    const branchAddr = foundBranch ? formatAddress(foundBranch.address) : '';
+    const restaurantAddr = activeRestaurant ? formatAddress(activeRestaurant.address) : '';
+    setDeliveryAddress(branchAddr || restaurantAddr || '');
+  };
+
   // Open Create PO modal
   const handleOpenCreate = () => {
     const firstSupplier = suppliers.find(s => s.isActive !== false) || suppliers[0];
+    if (!firstSupplier) {
+      toast.error('Please create at least one active vendor in the Vendor Directory first.');
+      return;
+    }
     setSelectedSupplierId(firstSupplier?.id || '');
+
+    // Resolve initial branch and delivery address - strictly separated from vendor address
+    const initialBranch = branches.length > 0 ? branches[0] : null;
+    const branchId = initialBranch?.id || 'main';
+    const branchName = initialBranch?.name || 'Main Branch';
+    setSelectedBranchId(branchId);
+    setSelectedBranchName(branchName);
+
+    const branchAddr = initialBranch ? formatAddress(initialBranch.address) : '';
+    const restaurantAddr = activeRestaurant ? formatAddress(activeRestaurant.address) : '';
+    const defaultDeliveryAddr = branchAddr || restaurantAddr || '';
+    setDeliveryAddress(defaultDeliveryAddr);
 
     // Default item
     const firstIng = ingredients[0];
@@ -207,7 +271,6 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
 
     setDeliveryCharge('0');
     setExpectedDate('');
-    setDeliveryAddress(firstSupplier?.address || '');
     setSupplierInstructions('');
     setInternalNotes('');
     setIsCreateOpen(true);
@@ -291,6 +354,9 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
         supplierEmail: supplier.email,
         supplierAddress: supplier.address,
         supplierGstNumber: supplier.gstNumber,
+        restaurantName: activeRestaurant?.name || activeRestaurant?.restaurantName || 'SpiralDine Restaurant',
+        branchId: selectedBranchId,
+        branchName: selectedBranchName,
         items: orderItems,
         deliveryCharge: Math.round(parseFloat(deliveryCharge) * 100) || 0,
         expectedDeliveryDate: expectedDate,
@@ -393,10 +459,58 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
     }
   };
 
-  // WhatsApp Dispatch
+  // Edit Delivery Address for Existing PO (allows correcting legacy orders)
+  const handleOpenEditAddress = (po: IPurchaseOrder) => {
+    setEditAddressPo(po);
+    setEditDeliveryAddress(po.deliveryAddress || '');
+    setEditBranchId(po.branchId || '');
+    setEditBranchName(po.branchName || 'Main Branch');
+    setIsEditAddressOpen(true);
+  };
+
+  const handleSaveEditedAddress = async () => {
+    if (!tenantId || !editAddressPo) return;
+    if (!editDeliveryAddress.trim()) {
+      toast.error('Please enter a valid delivery address.');
+      return;
+    }
+    setIsUpdatingAddress(true);
+    try {
+      await vendorPurchaseOrderService.updatePurchaseOrderDeliveryAddress(
+        tenantId,
+        editAddressPo.id,
+        editDeliveryAddress.trim(),
+        editBranchId,
+        editBranchName,
+        user
+      );
+      toast.success(`Delivery address updated for ${editAddressPo.poNumber}.`);
+
+      const updatedPo: IPurchaseOrder = {
+        ...editAddressPo,
+        deliveryAddress: editDeliveryAddress.trim(),
+        branchId: editBranchId,
+        branchName: editBranchName,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (selectedPo?.id === editAddressPo.id) {
+        setSelectedPo(updatedPo);
+      }
+      setPurchaseOrders(prev => prev.map(p => p.id === editAddressPo.id ? updatedPo : p));
+      setIsEditAddressOpen(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update delivery address.');
+    } finally {
+      setIsUpdatingAddress(false);
+    }
+  };
+
+  // WhatsApp Dispatch with authorized restaurant and delivery details
   const handleDispatchWhatsApp = (po: IPurchaseOrder) => {
     if (!tenantId) return;
-    const msg = vendorPurchaseOrderService.formatPoWhatsAppMessage(po);
+    const restName = po.restaurantName || activeRestaurant?.name || activeRestaurant?.restaurantName || 'SpiralDine Restaurant';
+    const msg = vendorPurchaseOrderService.formatPoWhatsAppMessage(po, restName);
     const phone = (po.supplierPhone || '').replace(/[^0-9]/g, '');
 
     // Record audit
@@ -410,16 +524,45 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
     toast.success('WhatsApp dispatch initiated and logged.');
   };
 
-  // Email Dispatch
+  // Email Dispatch with authorized restaurant and delivery details
   const handleDispatchEmail = (po: IPurchaseOrder) => {
     if (!tenantId) return;
-    const { subject, text } = vendorPurchaseOrderService.formatPoEmailContent(po);
+    const restName = po.restaurantName || activeRestaurant?.name || activeRestaurant?.restaurantName || 'SpiralDine Restaurant';
+    const { subject, text } = vendorPurchaseOrderService.formatPoEmailContent(po, restName);
 
     vendorPurchaseOrderService.sendPurchaseOrder(tenantId, po.id, 'email', user);
 
     const mailto = `mailto:${po.supplierEmail || ''}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text)}`;
     window.location.href = mailto;
     toast.success('Email dispatch initiated and logged.');
+  };
+
+  // Print / PDF Preview Dispatch
+  const handlePrintPo = (po: IPurchaseOrder) => {
+    const restName = po.restaurantName || activeRestaurant?.name || activeRestaurant?.restaurantName || 'SpiralDine Restaurant';
+    const { html } = vendorPurchaseOrderService.formatPoEmailContent(po, restName);
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Purchase Order ${po.poNumber}</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; }
+              @media print { body { margin: 0; } }
+            </style>
+          </head>
+          <body>
+            ${html}
+            <script>
+              window.onload = function() { window.print(); }
+            </script>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+    }
   };
 
   // Confirm PO
@@ -696,34 +839,131 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
         className="max-w-3xl bg-white"
       >
         <div className="space-y-4 text-xs text-left max-h-[80vh] overflow-y-auto pr-1">
-          {/* Vendor Selector */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-            <div>
-              <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Select Vendor *</label>
-              <select
-                value={selectedSupplierId}
-                onChange={e => {
-                  setSelectedSupplierId(e.target.value);
-                  const sup = suppliers.find(s => s.id === e.target.value);
-                  if (sup?.address) setDeliveryAddress(sup.address);
-                }}
-                className="w-full p-2 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 focus:outline-none focus:border-[#16845B]"
-              >
-                {suppliers.filter(s => s.isActive !== false).map(sup => (
-                  <option key={sup.id} value={sup.id}>
-                    {sup.name} {sup.companyName ? `(${sup.companyName})` : ''}
-                  </option>
-                ))}
-              </select>
+          {/* Section 1: Vendor Selection & Supplier Info */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+            <div className="flex items-center gap-1.5 font-extrabold uppercase text-[10.5px] text-slate-700">
+              <Building2 className="w-3.5 h-3.5 text-slate-500" />
+              <span>1. Supplier / Vendor Details</span>
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Select Vendor *</label>
+                <select
+                  value={selectedSupplierId}
+                  onChange={e => setSelectedSupplierId(e.target.value)}
+                  className="w-full p-2 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 focus:outline-none focus:border-[#16845B]"
+                >
+                  {suppliers.filter(s => s.isActive !== false).map(sup => (
+                    <option key={sup.id} value={sup.id}>
+                      {sup.name} {sup.companyName ? `(${sup.companyName})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Vendor business address display - explicitly labeled as supplier premises */}
+              {(() => {
+                const sup = suppliers.find(s => s.id === selectedSupplierId);
+                return (
+                  <div className="p-2 bg-white border border-slate-200 rounded-xl text-[11px] flex flex-col justify-center">
+                    <p className="font-bold text-slate-800">
+                      Vendor Business Location:
+                    </p>
+                    <p className="text-slate-600 truncate mt-0.5">
+                      {sup?.address || <span className="italic text-slate-400">No registered address</span>}
+                    </p>
+                    <span className="text-[9.5px] text-slate-400 italic">
+                      (Supplier's business location — not used as delivery destination)
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+
+          {/* Section 2: Delivery Destination (Ship To) */}
+          <div className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 font-extrabold uppercase text-[10.5px] text-[#16845B]">
+                <MapPin className="w-3.5 h-3.5 text-[#16845B]" />
+                <span>2. Delivery Destination (Ship To)</span>
+              </div>
+              <span className="text-[10px] text-slate-500">
+                Restaurant: <strong>{activeRestaurant?.name || activeRestaurant?.restaurantName || 'SpiralDine Restaurant'}</strong>
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] font-extrabold uppercase text-slate-600 block mb-1">
+                  Receiving Branch *
+                </label>
+                <select
+                  value={selectedBranchId}
+                  onChange={e => handleBranchChange(e.target.value)}
+                  className="w-full p-2 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 focus:outline-none focus:border-[#16845B]"
+                >
+                  {branches.length > 0 ? (
+                    branches.map(b => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} {b.city ? `(${b.city})` : ''}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="main">Main Branch</option>
+                  )}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-extrabold uppercase text-slate-600 block mb-1">
+                  Expected Delivery Date
+                </label>
+                <input 
+                  type="date" 
+                  value={expectedDate}
+                  onChange={e => setExpectedDate(e.target.value)}
+                  className="w-full p-2 bg-white border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-[#16845B]"
+                />
+              </div>
+            </div>
+
             <div>
-              <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Expected Delivery Date</label>
-              <input 
-                type="date" 
-                value={expectedDate}
-                onChange={e => setExpectedDate(e.target.value)}
-                className="w-full p-2 bg-white border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-[#16845B]"
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] font-extrabold uppercase text-slate-600">
+                  Delivery Address (Where vendor must deliver) *
+                </label>
+                {(branches.length > 0 || activeRestaurant?.address) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const foundBranch = branches.find(b => b.id === selectedBranchId);
+                      const branchAddr = foundBranch ? formatAddress(foundBranch.address) : '';
+                      const restAddr = activeRestaurant ? formatAddress(activeRestaurant.address) : '';
+                      setDeliveryAddress(branchAddr || restAddr || '');
+                      toast.success('Reset to saved branch address.');
+                    }}
+                    className="text-[10px] text-[#16845B] hover:underline font-bold"
+                  >
+                    Reset to Branch Address
+                  </button>
+                )}
+              </div>
+              <textarea 
+                rows={2}
+                placeholder="Enter destination delivery address..." 
+                value={deliveryAddress}
+                onChange={e => setDeliveryAddress(e.target.value)}
+                className={`w-full p-2 bg-white border rounded-xl text-slate-800 focus:outline-none focus:border-[#16845B] ${
+                  !deliveryAddress.trim() ? 'border-amber-400 ring-1 ring-amber-200' : 'border-slate-200'
+                }`}
               />
+              {!deliveryAddress.trim() && (
+                <p className="text-[10px] font-bold text-amber-700 mt-1 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                  No saved address found for this branch. Please enter the delivery address so the vendor knows where to fulfill.
+                </p>
+              )}
             </div>
           </div>
 
@@ -823,29 +1063,18 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
             </div>
           </div>
 
-          {/* Delivery & Address */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Delivery Address</label>
-              <input 
-                type="text" 
-                placeholder="Restaurant Receiving Dock, Gate 2" 
-                value={deliveryAddress}
-                onChange={e => setDeliveryAddress(e.target.value)}
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl"
-              />
-            </div>
-            <div>
-              <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Delivery / Freight Charge (₹)</label>
-              <input 
-                type="number" 
-                min="0" 
-                step="0.01"
-                value={deliveryCharge}
-                onChange={e => setDeliveryCharge(e.target.value)}
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl font-mono"
-              />
-            </div>
+          {/* Delivery Charge */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+            <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Estimated Delivery / Freight Charge (₹)</label>
+            <input 
+              type="number" 
+              min="0" 
+              step="0.01" 
+              value={deliveryCharge}
+              onChange={e => setDeliveryCharge(e.target.value)}
+              className="w-full sm:w-1/2 p-2 bg-white border border-slate-200 rounded-xl font-mono text-slate-800 focus:outline-none focus:border-[#16845B]"
+              placeholder="0.00"
+            />
           </div>
 
           {/* Notes */}
@@ -941,12 +1170,22 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                   <h4 className="text-lg font-mono font-extrabold text-slate-900">{selectedPo.poNumber}</h4>
                   {renderStatusBadge(selectedPo.status)}
                 </div>
-                <p className="text-slate-500">Vendor: <strong>{selectedPo.supplierName}</strong> • {new Date(selectedPo.createdAt).toLocaleDateString()}</p>
+                <p className="text-slate-500">
+                  Vendor: <strong>{selectedPo.supplierName}</strong> • {new Date(selectedPo.createdAt).toLocaleDateString()}
+                </p>
                 {selectedPo.expectedDeliveryDate && (
                   <p className="text-emerald-700 font-bold mt-0.5">Expected Delivery: {selectedPo.expectedDeliveryDate}</p>
                 )}
               </div>
               <div className="flex items-center gap-2">
+                <Button 
+                  onClick={() => handlePrintPo(selectedPo)} 
+                  variant="secondary"
+                  className="text-xs font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print</span>
+                </Button>
                 <Button 
                   onClick={() => handleDispatchWhatsApp(selectedPo)} 
                   className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-1.5 px-3 rounded-lg flex items-center gap-1.5"
@@ -964,6 +1203,76 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
                 </Button>
               </div>
             </div>
+
+            {/* Address Comparison & Details Card */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Delivery Destination (Ship To) */}
+              <div className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl space-y-1">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 font-bold text-[#16845B] uppercase text-[10.5px]">
+                    <MapPin className="w-3.5 h-3.5 text-[#16845B]" />
+                    <span>Delivery Location (Ship To)</span>
+                  </div>
+                  {selectedPo.status !== 'CANCELLED' && selectedPo.status !== 'DELIVERED' && (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditAddress(selectedPo)}
+                      className="text-[10px] text-[#16845B] hover:underline font-bold flex items-center gap-0.5"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                      <span>Edit</span>
+                    </button>
+                  )}
+                </div>
+                <p className="font-semibold text-slate-900">
+                  {selectedPo.restaurantName || activeRestaurant?.name || 'SpiralDine Restaurant'} 
+                  {selectedPo.branchName ? ` — ${selectedPo.branchName}` : ''}
+                </p>
+                <p className="text-slate-600 text-[11px] leading-relaxed">
+                  {selectedPo.deliveryAddress || (
+                    <span className="italic text-amber-700">No delivery address specified</span>
+                  )}
+                </p>
+              </div>
+
+              {/* Vendor Information */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-slate-700 uppercase text-[10.5px]">
+                  <Building2 className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Vendor (Supplier Premises)</span>
+                </div>
+                <p className="font-semibold text-slate-900">{selectedPo.supplierName}</p>
+                <p className="text-slate-600 text-[11px] leading-relaxed">
+                  {selectedPo.supplierAddress || <span className="italic text-slate-400">No registered address</span>}
+                </p>
+                {selectedPo.supplierPhone && (
+                  <p className="text-slate-500 text-[10.5px]">Ph: {selectedPo.supplierPhone}</p>
+                )}
+              </div>
+            </div>
+
+            {/* Warning if delivery address matches supplier address (legacy copy issue) */}
+            {selectedPo.deliveryAddress && selectedPo.supplierAddress && 
+             selectedPo.deliveryAddress.trim().toLowerCase() === selectedPo.supplierAddress.trim().toLowerCase() && (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start justify-between gap-3 text-amber-900">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-bold text-[11px]">Notice: Delivery Address matches Vendor Business Address</p>
+                    <p className="text-[10.5px] text-amber-800">
+                      This purchase order has the supplier's address listed as the delivery location. You can update it to your restaurant branch delivery address.
+                    </p>
+                  </div>
+                </div>
+                <Button 
+                  size="sm" 
+                  onClick={() => handleOpenEditAddress(selectedPo)}
+                  className="bg-amber-600 hover:bg-amber-700 text-white text-[10.5px] font-bold px-2.5 py-1 rounded-lg shrink-0"
+                >
+                  Correct Address
+                </Button>
+              </div>
+            )}
 
             {/* Items Table */}
             <div>
@@ -1220,6 +1529,93 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
               className="bg-rose-600 hover:bg-rose-700 text-white font-bold"
             >
               Confirm Cancellation
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* MODAL 5: EDIT DELIVERY ADDRESS FOR EXISTING PO */}
+      <Modal
+        isOpen={isEditAddressOpen}
+        onClose={() => setIsEditAddressOpen(false)}
+        title={editAddressPo ? `Edit Delivery Address: ${editAddressPo.poNumber}` : 'Edit Delivery Address'}
+        className="max-w-md bg-white"
+      >
+        <div className="space-y-4 text-xs text-left">
+          <p className="text-slate-600">
+            Update the destination branch or delivery address for this purchase order. This address will be used for supplier WhatsApp messages, emails, and purchase order documents.
+          </p>
+
+          <div>
+            <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">
+              Receiving Branch
+            </label>
+            <select
+              value={editBranchId}
+              onChange={e => {
+                const bId = e.target.value;
+                setEditBranchId(bId);
+                const b = branches.find(br => br.id === bId);
+                const bName = b?.name || 'Main Branch';
+                setEditBranchName(bName);
+                const bAddr = b ? formatAddress(b.address) : '';
+                const rAddr = activeRestaurant ? formatAddress(activeRestaurant.address) : '';
+                setEditDeliveryAddress(bAddr || rAddr || '');
+              }}
+              className="w-full p-2 bg-white border border-slate-200 rounded-xl font-bold text-slate-800 focus:outline-none focus:border-[#16845B]"
+            >
+              {branches.length > 0 ? (
+                branches.map(b => (
+                  <option key={b.id} value={b.id}>
+                    {b.name} {b.city ? `(${b.city})` : ''}
+                  </option>
+                ))
+              ) : (
+                <option value="main">Main Branch</option>
+              )}
+            </select>
+          </div>
+
+          <div>
+            <div className="flex justify-between items-center mb-1">
+              <label className="text-[10px] font-extrabold uppercase text-slate-500">
+                Delivery Address *
+              </label>
+              {(branches.length > 0 || activeRestaurant?.address) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const b = branches.find(br => br.id === editBranchId);
+                    const bAddr = b ? formatAddress(b.address) : '';
+                    const rAddr = activeRestaurant ? formatAddress(activeRestaurant.address) : '';
+                    setEditDeliveryAddress(bAddr || rAddr || '');
+                    toast.success('Reset to branch address.');
+                  }}
+                  className="text-[10px] text-[#16845B] hover:underline font-bold"
+                >
+                  Use Branch Address
+                </button>
+              )}
+            </div>
+            <textarea
+              rows={3}
+              value={editDeliveryAddress}
+              onChange={e => setEditDeliveryAddress(e.target.value)}
+              placeholder="Enter complete delivery address..."
+              className="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-[#16845B]"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <Button variant="secondary" onClick={() => setIsEditAddressOpen(false)}>
+              Cancel
+            </Button>
+            <Button 
+              disabled={isUpdatingAddress || !editDeliveryAddress.trim()}
+              onClick={handleSaveEditedAddress}
+              className="bg-[#16845B] hover:bg-[#126B49] text-white font-bold"
+            >
+              {isUpdatingAddress ? 'Saving...' : 'Save Address'}
             </Button>
           </div>
         </div>

@@ -229,3 +229,24 @@ export function isWithinDaysInTimezone(isoString?: string, days: number = 7, tim
     return false;
   }
 }
+
+/**
+ * Safely formats an address whether it is stored as a string or an object.
+ */
+export function formatAddress(addr: any): string {
+  if (!addr) return '';
+  if (typeof addr === 'string') return addr.trim();
+  if (typeof addr === 'object') {
+    const parts = [
+      addr.street || addr.addressLine1 || '',
+      addr.city || '',
+      addr.state || '',
+      addr.zipCode || addr.postalCode || '',
+      addr.country || ''
+    ]
+      .map(p => (typeof p === 'string' ? p.trim() : ''))
+      .filter(Boolean);
+    return parts.join(', ');
+  }
+  return String(addr).trim();
+}

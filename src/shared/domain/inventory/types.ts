@@ -136,6 +136,7 @@ export interface IPurchaseOrder {
   id: string;
   poNumber: string; // e.g. "PO-20261026-001"
   tenantId: string;
+  restaurantName?: string;
   branchId?: string;
   branchName?: string;
   supplierId: string;

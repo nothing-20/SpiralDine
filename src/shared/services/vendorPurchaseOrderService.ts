@@ -270,6 +270,7 @@ export const vendorPurchaseOrderService = {
       supplierEmail?: string;
       supplierAddress?: string;
       supplierGstNumber?: string;
+      restaurantName?: string;
       branchId?: string;
       branchName?: string;
       items: Array<{
@@ -328,6 +329,7 @@ export const vendorPurchaseOrderService = {
       id: poId,
       poNumber,
       tenantId,
+      restaurantName: data.restaurantName || 'SpiralDine Restaurant',
       branchId: data.branchId || '',
       branchName: data.branchName || 'Main Branch',
       supplierId: data.supplierId,
@@ -555,6 +557,54 @@ export const vendorPurchaseOrderService = {
       title: `Purchase Order ${po.poNumber} Cancelled`,
       description: `Cancelled with reason: ${reason}.`,
       metadata: { poId, poNumber: po.poNumber, reason }
+    });
+  },
+
+  updatePurchaseOrderDeliveryAddress: async (
+    tenantId: string,
+    poId: string,
+    deliveryAddress: string,
+    branchId?: string,
+    branchName?: string,
+    user?: any
+  ): Promise<void> => {
+    const docRef = doc(db, 'restaurants', tenantId, 'purchaseOrders', poId);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      throw new Error(`Purchase order ${poId} not found.`);
+    }
+
+    const currentPo = snap.data() as IPurchaseOrder;
+    const timestamp = new Date().toISOString();
+    const userName = user?.displayName || user?.name || user?.email || 'Owner';
+
+    const updates: Partial<IPurchaseOrder> = {
+      deliveryAddress: deliveryAddress.trim(),
+      updatedAt: timestamp
+    };
+
+    if (branchId) updates.branchId = branchId;
+    if (branchName) updates.branchName = branchName;
+
+    const auditLog = currentPo.auditLog || [];
+    auditLog.push({
+      action: 'DELIVERY_ADDRESS_UPDATED',
+      timestamp,
+      performedBy: userName,
+      notes: `Delivery address updated to: ${deliveryAddress.trim()}${branchName ? ` (${branchName})` : ''}`
+    });
+    updates.auditLog = auditLog;
+
+    await updateDoc(docRef, updates);
+
+    logEvent(tenantId, {
+      eventType: 'Purchase Order Updated',
+      eventCategory: 'Management',
+      performedBy: userName,
+      performedByRole: user?.role || 'owner',
+      title: `Purchase Order ${currentPo.poNumber} Address Updated`,
+      description: `Delivery address updated for ${currentPo.poNumber}.`,
+      metadata: { poId, poNumber: currentPo.poNumber, deliveryAddress: deliveryAddress.trim() }
     });
   },
 
@@ -933,15 +983,17 @@ export const vendorPurchaseOrderService = {
   // ==========================================
 
   formatPoWhatsAppMessage: (po: IPurchaseOrder, restaurantName: string = 'SpiralDine Restaurant'): string => {
-    let msg = `*PURCHASE ORDER: ${po.poNumber}*\n`;
-    msg += `*From:* ${restaurantName}${po.branchName ? ` (${po.branchName})` : ''}\n`;
+    const effectiveRestName = po.restaurantName || restaurantName;
+    const branchLabel = po.branchName ? ` — ${po.branchName}` : '';
+    let msg = `*PURCHASE ORDER: ${po.poNumber}*\n\n`;
+    msg += `*From:* ${effectiveRestName}${branchLabel}\n`;
     msg += `*To:* ${po.supplierName}\n`;
+    if (po.deliveryAddress) {
+      msg += `*Delivery Address:* ${po.deliveryAddress}\n`;
+    }
     msg += `*Date:* ${new Date(po.createdAt).toLocaleDateString()}\n`;
     if (po.expectedDeliveryDate) {
       msg += `*Expected Delivery:* ${po.expectedDeliveryDate}\n`;
-    }
-    if (po.deliveryAddress) {
-      msg += `*Delivery Address:* ${po.deliveryAddress}\n`;
     }
     msg += `------------------------------------\n`;
     msg += `*ORDERED ITEMS:*\n`;
@@ -970,8 +1022,9 @@ export const vendorPurchaseOrderService = {
   },
 
   formatPoEmailContent: (po: IPurchaseOrder, restaurantName: string = 'SpiralDine Restaurant'): { subject: string; text: string; html: string } => {
-    const subject = `Purchase Order ${po.poNumber} from ${restaurantName}`;
-    const text = vendorPurchaseOrderService.formatPoWhatsAppMessage(po, restaurantName);
+    const effectiveRestName = po.restaurantName || restaurantName;
+    const subject = `Purchase Order ${po.poNumber} from ${effectiveRestName}`;
+    const text = vendorPurchaseOrderService.formatPoWhatsAppMessage(po, effectiveRestName);
 
     const itemsRows = po.items.map((item, idx) => `
       <tr style="border-bottom: 1px solid #E2E8F0;">
@@ -985,15 +1038,24 @@ export const vendorPurchaseOrderService = {
     const html = `
       <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #E2E8F0; border-radius: 12px; background: #FFFFFF;">
         <div style="border-bottom: 2px solid #16845B; padding-bottom: 16px; margin-bottom: 20px;">
-          <h2 style="margin: 0; color: #16845B;">${restaurantName}</h2>
+          <h2 style="margin: 0; color: #16845B;">${effectiveRestName}${po.branchName ? ` — ${po.branchName}` : ''}</h2>
           <h3 style="margin: 4px 0 0; color: #0F172A;">Purchase Order: ${po.poNumber}</h3>
           <p style="margin: 4px 0 0; color: #64748B; font-size: 13px;">Date: ${new Date(po.createdAt).toLocaleDateString()}</p>
         </div>
 
-        <div style="margin-bottom: 20px; font-size: 14px; color: #334155;">
-          <p style="margin: 2px 0;"><strong>Vendor:</strong> ${po.supplierName}</p>
-          ${po.expectedDeliveryDate ? `<p style="margin: 2px 0;"><strong>Expected Delivery:</strong> ${po.expectedDeliveryDate}</p>` : ''}
-          ${po.deliveryAddress ? `<p style="margin: 2px 0;"><strong>Delivery Address:</strong> ${po.deliveryAddress}</p>` : ''}
+        <div style="margin-bottom: 20px; font-size: 14px; color: #334155; display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div style="background: #F8FAFC; padding: 12px; border-radius: 8px; border: 1px solid #E2E8F0;">
+            <p style="margin: 0 0 4px; font-weight: bold; color: #16845B; text-transform: uppercase; font-size: 11px;">Delivery Location (Ship To):</p>
+            <p style="margin: 2px 0; font-weight: 600; color: #0F172A;">${effectiveRestName} ${po.branchName ? `(${po.branchName})` : ''}</p>
+            <p style="margin: 2px 0; color: #475569;">${po.deliveryAddress || 'Address to be confirmed'}</p>
+            ${po.expectedDeliveryDate ? `<p style="margin: 6px 0 0; font-size: 12px; color: #16845B;"><strong>Expected Delivery:</strong> ${po.expectedDeliveryDate}</p>` : ''}
+          </div>
+          <div style="background: #F8FAFC; padding: 12px; border-radius: 8px; border: 1px solid #E2E8F0;">
+            <p style="margin: 0 0 4px; font-weight: bold; color: #64748B; text-transform: uppercase; font-size: 11px;">Vendor (Supplier):</p>
+            <p style="margin: 2px 0; font-weight: 600; color: #0F172A;">${po.supplierName}</p>
+            ${po.supplierAddress ? `<p style="margin: 2px 0; color: #475569;">${po.supplierAddress}</p>` : ''}
+            ${po.supplierPhone ? `<p style="margin: 2px 0; font-size: 12px; color: #64748B;">Ph: ${po.supplierPhone}</p>` : ''}
+          </div>
         </div>
 
         <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
