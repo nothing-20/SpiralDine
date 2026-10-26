@@ -48,12 +48,16 @@ import {
   CheckCircle,
   HelpCircle,
   FileText,
-  Star
+  Star,
+  ShoppingCart
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 import { IStockIngredient, IRecipe, IStockMovement, ISupplier, IPurchaseSuggestion, IWasteLog } from '../../../shared/domain/inventory/types';
 import { useCurrency } from '../../../context/CurrencyContext';
+import { VendorDirectoryTab } from '../inventory/VendorDirectoryTab';
+import { PurchaseOrdersTab } from '../inventory/PurchaseOrdersTab';
+import { vendorPurchaseOrderService } from '../../../shared/services/vendorPurchaseOrderService';
 
 export const OwnerInventoryManager: React.FC = () => {
   const { user } = useAuth();
@@ -64,7 +68,7 @@ export const OwnerInventoryManager: React.FC = () => {
   const [activeTab, setActiveTab] = useState(() => {
     const path = window.location.pathname;
     if (path.includes('purchase-orders')) {
-      return 'suggestions';
+      return 'purchase-orders';
     }
     return 'overview';
   });
@@ -1039,13 +1043,26 @@ export const OwnerInventoryManager: React.FC = () => {
     }
   };
 
+  const handleConvertSuggestionToPO = async (sug: IPurchaseSuggestion) => {
+    if (!tenantId) return;
+    try {
+      const po = await vendorPurchaseOrderService.createDraftPoFromSuggestion(tenantId, sug, user);
+      toast.success(`Draft Purchase Order ${po.poNumber} created for ${sug.ingredientName}!`);
+      setActiveTab('purchase-orders');
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e.message || 'Failed to generate PO from suggestion.');
+    }
+  };
+
   // Nav tabs config
   const navTabs = [
     { id: 'overview', label: 'Overview', icon: TrendingUp },
     { id: 'ingredients', label: 'Ingredients list', icon: Package },
     { id: 'recipes', label: 'Recipes map', icon: BookOpen },
     { id: 'movements', label: 'Movements Log', icon: FileText },
-    { id: 'suppliers', label: 'Suppliers', icon: Truck },
+    { id: 'suppliers', label: 'Vendor Directory', icon: Truck },
+    { id: 'purchase-orders', label: 'Purchase Orders', icon: ShoppingCart },
     { id: 'lowstock', label: 'Low Stock warnings', icon: AlertOctagon },
     { id: 'expiry', label: 'Expiry monitor', icon: Calendar },
     { id: 'waste', label: 'Waste Logs', icon: Trash },
@@ -1637,97 +1654,18 @@ export const OwnerInventoryManager: React.FC = () => {
         </div>
       )}
 
-      {/* Suppliers tab */}
+      {/* Vendor Directory Tab */}
       {activeTab === 'suppliers' && (
-        <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Registered Supplier Matrix</h3>
-            <Button onClick={handleOpenAddSupplier} className="text-xs font-bold py-1.5 px-3">
-              <Plus className="w-3.5 h-3.5 mr-1" />
-              <span>Add Supplier</span>
-            </Button>
-          </div>
+        <VendorDirectoryTab suppliers={suppliers} ingredients={ingredients} />
+      )}
 
-          {suppliers.length === 0 ? (
-            <Card className="p-8 text-center border border-dashed border-slate-850 rounded-2xl bg-slate-900/10">
-              <AlertTriangle className="w-10 h-10 text-slate-700 mx-auto mb-2" />
-              <p className="text-sm font-semibold text-slate-450">No suppliers logged.</p>
-            </Card>
-          ) : (
-            <Card className="p-0 overflow-hidden border-slate-850">
-              <Table
-                 keyExtractor={(row: ISupplier) => row?.id || Math.random().toString()}
-                data={suppliers}
-                columns={[
-                  {
-                    header: 'Supplier Details',
-                    accessor: (row: ISupplier) => (
-                      <div>
-                        <span className="font-bold text-textPearl text-sm block">{row?.name || 'Unnamed'}</span>
-                        {row?.companyName || row?.gstNumber ? (
-                          <span className="text-[10px] text-slate-500 font-semibold block mt-0.5">
-                            {row?.companyName && `Co: ${row.companyName}`} {row?.gstNumber && ` • GST: ${row.gstNumber}`}
-                          </span>
-                        ) : null}
-                      </div>
-                    )
-                  },
-                  {
-                    header: 'Contact Details',
-                    accessor: (row: ISupplier) => (
-                      <div className="space-y-0.5">
-                        <span className="text-slate-350 font-semibold block">{row?.phone || 'No phone'}</span>
-                        <span className="text-[10px] text-slate-550 block font-semibold">{row?.email || 'No email'}</span>
-                      </div>
-                    )
-                  },
-                  {
-                    header: 'Delivery & Payment',
-                    accessor: (row: ISupplier) => (
-                      <div className="space-y-0.5">
-                        <span className="text-slate-350 font-semibold block">{row?.deliveryTimeDays !== undefined ? `${row.deliveryTimeDays} days` : 'N/A'} ({row?.deliverySchedule || 'Weekly'})</span>
-                        <span className="text-[10px] text-slate-500 block font-semibold">Terms: {row?.paymentTerms || 'COD'}</span>
-                      </div>
-                    )
-                  },
-                  {
-                    header: 'Supplier Rating',
-                    accessor: (row: ISupplier) => (
-                      <div className="flex items-center space-x-1">
-                        {[1, 2, 3, 4, 5].map(star => (
-                          <Star key={star} className={`w-3.5 h-3.5 ${star <= (row?.rating || 0) ? 'text-amber-500 fill-current' : 'text-slate-700'}`} />
-                        ))}
-                      </div>
-                    )
-                  },
-                  {
-                    header: 'Actions',
-                    accessor: (row: ISupplier) => (
-                      <div className="flex items-center space-x-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleOpenEditSupplier(row)}
-                          className="p-1 text-slate-400 hover:text-primary hover:bg-slate-800/50"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleOpenDeleteSupplier(row.id)}
-                          className="p-1 text-slate-450 hover:text-red-500 hover:bg-red-500/10"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
-                      </div>
-                    )
-                  }
-                ]}
-              />
-            </Card>
-          )}
-        </div>
+      {/* Purchase Orders Tab */}
+      {activeTab === 'purchase-orders' && (
+        <PurchaseOrdersTab 
+          suppliers={suppliers} 
+          ingredients={ingredients} 
+          onNavigateToSuppliers={() => setActiveTab('suppliers')} 
+        />
       )}
 
       {/* Low Stock tab */}
@@ -1915,16 +1853,37 @@ export const OwnerInventoryManager: React.FC = () => {
       {/* Suggestions tab */}
       {activeTab === 'suggestions' && (
         <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Replenishment Suggestions</h3>
-            <Button
-              onClick={handleGenerateLocalSuggestions}
-              className="text-xs font-bold py-1.5 px-3 bg-slate-800 border border-slate-750 text-slate-300 hover:text-textPearl flex items-center gap-1.5"
-            >
-              <RefreshCcw className="w-3.5 h-3.5" />
-              <span>Optimize suggestions</span>
-            </Button>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div>
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Replenishment Suggestions</h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">Calculated automatically when ingredient stock falls to or below reorder levels (Target: Max Stock - Current Stock).</p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => setActiveTab('purchase-orders')}
+                className="text-xs font-bold py-1.5 px-3 bg-[#16845B] hover:bg-[#126B49] text-white flex items-center gap-1.5 rounded-xl shadow-xs"
+              >
+                <ShoppingCart className="w-3.5 h-3.5" />
+                <span>View Purchase Orders</span>
+              </Button>
+              <Button
+                onClick={handleGenerateLocalSuggestions}
+                className="text-xs font-bold py-1.5 px-3 bg-slate-800 border border-slate-750 text-slate-300 hover:text-textPearl flex items-center gap-1.5 rounded-xl"
+              >
+                <RefreshCcw className="w-3.5 h-3.5" />
+                <span>Optimize suggestions</span>
+              </Button>
+            </div>
           </div>
+
+          <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex items-start gap-3">
+            <Sparkles className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+            <div className="text-xs text-emerald-950">
+              <strong className="font-extrabold block mb-0.5">Automated Procurement Workflow</strong>
+              <span>You can convert any replenishment recommendation directly into a draft <strong>Purchase Order</strong> to negotiate, dispatch via WhatsApp/Email, and track partial receipts. Alternatively, click <strong>Direct Restock</strong> to quickly check in emergency store purchases.</span>
+            </div>
+          </div>
+
           {suggestions.length === 0 ? (
             <Card className="p-8 text-center border border-dashed border-slate-850 rounded-2xl bg-slate-900/10">
               <Sparkles className="w-10 h-10 text-slate-700 mx-auto mb-2 animate-pulse" />
@@ -1945,7 +1904,12 @@ export const OwnerInventoryManager: React.FC = () => {
                 columns={[
                   {
                     header: 'Replenishment Ingredient',
-                    accessor: (row: IPurchaseSuggestion) => <span className="font-bold text-textPearl">{row?.ingredientName || 'Unknown Ingredient'}</span>
+                    accessor: (row: IPurchaseSuggestion) => (
+                      <div className="space-y-0.5">
+                        <span className="font-bold text-textPearl block">{row?.ingredientName || 'Unknown Ingredient'}</span>
+                        <span className="text-[10px] text-slate-500 font-medium block">ID: {row?.ingredientId}</span>
+                      </div>
+                    )
                   },
                   {
                     header: 'Recommended Order Qty',
@@ -1980,11 +1944,19 @@ export const OwnerInventoryManager: React.FC = () => {
                     header: 'Actions',
                     accessor: (row: IPurchaseSuggestion) => (
                       <div className="flex items-center space-x-2">
+                        <Button
+                          size="sm"
+                          onClick={() => handleConvertSuggestionToPO(row)}
+                          className="text-[10.5px] font-bold py-1 px-2.5 bg-[#16845B] hover:bg-[#126B49] text-white flex items-center gap-1 rounded-lg shadow-xs"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Create PO</span>
+                        </Button>
                         {row?.status === 'pending' ? (
                           <Button
                             size="sm"
                             onClick={() => handleMarkSuggestionOrdered(row?.id)}
-                            className="text-[10px] font-bold py-1 px-2.5 bg-slate-800 border border-slate-750 text-slate-300 hover:text-textPearl"
+                            className="text-[10px] font-bold py-1 px-2 bg-slate-800 border border-slate-750 text-slate-300 hover:text-textPearl rounded-lg"
                           >
                             Mark Ordered
                           </Button>
@@ -1992,9 +1964,9 @@ export const OwnerInventoryManager: React.FC = () => {
                           <Button
                             size="sm"
                             onClick={() => handleCompleteSuggestion(row)}
-                            className="text-[10px] font-bold py-1 px-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-background"
+                            className="text-[10px] font-bold py-1 px-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-background rounded-lg"
                           >
-                            Receive Stock
+                            Direct Restock
                           </Button>
                         )}
                       </div>

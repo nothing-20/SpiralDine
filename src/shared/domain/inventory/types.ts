@@ -73,6 +73,130 @@ export interface ISupplier {
   gstNumber?: string;
   paymentTerms?: string;
   deliverySchedule?: string;
+  // Additive vendor directory enhancements
+  contactPerson?: string;
+  notes?: string;
+  isActive?: boolean;
+  branchIds?: string[];
+  createdAt?: string;
+  createdBy?: string;
+  updatedBy?: string;
+}
+
+export interface ISupplierPrice {
+  id: string; // Composite key or doc ID: `${supplierId}_${ingredientId}`
+  supplierId: string;
+  supplierName: string;
+  ingredientId: string;
+  ingredientName: string;
+  unitPrice: number; // in cents / base unit
+  currency?: string;
+  purchaseUnit: string;
+  minOrderQuantity?: number;
+  leadTimeDays?: number;
+  isPreferred?: boolean;
+  effectiveFrom: string; // ISO date
+  effectiveTo?: string; // Optional end date
+  notes?: string;
+  priceHistory?: Array<{
+    price: number;
+    effectiveFrom: string;
+    changedAt: string;
+    changedBy?: string;
+    reason?: string;
+  }>;
+  updatedAt: string;
+}
+
+export interface IPurchaseOrderItem {
+  ingredientId: string;
+  ingredientName: string;
+  unit: string;
+  quantity: number;
+  unitPrice: number; // in cents
+  taxRate?: number; // e.g. 5 for 5%
+  lineTotal: number; // quantity * unitPrice
+  receivedQuantity: number;
+  notes?: string;
+}
+
+export type PurchaseOrderStatus = 
+  | 'DRAFT' 
+  | 'SENT' 
+  | 'CONFIRMED' 
+  | 'PARTIALLY_RECEIVED' 
+  | 'DELIVERED' 
+  | 'CANCELLED';
+
+export interface IPurchaseOrder {
+  id: string;
+  poNumber: string; // e.g. "PO-20261026-001"
+  tenantId: string;
+  branchId?: string;
+  branchName?: string;
+  supplierId: string;
+  supplierName: string;
+  supplierPhone?: string;
+  supplierEmail?: string;
+  supplierAddress?: string;
+  supplierGstNumber?: string;
+  items: IPurchaseOrderItem[];
+  status: PurchaseOrderStatus;
+  subtotal: number; // in cents
+  taxTotal: number; // in cents
+  deliveryCharge?: number; // in cents
+  grandTotal: number; // in cents
+  expectedDeliveryDate?: string;
+  deliveryAddress?: string;
+  supplierInstructions?: string;
+  internalNotes?: string;
+  createdAt: string;
+  createdBy: string;
+  createdByName: string;
+  updatedAt: string;
+  sentAt?: string;
+  sentVia?: 'whatsapp' | 'email' | 'manual' | 'pdf';
+  confirmedAt?: string;
+  cancelledAt?: string;
+  cancellationReason?: string;
+  receiptCount?: number;
+  auditLog?: Array<{
+    action: string;
+    timestamp: string;
+    performedBy: string;
+    notes?: string;
+  }>;
+}
+
+export interface IGoodsReceiptItem {
+  ingredientId: string;
+  ingredientName: string;
+  unit: string;
+  quantityOrdered: number;
+  quantityPreviouslyReceived: number;
+  quantityReceived: number;
+  quantityRejected?: number;
+  batchNumber?: string;
+  expiryDate?: string;
+  discrepancyReason?: string;
+}
+
+export interface IGoodsReceipt {
+  id: string;
+  receiptNumber: string; // e.g. "GRN-20261026-001"
+  poId: string;
+  poNumber: string;
+  tenantId: string;
+  branchId?: string;
+  supplierId: string;
+  supplierName: string;
+  supplierInvoiceNumber?: string;
+  invoiceDate?: string;
+  items: IGoodsReceiptItem[];
+  receivedAt: string;
+  receivedBy: string;
+  receivedByName: string;
+  notes?: string;
 }
 
 export interface IPurchaseSuggestion {
