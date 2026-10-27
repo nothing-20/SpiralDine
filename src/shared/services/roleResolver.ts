@@ -11,7 +11,7 @@ export interface IResolvedUserProfile {
   tenantId: string;
   branchId?: string;
   department?: string;
-  status?: 'active' | 'inactive';
+  status?: 'active' | 'inactive' | 'pending_approval' | 'rejected' | 'more_info_required';
   phoneNumber?: string;
   createdAt: string;
 }

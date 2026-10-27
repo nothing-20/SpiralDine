@@ -22,6 +22,11 @@ export const PublicGuard: React.FC = () => {
       return <Navigate to="/super-admin/dashboard" replace />;
     }
 
+    // If account application is pending approval or reviewed with feedback
+    if (user.status && ['pending_approval', 'rejected', 'more_info_required'].includes(user.status)) {
+      return <Navigate to="/application-pending" replace />;
+    }
+
     const isOwnerOrAdmin = ['owner', 'admin'].includes(role);
     const path = location.pathname;
 

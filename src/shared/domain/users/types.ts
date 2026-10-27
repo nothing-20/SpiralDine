@@ -8,7 +8,7 @@ export interface IUser {
   displayName: string;
   tenantId: string;
   role: TUserRole;
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'pending_approval' | 'rejected' | 'more_info_required';
   phoneNumber?: string;
   isAnonymous?: boolean;
   createdAt: string;

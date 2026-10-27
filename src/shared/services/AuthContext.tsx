@@ -107,7 +107,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     displayName: data.fullName || data.displayName || fUser.displayName || (resolvedRole === 'customer' ? 'Customer' : 'User'),
                     tenantId: data.tenantId || '',
                     role: resolvedRole,
-                    status: (data.status === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
+                    status: (['inactive', 'pending_approval', 'rejected', 'more_info_required'].includes(data.status) ? data.status : 'active') as any,
                     phoneNumber: data.phoneNumber || data.phone || '',
                     createdAt: data.createdAt || fUser.metadata.creationTime || new Date().toISOString()
                   };
@@ -135,7 +135,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                       displayName: profile.displayName,
                       tenantId: profile.tenantId,
                       role: resolvedRole,
-                      status: (profile.status === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
+                      status: (['inactive', 'pending_approval', 'rejected', 'more_info_required'].includes(profile.status as string) ? (profile.status as any) : 'active'),
                       phoneNumber: profile.phoneNumber || '',
                       createdAt: profile.createdAt
                     };

@@ -102,11 +102,8 @@ export const RegisterForm: React.FC = () => {
         locale
       );
       
-      addToast('Restaurant registered successfully!', 'success');
-      
-      // Direct route to dashboard
-      const destination = getDashboardRoute('owner');
-      navigate(destination, { replace: true });
+      addToast('Application submitted! Your restaurant registration is pending administrator approval.', 'info');
+      navigate('/application-pending', { replace: true });
     } catch (err: any) {
       console.error(err);
       addToast(err.message || 'Registration failed. Please check parameters.', 'error');

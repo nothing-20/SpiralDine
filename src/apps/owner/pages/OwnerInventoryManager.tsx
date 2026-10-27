@@ -15,6 +15,7 @@ import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { formatPrice } from '../../../shared/utils/format';
 import { inventoryService } from '../../../shared/services/inventoryService';
+import { getMenuItemPath } from '../../../firebase/collections';
 
 // UI Kit components
 import Button from '../../../components/ui/Button/Button';
@@ -48,12 +49,26 @@ import {
   CheckCircle,
   HelpCircle,
   FileText,
-  Star
+  Star,
+  ShoppingCart
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-import { IStockIngredient, IRecipe, IStockMovement, ISupplier, IPurchaseSuggestion, IWasteLog } from '../../../shared/domain/inventory/types';
+import { 
+  IStockIngredient, 
+  IRecipe, 
+  IStockMovement, 
+  ISupplier, 
+  IPurchaseSuggestion, 
+  IWasteLog,
+  IGoodsReceipt,
+  IPurchaseOrder,
+  ISupplierPrice
+} from '../../../shared/domain/inventory/types';
 import { useCurrency } from '../../../context/CurrencyContext';
+import { VendorDirectoryTab } from '../inventory/VendorDirectoryTab';
+import { PurchaseOrdersTab } from '../inventory/PurchaseOrdersTab';
+import { vendorPurchaseOrderService } from '../../../shared/services/vendorPurchaseOrderService';
 
 export const OwnerInventoryManager: React.FC = () => {
   const { user } = useAuth();
@@ -64,7 +79,7 @@ export const OwnerInventoryManager: React.FC = () => {
   const [activeTab, setActiveTab] = useState(() => {
     const path = window.location.pathname;
     if (path.includes('purchase-orders')) {
-      return 'suggestions';
+      return 'purchase-orders';
     }
     return 'overview';
   });
@@ -77,6 +92,15 @@ export const OwnerInventoryManager: React.FC = () => {
   const [suggestions, setSuggestions] = useState<IPurchaseSuggestion[]>([]);
   const [wasteLogs, setWasteLogs] = useState<IWasteLog[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
+  const [isMenuItemsLoading, setIsMenuItemsLoading] = useState(true);
+  const [menuItemsError, setMenuItemsError] = useState<string | null>(null);
+  const [menuItemsReloadCounter, setMenuItemsReloadCounter] = useState(0);
+  const [goodsReceipts, setGoodsReceipts] = useState<IGoodsReceipt[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<IPurchaseOrder[]>([]);
+  const [supplierPrices, setSupplierPrices] = useState<ISupplierPrice[]>([]);
+  const [selectedFyStartYear, setSelectedFyStartYear] = useState<number>(() => {
+    return vendorPurchaseOrderService.getFinancialYearBoundaries().startYear;
+  });
   const [isLoading, setIsLoading] = useState(true);
 
   // Filter States
@@ -154,6 +178,11 @@ export const OwnerInventoryManager: React.FC = () => {
   const [movementCustomEnd, setMovementCustomEnd] = useState('');
   const [selectedMovement, setSelectedMovement] = useState<IStockMovement | null>(null);
 
+  // Quick PO Creation from Ingredients List State
+  const [selectedIngredientIds, setSelectedIngredientIds] = useState<string[]>([]);
+  const [poPrefillIngredients, setPoPrefillIngredients] = useState<IStockIngredient[]>([]);
+  const [initialCreateOpen, setInitialCreateOpen] = useState(false);
+
   // Categories definition
   const categories = [
     { value: 'all', label: 'All Categories' },
@@ -229,13 +258,53 @@ export const OwnerInventoryManager: React.FC = () => {
       setWasteLogs(list);
     });
 
-    // Menu Items listener (real-time)
-    const unsubMenuItems = onSnapshot(collection(db, 'restaurants', tenantId, 'menuItems'), (snap) => {
-      const list: any[] = [];
+    // Menu Items listener (real-time from canonical path)
+    setIsMenuItemsLoading(true);
+    setMenuItemsError(null);
+    const unsubMenuItems = onSnapshot(
+      collection(db, getMenuItemPath(tenantId)),
+      (snap) => {
+        const list: any[] = [];
+        snap.forEach(docSnap => {
+          list.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        setMenuItems(list);
+        setIsMenuItemsLoading(false);
+        setMenuItemsError(null);
+      },
+      (err) => {
+        console.error('Menu items listener error:', err);
+        setMenuItemsError(err.message || 'Failed to load menu items');
+        setIsMenuItemsLoading(false);
+      }
+    );
+
+    // Goods Receipts listener (authoritative received goods expenditure)
+    const unsubReceipts = onSnapshot(collection(db, 'restaurants', tenantId, 'goodsReceipts'), (snap) => {
+      const list: IGoodsReceipt[] = [];
       snap.forEach(docSnap => {
-        list.push({ id: docSnap.id, ...docSnap.data() });
+        list.push({ id: docSnap.id, ...docSnap.data() } as IGoodsReceipt);
       });
-      setMenuItems(list);
+      list.sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime());
+      setGoodsReceipts(list);
+    });
+
+    // Purchase Orders listener
+    const unsubPOs = onSnapshot(collection(db, 'restaurants', tenantId, 'purchaseOrders'), (snap) => {
+      const list: IPurchaseOrder[] = [];
+      snap.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as IPurchaseOrder);
+      });
+      setPurchaseOrders(list);
+    });
+
+    // Supplier Prices listener
+    const unsubPrices = onSnapshot(collection(db, 'restaurants', tenantId, 'supplierPrices'), (snap) => {
+      const list: ISupplierPrice[] = [];
+      snap.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() } as ISupplierPrice);
+      });
+      setSupplierPrices(list);
     });
 
     setIsLoading(false);
@@ -248,8 +317,11 @@ export const OwnerInventoryManager: React.FC = () => {
       unsubSuggestions();
       unsubWaste();
       unsubMenuItems();
+      unsubReceipts();
+      unsubPOs();
+      unsubPrices();
     };
-  }, [tenantId]);
+  }, [tenantId, menuItemsReloadCounter]);
 
   // Derived stock overview metrics
   const stockMetrics = useMemo(() => {
@@ -282,7 +354,9 @@ export const OwnerInventoryManager: React.FC = () => {
       (item.availableServings ?? 0) === 0
     ).length;
 
-    const value = ingredients.reduce((sum, item) => sum + (Number(item.currentStock) * (Number(item.purchaseCost) || 0)), 0);
+    // 1. Authoritative Kitchen Stock Value calculation
+    const stockValuation = vendorPurchaseOrderService.calculateKitchenStockValue(ingredients, supplierPrices);
+    const value = stockValuation.totalValue;
 
     const todayStr = new Date().toISOString().split('T')[0];
     const soonDate = new Date();
@@ -292,37 +366,70 @@ export const OwnerInventoryManager: React.FC = () => {
     const expired = ingredients.filter(i => i.expiryDate && i.expiryDate < todayStr).length;
     const expiringSoon = ingredients.filter(i => i.expiryDate && i.expiryDate >= todayStr && i.expiryDate <= soonStr).length;
 
-    // Total loss to spoilage/waste this week
+    // Total loss to spoilage/waste recorded
     const wasteCost = wasteLogs.reduce((sum, item) => sum + (item.valueLost || 0), 0);
 
-    // Advanced Operational Metrics
-    const todayConsumptionCount = movements
-      .filter(m => m.type === 'consumption' && new Date(m.timestamp).toDateString() === new Date().toDateString())
-      .reduce((sum, m) => sum + Math.abs(m.quantity), 0);
+    // Advanced Operational Metrics: Today's Consumption
+    const now = new Date();
+    const todayMovements = movements.filter(m => {
+      if (m.type !== 'consumption') return false;
+      const mDate = new Date(m.timestamp);
+      return mDate.toDateString() === now.toDateString();
+    });
 
-    const todayConsumptionVal = movements
-      .filter(m => m.type === 'consumption' && new Date(m.timestamp).toDateString() === new Date().toDateString())
-      .reduce((sum, m) => {
-        const ing = ingredients.find(i => i.id === m.ingredientId);
-        return sum + (Math.abs(m.quantity) * (ing?.purchaseCost || 0));
-      }, 0);
+    const todayConsumptionCount = todayMovements.reduce((sum, m) => sum + Math.abs(m.quantity), 0);
+    const todayConsumptionVal = todayMovements.reduce((sum, m) => {
+      const ing = ingredients.find(i => i.id === m.ingredientId);
+      const unitCost = ing?.purchaseCost || 0;
+      return sum + Math.round(Math.abs(m.quantity) * unitCost);
+    }, 0);
 
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0,0,0,0);
-    const startM = startOfMonth.getTime();
-    const monthlyPurchases = movements
-      .filter(m => m.type === 'purchase' && new Date(m.timestamp).getTime() >= startM)
-      .reduce((sum, m) => {
-        const ing = ingredients.find(i => i.id === m.ingredientId);
-        const cost = ing ? (ing.purchaseCost || 0) : 0;
-        return sum + (Math.abs(m.quantity) * cost);
-      }, 0);
+    // 2. Authoritative Monthly Purchases (Current Month)
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const monthlyStats = vendorPurchaseOrderService.calculatePurchasesForPeriod(
+      goodsReceipts,
+      movements,
+      startOfMonth,
+      endOfMonth
+    );
+    const monthlyPurchases = monthlyStats.totalValue;
+    const monthlyReceiptsCount = monthlyStats.receiptCount;
 
+    // 3. Authoritative Annual Purchases for Selected Financial Year
+    const fyBoundaries = vendorPurchaseOrderService.getFinancialYearBoundaries(selectedFyStartYear);
+    const annualStats = vendorPurchaseOrderService.calculatePurchasesForPeriod(
+      goodsReceipts,
+      movements,
+      fyBoundaries.startDate,
+      fyBoundaries.endDate
+    );
+    const prevAnnualStats = vendorPurchaseOrderService.calculatePurchasesForPeriod(
+      goodsReceipts,
+      movements,
+      fyBoundaries.prevStartDate,
+      fyBoundaries.prevEndDate
+    );
+
+    const annualPurchases = annualStats.totalValue;
+    const annualReceiptsCount = annualStats.receiptCount;
+    const prevAnnualPurchases = prevAnnualStats.totalValue;
+
+    // YoY % change (null if no previous year data to avoid misleading comparison)
+    const annualYoyChangePct = prevAnnualPurchases > 0
+      ? Math.round(((annualPurchases - prevAnnualPurchases) / prevAnnualPurchases) * 100)
+      : null;
+
+    // 4. Inventory Accuracy
     const adjustmentsCount = movements.filter(m => m.type === 'adjustment' || m.type === 'manual_correction').length;
-    const inventoryAccuracy = Math.max(70, 100 - (adjustmentsCount * 2));
+    const auditVerified = adjustmentsCount > 0 || movements.length > 0;
+    const inventoryAccuracy = auditVerified ? Math.max(70, 100 - (adjustmentsCount * 2)) : 100;
+    const accuracyStatus = !auditVerified ? 'Unverified' : `${inventoryAccuracy}%`;
 
-    const turnoverRatio = value > 0 ? Number(((wasteCost + Math.abs(todayConsumptionVal) * 30) / value).toFixed(2)) : 0.00;
+    // 5. Turnover Index: Cost of Goods Consumed (monthly annualized) / Kitchen Stock Value
+    const turnoverRatio = value > 0 
+      ? Number(((wasteCost + Math.abs(todayConsumptionVal) * 30) / value).toFixed(2)) 
+      : 0.00;
 
     return { 
       total, 
@@ -332,15 +439,25 @@ export const OwnerInventoryManager: React.FC = () => {
       lowBatch, 
       outBatch,
       value, 
+      stockValuation,
       expired, 
       expiringSoon, 
       wasteCost,
       todayConsumptionCount,
+      todayConsumptionVal,
       monthlyPurchases,
+      monthlyReceiptsCount,
+      annualPurchases,
+      annualReceiptsCount,
+      prevAnnualPurchases,
+      annualYoyChangePct,
+      fyLabel: fyBoundaries.label,
+      prevFyLabel: fyBoundaries.prevLabel,
       inventoryAccuracy,
+      accuracyStatus,
       turnoverRatio
     };
-  }, [ingredients, wasteLogs, menuItems, movements]);
+  }, [ingredients, wasteLogs, menuItems, movements, goodsReceipts, supplierPrices, selectedFyStartYear]);
 
   // Derived stock health alerts list for UI widgets
   const allLowStockAlerts = useMemo(() => {
@@ -435,6 +552,39 @@ export const OwnerInventoryManager: React.FC = () => {
       return true;
     });
   }, [movements, movementFilter, movementCustomStart, movementCustomEnd]);
+
+  // Quick PO Creation Selection Handlers
+  const handleToggleSelectIngredient = (id: string) => {
+    setSelectedIngredientIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAllVisible = () => {
+    const visibleIds = filteredIngredients.map(i => i.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIngredientIds.includes(id));
+    if (allSelected) {
+      setSelectedIngredientIds(prev => prev.filter(id => !visibleIds.includes(id)));
+    } else {
+      setSelectedIngredientIds(prev => Array.from(new Set([...prev, ...visibleIds])));
+    }
+  };
+
+  const handleQuickCreatePo = (singleIngredient?: IStockIngredient) => {
+    let itemsToOrder: IStockIngredient[] = [];
+    if (singleIngredient) {
+      itemsToOrder = [singleIngredient];
+    } else if (selectedIngredientIds.length > 0) {
+      itemsToOrder = ingredients.filter(i => selectedIngredientIds.includes(i.id));
+    } else {
+      toast.error('Please select at least one ingredient using the checkboxes to create a purchase order.');
+      return;
+    }
+
+    setPoPrefillIngredients(itemsToOrder);
+    setInitialCreateOpen(true);
+    setActiveTab('purchase-orders');
+  };
 
   // Add / Edit Ingredient logic
   const handleOpenAddIngredient = () => {
@@ -646,12 +796,32 @@ export const OwnerInventoryManager: React.FC = () => {
 
   const handleSaveRecipe = async () => {
     if (!tenantId || !selectedRecipeItem) {
-      toast.error('Please select a Menu Item.');
+      toast.error('Please select a valid Menu Item.');
       return;
     }
     if (!recipeName.trim()) {
       toast.error('Recipe Name is required.');
       return;
+    }
+    const yieldNum = parseFloat(recipeYield);
+    if (isNaN(yieldNum) || yieldNum <= 0) {
+      toast.error('Preparation yield must be a positive number.');
+      return;
+    }
+    if (recipeIngredients.length === 0) {
+      toast.error('Recipe must contain at least one ingredient mapping.');
+      return;
+    }
+    for (const [idx, ing] of recipeIngredients.entries()) {
+      if (!ing.ingredientId) {
+        toast.error(`Please select an ingredient for row #${idx + 1}`);
+        return;
+      }
+      const qty = parseFloat(ing.quantity);
+      if (isNaN(qty) || qty <= 0) {
+        toast.error(`Quantity for "${ing.ingredientName || 'ingredient'}" must be greater than zero.`);
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -663,17 +833,17 @@ export const OwnerInventoryManager: React.FC = () => {
         menuItemId: selectedRecipeItem.id,
         menuItemName: selectedRecipeItem.name,
         version: recipeVersion || 'v1.0',
-        yieldQuantity: parseFloat(recipeYield) || 1,
-        wastePercentage: parseFloat(recipeWastePercent) || 0,
+        yieldQuantity: yieldNum,
+        wastePercentage: Math.max(0, parseFloat(recipeWastePercent) || 0),
         recipeName: recipeName.trim(),
-        portionSize: recipePortionSize.trim(),
-        cookingNotes: recipeCookingNotes.trim(),
+        portionSize: (recipePortionSize || '1 Portion').trim(),
+        cookingNotes: (recipeCookingNotes || '').trim(),
         ingredients: recipeIngredients.map(ing => ({
           ingredientId: ing.ingredientId,
           ingredientName: ing.ingredientName,
           quantity: parseFloat(ing.quantity) || 0,
           unit: ing.unit || 'g',
-          notes: ing.notes || ''
+          notes: (ing.notes || '').trim()
         })),
         updatedAt: new Date().toISOString()
       };
@@ -1039,13 +1209,26 @@ export const OwnerInventoryManager: React.FC = () => {
     }
   };
 
+  const handleConvertSuggestionToPO = async (sug: IPurchaseSuggestion) => {
+    if (!tenantId) return;
+    try {
+      const po = await vendorPurchaseOrderService.createDraftPoFromSuggestion(tenantId, sug, user);
+      toast.success(`Draft Purchase Order ${po.poNumber} created for ${sug.ingredientName}!`);
+      setActiveTab('purchase-orders');
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e.message || 'Failed to generate PO from suggestion.');
+    }
+  };
+
   // Nav tabs config
   const navTabs = [
     { id: 'overview', label: 'Overview', icon: TrendingUp },
     { id: 'ingredients', label: 'Ingredients list', icon: Package },
     { id: 'recipes', label: 'Recipes map', icon: BookOpen },
     { id: 'movements', label: 'Movements Log', icon: FileText },
-    { id: 'suppliers', label: 'Suppliers', icon: Truck },
+    { id: 'suppliers', label: 'Vendor Directory', icon: Truck },
+    { id: 'purchase-orders', label: 'Purchase Orders', icon: ShoppingCart },
     { id: 'lowstock', label: 'Low Stock warnings', icon: AlertOctagon },
     { id: 'expiry', label: 'Expiry monitor', icon: Calendar },
     { id: 'waste', label: 'Waste Logs', icon: Trash },
@@ -1086,6 +1269,10 @@ export const OwnerInventoryManager: React.FC = () => {
               <div className="space-y-1">
                 <span className="text-[10px] text-[#7B8794] font-bold uppercase tracking-wider block">Kitchen Stock Value</span>
                 <strong className="text-xl font-mono text-[#17202A] font-extrabold">{formatPrice(stockMetrics.value)}</strong>
+                <span className="text-[10px] text-slate-500 font-medium block">
+                  {stockMetrics.stockValuation.valuedItemsCount} of {ingredients.length} items valued
+                  {stockMetrics.stockValuation.unvaluedItemsCount > 0 && ` (${stockMetrics.stockValuation.unvaluedItemsCount} unvalued)`}
+                </span>
               </div>
               <div className="p-3 bg-[#E8F5EF] border border-[#C6E7D8] rounded-2xl text-[#16845B]">
                 <TrendingUp className="w-6 h-6" />
@@ -1096,6 +1283,9 @@ export const OwnerInventoryManager: React.FC = () => {
               <div className="space-y-1">
                 <span className="text-[10px] text-[#7B8794] font-bold uppercase tracking-wider block">Low Stock Warnings</span>
                 <strong className="text-xl font-mono text-[#9A6200] font-extrabold">{stockMetrics.low + stockMetrics.critical}</strong>
+                <span className="text-[10px] text-amber-700 font-medium block">
+                  {stockMetrics.critical} critical • {stockMetrics.low} low
+                </span>
               </div>
               <div className="p-3 bg-[#FFF4DC] border border-[#FDE6B0] rounded-2xl text-[#D98B00]">
                 <AlertTriangle className="w-6 h-6" />
@@ -1106,6 +1296,7 @@ export const OwnerInventoryManager: React.FC = () => {
               <div className="space-y-1">
                 <span className="text-[10px] text-[#7B8794] font-bold uppercase tracking-wider block">Out of Stock</span>
                 <strong className="text-xl font-mono text-[#B92E2E] font-extrabold">{stockMetrics.out}</strong>
+                <span className="text-[10px] text-rose-700 font-medium block">Immediate reorder</span>
               </div>
               <div className="p-3 bg-[#FBEAE5] border border-[#F5CBC4] rounded-2xl text-[#D64545]">
                 <AlertOctagon className="w-6 h-6 animate-pulse" />
@@ -1116,6 +1307,7 @@ export const OwnerInventoryManager: React.FC = () => {
               <div className="space-y-1">
                 <span className="text-[10px] text-[#7B8794] font-bold uppercase tracking-wider block">Spoilage & Waste Lost</span>
                 <strong className="text-xl font-mono text-[#52606D] font-extrabold">{formatPrice(stockMetrics.wasteCost)}</strong>
+                <span className="text-[10px] text-slate-500 font-medium block">{wasteLogs.length} logged incident{wasteLogs.length === 1 ? '' : 's'}</span>
               </div>
               <div className="p-3 bg-[#F8F6F2] border border-[#E5E0D9] rounded-2xl text-[#7B8794]">
                 <Trash className="w-6 h-6" />
@@ -1123,30 +1315,81 @@ export const OwnerInventoryManager: React.FC = () => {
             </Card>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Card className="p-4 border-slate-850 bg-slate-900/15 flex items-center justify-between">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <Card className="p-4 border-slate-850 bg-slate-900/15 flex flex-col justify-between">
+              <div className="space-y-1">
+                <span className="text-[9px] text-slate-550 font-bold uppercase tracking-wider block">
+                  Monthly Purchases ({new Date().toLocaleString('default', { month: 'short' })})
+                </span>
+                <strong className="text-base font-mono text-textPearl font-bold block">
+                  {formatPrice(stockMetrics.monthlyPurchases)}
+                </strong>
+              </div>
+              <span className="text-[10px] text-slate-400 font-medium mt-2 block">
+                {stockMetrics.monthlyReceiptsCount} goods receipt{stockMetrics.monthlyReceiptsCount === 1 ? '' : 's'} checked in
+              </span>
+            </Card>
+
+            <Card className="p-4 border-slate-850 bg-slate-900/15 flex flex-col justify-between">
+              <div className="space-y-1">
+                <div className="flex items-center justify-between gap-1 mb-1">
+                  <span className="text-[9px] text-slate-550 font-bold uppercase tracking-wider block">
+                    Annual Purchases
+                  </span>
+                  <select
+                    value={selectedFyStartYear}
+                    onChange={e => setSelectedFyStartYear(Number(e.target.value))}
+                    className="text-[10px] font-bold bg-slate-800 text-slate-200 border border-slate-700 rounded-md px-1.5 py-0.5 focus:outline-none focus:border-[#16845B] cursor-pointer"
+                  >
+                    <option value={2026}>FY 2026–27</option>
+                    <option value={2025}>FY 2025–26</option>
+                    <option value={2024}>FY 2024–25</option>
+                  </select>
+                </div>
+                <strong className="text-base font-mono text-textPearl font-bold block">
+                  {formatPrice(stockMetrics.annualPurchases)}
+                </strong>
+              </div>
+              <div className="flex items-center justify-between text-[10px] mt-2">
+                <span className="text-slate-400">{stockMetrics.annualReceiptsCount} receipts</span>
+                {stockMetrics.annualYoyChangePct !== null ? (
+                  <span className={`font-bold ${stockMetrics.annualYoyChangePct <= 0 ? 'text-emerald-500' : 'text-amber-500'}`}>
+                    {stockMetrics.annualYoyChangePct > 0 ? `+${stockMetrics.annualYoyChangePct}%` : `${stockMetrics.annualYoyChangePct}%`} vs prev FY
+                  </span>
+                ) : (
+                  <span className="text-slate-500">Baseline FY</span>
+                )}
+              </div>
+            </Card>
+
+            <Card className="p-4 border-slate-850 bg-slate-900/15 flex flex-col justify-between">
               <div className="space-y-1">
                 <span className="text-[9px] text-slate-550 font-bold uppercase tracking-wider block">Today's Consumption</span>
-                <strong className="text-base font-mono text-textPearl font-bold">{stockMetrics.todayConsumptionCount} units</strong>
+                <strong className="text-base font-mono text-textPearl font-bold block">{stockMetrics.todayConsumptionCount} units</strong>
               </div>
+              <span className="text-[10px] text-slate-400 font-medium mt-2 block">
+                Cost value: {formatPrice(stockMetrics.todayConsumptionVal)}
+              </span>
             </Card>
-            <Card className="p-4 border-slate-850 bg-slate-900/15 flex items-center justify-between">
-              <div className="space-y-1">
-                <span className="text-[9px] text-slate-555 font-bold uppercase tracking-wider block">Monthly Purchases</span>
-                <strong className="text-base font-mono text-textPearl font-bold">{formatPrice(stockMetrics.monthlyPurchases)}</strong>
-              </div>
-            </Card>
-            <Card className="p-4 border-slate-850 bg-slate-900/15 flex items-center justify-between">
+
+            <Card className="p-4 border-slate-850 bg-slate-900/15 flex flex-col justify-between">
               <div className="space-y-1">
                 <span className="text-[9px] text-slate-555 font-bold uppercase tracking-wider block">Inventory Accuracy</span>
-                <strong className="text-base font-mono text-emerald-500 font-bold">{stockMetrics.inventoryAccuracy}%</strong>
+                <strong className="text-base font-mono text-emerald-500 font-bold block">{stockMetrics.accuracyStatus}</strong>
               </div>
+              <span className="text-[10px] text-slate-400 font-medium mt-2 block">
+                {movements.filter(m => m.type === 'adjustment' || m.type === 'manual_correction').length} adjustments recorded
+              </span>
             </Card>
-            <Card className="p-4 border-slate-850 bg-slate-900/15 flex items-center justify-between">
+
+            <Card className="p-4 border-slate-850 bg-slate-900/15 flex flex-col justify-between">
               <div className="space-y-1">
                 <span className="text-[9px] text-slate-555 font-bold uppercase tracking-wider block">Turnover Index</span>
-                <strong className="text-base font-mono text-textPearl font-bold">{stockMetrics.turnoverRatio}x</strong>
+                <strong className="text-base font-mono text-textPearl font-bold block">{stockMetrics.turnoverRatio}x</strong>
               </div>
+              <span className="text-[10px] text-slate-400 font-medium mt-2 block">
+                Annualized consumption / stock
+              </span>
             </Card>
           </div>
 
@@ -1210,20 +1453,34 @@ export const OwnerInventoryManager: React.FC = () => {
       {activeTab === 'ingredients' && (
         <div className="space-y-6">
           <Card className="p-4 border-slate-850 bg-slate-900/20">
-            <div className="flex flex-col md:flex-row gap-4">
-              <div className="flex-1">
-                <SearchBar 
-                  placeholder="Search ingredient list..." 
-                  value={searchQuery}
-                  onSearchChange={setSearchQuery}
-                />
+            <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-center justify-between">
+              <div className="flex-1 flex flex-col md:flex-row gap-4">
+                <div className="flex-1">
+                  <SearchBar 
+                    placeholder="Search ingredient list..." 
+                    value={searchQuery}
+                    onSearchChange={setSearchQuery}
+                  />
+                </div>
+                <div className="w-full md:w-56">
+                  <Select 
+                    options={categories}
+                    value={categoryFilter}
+                    onChange={(e) => setCategoryFilter(e.target.value)}
+                  />
+                </div>
               </div>
-              <div className="w-full md:w-56">
-                <Select 
-                  options={categories}
-                  value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
-                />
+              <div className="flex items-center gap-2 shrink-0">
+                <Button 
+                  onClick={() => handleQuickCreatePo()} 
+                  disabled={filteredIngredients.length === 0}
+                  className="bg-[#16845B] hover:bg-[#126B49] text-white flex items-center gap-1.5 text-xs font-bold py-2 px-3 whitespace-nowrap shadow-sm"
+                >
+                  <ShoppingCart className="w-4 h-4" />
+                  <span>
+                    Create Purchase Order {selectedIngredientIds.length > 0 ? `(${selectedIngredientIds.length})` : ''}
+                  </span>
+                </Button>
               </div>
             </div>
           </Card>
@@ -1251,6 +1508,41 @@ export const OwnerInventoryManager: React.FC = () => {
                 keyExtractor={(row: IStockIngredient) => row.id} 
                 data={filteredIngredients}
                 columns={[
+                  {
+                    header: (() => {
+                      const visibleIds = filteredIngredients.map(i => i.id);
+                      const isAllChecked = visibleIds.length > 0 && visibleIds.every(id => selectedIngredientIds.includes(id));
+                      const isSomeChecked = visibleIds.some(id => selectedIngredientIds.includes(id));
+
+                      return (
+                        <div className="flex items-center justify-center">
+                          <input
+                            type="checkbox"
+                            aria-label="Select all visible ingredients"
+                            checked={isAllChecked}
+                            ref={el => { if (el) el.indeterminate = !isAllChecked && isSomeChecked; }}
+                            onChange={handleToggleSelectAllVisible}
+                            className="w-4 h-4 rounded border-slate-700 text-[#16845B] focus:ring-[#16845B] cursor-pointer accent-[#16845B]"
+                          />
+                        </div>
+                      );
+                    })(),
+                    className: "w-10 text-center px-2",
+                    accessor: (row: IStockIngredient) => {
+                      const isSelected = selectedIngredientIds.includes(row.id);
+                      return (
+                        <div className="flex items-center justify-center" onClick={e => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${row.name}`}
+                            checked={isSelected}
+                            onChange={() => handleToggleSelectIngredient(row.id)}
+                            className="w-4 h-4 rounded border-slate-700 text-[#16845B] focus:ring-[#16845B] cursor-pointer accent-[#16845B]"
+                          />
+                        </div>
+                      );
+                    }
+                  },
                   {
                     header: 'Ingredient Details',
                     accessor: (row: IStockIngredient) => (
@@ -1305,7 +1597,16 @@ export const OwnerInventoryManager: React.FC = () => {
                   {
                     header: 'Actions',
                     accessor: (row: IStockIngredient) => (
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-1.5">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title={`Create Purchase Order for ${row.name}`}
+                          onClick={() => handleQuickCreatePo(row)}
+                          className="p-1 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"
+                        >
+                          <ShoppingCart className="w-3.5 h-3.5" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1348,7 +1649,7 @@ export const OwnerInventoryManager: React.FC = () => {
                 <select
                   value={recipeCategoryFilter}
                   onChange={(e) => setRecipeCategoryFilter(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none"
+                  className="w-full bg-white border border-slate-200 focus:border-[#C9533B] rounded-xl p-3 text-xs font-semibold text-slate-800 outline-none shadow-xs"
                 >
                   <option value="all">All Categories</option>
                   {['Vegetables', 'Meat', 'Dairy', 'Dry Goods', 'Beverages', 'Spices', 'Bakery', 'Other'].map(cat => (
@@ -1359,7 +1660,7 @@ export const OwnerInventoryManager: React.FC = () => {
             </div>
             <Button
               onClick={handleOpenCreateRecipe}
-              className="w-full md:w-auto bg-gradient-to-r from-primary to-amber-600 hover:from-primary-hover hover:to-amber-700 text-background flex items-center justify-center gap-1.5 text-xs font-bold py-3 px-4"
+              className="w-full md:w-auto bg-[#C9533B] hover:bg-[#A94332] text-white flex items-center justify-center gap-1.5 text-xs font-bold py-3 px-4 rounded-xl shadow-xs transition-colors"
             >
               <Plus className="w-4 h-4" />
               <span>Create Recipe</span>
@@ -1367,15 +1668,15 @@ export const OwnerInventoryManager: React.FC = () => {
           </div>
 
           {recipes.length === 0 ? (
-            <Card className="p-10 text-center border border-dashed border-slate-850 rounded-2xl bg-slate-900/10 space-y-4">
-              <BookOpen className="w-12 h-12 text-slate-600 mx-auto mb-2" />
-              <h4 className="text-sm font-bold text-textPearl">No recipes configured yet</h4>
+            <Card className="p-10 text-center border border-dashed border-slate-200 rounded-2xl bg-white space-y-4">
+              <BookOpen className="w-12 h-12 text-slate-400 mx-auto mb-2" />
+              <h4 className="text-sm font-bold text-slate-800">No recipes configured yet</h4>
               <p className="text-xs text-slate-500 max-w-md mx-auto">
                 Map your menu items to ingredients and quantities to estimate costs, calculate yield limits, and automate stock deductions.
               </p>
               <Button
                 onClick={handleOpenCreateRecipe}
-                className="mx-auto text-xs font-bold py-2 px-4 bg-gradient-to-r from-primary to-amber-600 text-background"
+                className="mx-auto text-xs font-bold py-2.5 px-4 bg-[#C9533B] hover:bg-[#A94332] text-white rounded-xl shadow-xs"
               >
                 Create Recipe
               </Button>
@@ -1394,8 +1695,8 @@ export const OwnerInventoryManager: React.FC = () => {
 
                 if (filteredRecipes.length === 0) {
                   return (
-                    <Card className="p-8 text-center border border-dashed border-slate-850 rounded-2xl bg-slate-900/10">
-                      <AlertTriangle className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                    <Card className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-white">
+                      <AlertTriangle className="w-8 h-8 text-slate-400 mx-auto mb-2" />
                       <p className="text-xs text-slate-500 font-semibold">No recipes matching your filters.</p>
                     </Card>
                   );
@@ -1411,12 +1712,12 @@ export const OwnerInventoryManager: React.FC = () => {
                       }, 0);
 
                       return (
-                        <Card key={recipe.id} className="p-5 border-slate-850 bg-slate-900/30 flex flex-col justify-between space-y-4">
+                        <Card key={recipe.id} className="p-5 border-slate-200 bg-white shadow-xs rounded-2xl flex flex-col justify-between space-y-4">
                           <div className="space-y-2">
                             <div className="flex justify-between items-start">
                               <div>
-                                <h4 className="font-bold text-textPearl text-base">{recipe.menuItemName}</h4>
-                                <span className="text-[10px] text-primary font-bold uppercase tracking-wider block mt-0.5">
+                                <h4 className="font-bold text-slate-900 text-base">{recipe.menuItemName}</h4>
+                                <span className="text-[10px] text-[#C9533B] font-bold uppercase tracking-wider block mt-0.5">
                                   {recipe.recipeName || 'Standard Recipe'}
                                 </span>
                               </div>
@@ -1424,18 +1725,18 @@ export const OwnerInventoryManager: React.FC = () => {
                                 {recipe.portionSize || '1 Portion'}
                               </Badge>
                             </div>
-                            <div className="grid grid-cols-3 gap-2 py-2.5 border-y border-slate-850/50 text-[10px] text-slate-450 font-bold uppercase tracking-wider">
+                            <div className="grid grid-cols-3 gap-2 py-2.5 border-y border-slate-100 text-[10px] font-bold uppercase tracking-wider">
                               <div>
-                                <span className="text-slate-550 block text-[9px] mb-0.5">Ingredients</span>
-                                <span className="text-xs text-textPearl font-extrabold">{recipe.ingredients?.length || 0} items</span>
+                                <span className="text-slate-400 block text-[9px] mb-0.5">Ingredients</span>
+                                <span className="text-xs text-slate-800 font-extrabold">{recipe.ingredients?.length || 0} items</span>
                               </div>
                               <div>
-                                <span className="text-slate-550 block text-[9px] mb-0.5">Estimated Cost</span>
-                                <span className="text-xs text-emerald-500 font-mono font-extrabold">{formatPrice(estimatedCost)}</span>
+                                <span className="text-slate-400 block text-[9px] mb-0.5">Estimated Cost</span>
+                                <span className="text-xs text-emerald-600 font-mono font-extrabold">{formatPrice(estimatedCost)}</span>
                               </div>
                               <div>
-                                <span className="text-slate-550 block text-[9px] mb-0.5">Yield Servings</span>
-                                <span className="text-xs text-textPearl font-extrabold">{recipe.yieldQuantity || 1} serv</span>
+                                <span className="text-slate-400 block text-[9px] mb-0.5">Yield Servings</span>
+                                <span className="text-xs text-slate-800 font-extrabold">{recipe.yieldQuantity || 1} serv</span>
                               </div>
                             </div>
                             <div className="text-[10px] text-slate-500 font-semibold flex items-center justify-between">
@@ -1447,14 +1748,14 @@ export const OwnerInventoryManager: React.FC = () => {
                             <Button 
                               variant="secondary"
                               onClick={() => handleOpenViewRecipe(recipe)}
-                              className="flex-1 text-xs py-2 px-2.5 font-bold"
+                              className="flex-1 text-xs py-2 px-2.5 font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl"
                             >
                               View
                             </Button>
                             <Button 
                               variant="secondary"
                               onClick={() => handleOpenEditRecipe(recipe)}
-                              className="flex-1 text-xs py-2 px-2.5 font-bold"
+                              className="flex-1 text-xs py-2 px-2.5 font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl"
                             >
                               Edit
                             </Button>
@@ -1464,7 +1765,7 @@ export const OwnerInventoryManager: React.FC = () => {
                                 const targetId = prompt(`Enter target Menu Item ID to copy recipe mapping to:\nOptions:\n${menuItems.filter(m => m.id !== recipe.menuItemId).map(m => `- ${m.id} (${m.name})`).join('\n')}`);
                                 if (targetId) handleDuplicateRecipe(recipe, targetId);
                               }}
-                              className="flex-1 text-[10px] border-slate-800 text-slate-300 font-bold py-2 px-2"
+                              className="flex-1 text-[10px] border-slate-200 hover:bg-slate-50 text-slate-700 font-bold py-2 px-2 rounded-xl"
                             >
                               Duplicate
                             </Button>
@@ -1475,7 +1776,7 @@ export const OwnerInventoryManager: React.FC = () => {
                                   handleDeleteRecipe(recipe.id);
                                 }
                               }}
-                              className="flex-1 text-[10px] border-slate-800 text-red-400 hover:text-red-500 font-bold py-2 px-2"
+                              className="flex-1 text-[10px] border-red-200 hover:bg-red-50 text-red-600 font-bold py-2 px-2 rounded-xl"
                             >
                               Delete
                             </Button>
@@ -1637,97 +1938,24 @@ export const OwnerInventoryManager: React.FC = () => {
         </div>
       )}
 
-      {/* Suppliers tab */}
+      {/* Vendor Directory Tab */}
       {activeTab === 'suppliers' && (
-        <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Registered Supplier Matrix</h3>
-            <Button onClick={handleOpenAddSupplier} className="text-xs font-bold py-1.5 px-3">
-              <Plus className="w-3.5 h-3.5 mr-1" />
-              <span>Add Supplier</span>
-            </Button>
-          </div>
+        <VendorDirectoryTab suppliers={suppliers} ingredients={ingredients} />
+      )}
 
-          {suppliers.length === 0 ? (
-            <Card className="p-8 text-center border border-dashed border-slate-850 rounded-2xl bg-slate-900/10">
-              <AlertTriangle className="w-10 h-10 text-slate-700 mx-auto mb-2" />
-              <p className="text-sm font-semibold text-slate-450">No suppliers logged.</p>
-            </Card>
-          ) : (
-            <Card className="p-0 overflow-hidden border-slate-850">
-              <Table
-                 keyExtractor={(row: ISupplier) => row?.id || Math.random().toString()}
-                data={suppliers}
-                columns={[
-                  {
-                    header: 'Supplier Details',
-                    accessor: (row: ISupplier) => (
-                      <div>
-                        <span className="font-bold text-textPearl text-sm block">{row?.name || 'Unnamed'}</span>
-                        {row?.companyName || row?.gstNumber ? (
-                          <span className="text-[10px] text-slate-500 font-semibold block mt-0.5">
-                            {row?.companyName && `Co: ${row.companyName}`} {row?.gstNumber && ` • GST: ${row.gstNumber}`}
-                          </span>
-                        ) : null}
-                      </div>
-                    )
-                  },
-                  {
-                    header: 'Contact Details',
-                    accessor: (row: ISupplier) => (
-                      <div className="space-y-0.5">
-                        <span className="text-slate-350 font-semibold block">{row?.phone || 'No phone'}</span>
-                        <span className="text-[10px] text-slate-550 block font-semibold">{row?.email || 'No email'}</span>
-                      </div>
-                    )
-                  },
-                  {
-                    header: 'Delivery & Payment',
-                    accessor: (row: ISupplier) => (
-                      <div className="space-y-0.5">
-                        <span className="text-slate-350 font-semibold block">{row?.deliveryTimeDays !== undefined ? `${row.deliveryTimeDays} days` : 'N/A'} ({row?.deliverySchedule || 'Weekly'})</span>
-                        <span className="text-[10px] text-slate-500 block font-semibold">Terms: {row?.paymentTerms || 'COD'}</span>
-                      </div>
-                    )
-                  },
-                  {
-                    header: 'Supplier Rating',
-                    accessor: (row: ISupplier) => (
-                      <div className="flex items-center space-x-1">
-                        {[1, 2, 3, 4, 5].map(star => (
-                          <Star key={star} className={`w-3.5 h-3.5 ${star <= (row?.rating || 0) ? 'text-amber-500 fill-current' : 'text-slate-700'}`} />
-                        ))}
-                      </div>
-                    )
-                  },
-                  {
-                    header: 'Actions',
-                    accessor: (row: ISupplier) => (
-                      <div className="flex items-center space-x-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleOpenEditSupplier(row)}
-                          className="p-1 text-slate-400 hover:text-primary hover:bg-slate-800/50"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleOpenDeleteSupplier(row.id)}
-                          className="p-1 text-slate-450 hover:text-red-500 hover:bg-red-500/10"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
-                      </div>
-                    )
-                  }
-                ]}
-              />
-            </Card>
-          )}
-        </div>
+      {/* Purchase Orders Tab */}
+      {activeTab === 'purchase-orders' && (
+        <PurchaseOrdersTab 
+          suppliers={suppliers} 
+          ingredients={ingredients} 
+          onNavigateToSuppliers={() => setActiveTab('suppliers')} 
+          initialSelectedIngredients={poPrefillIngredients}
+          initialCreateOpen={initialCreateOpen}
+          onClearInitialCreate={() => {
+            setInitialCreateOpen(false);
+            setPoPrefillIngredients([]);
+          }}
+        />
       )}
 
       {/* Low Stock tab */}
@@ -1915,16 +2143,37 @@ export const OwnerInventoryManager: React.FC = () => {
       {/* Suggestions tab */}
       {activeTab === 'suggestions' && (
         <div className="space-y-6">
-          <div className="flex justify-between items-center">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Replenishment Suggestions</h3>
-            <Button
-              onClick={handleGenerateLocalSuggestions}
-              className="text-xs font-bold py-1.5 px-3 bg-slate-800 border border-slate-750 text-slate-300 hover:text-textPearl flex items-center gap-1.5"
-            >
-              <RefreshCcw className="w-3.5 h-3.5" />
-              <span>Optimize suggestions</span>
-            </Button>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div>
+              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Replenishment Suggestions</h3>
+              <p className="text-[11px] text-slate-400 mt-0.5">Calculated automatically when ingredient stock falls to or below reorder levels (Target: Max Stock - Current Stock).</p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => setActiveTab('purchase-orders')}
+                className="text-xs font-bold py-1.5 px-3 bg-[#16845B] hover:bg-[#126B49] text-white flex items-center gap-1.5 rounded-xl shadow-xs"
+              >
+                <ShoppingCart className="w-3.5 h-3.5" />
+                <span>View Purchase Orders</span>
+              </Button>
+              <Button
+                onClick={handleGenerateLocalSuggestions}
+                className="text-xs font-bold py-1.5 px-3 bg-slate-800 border border-slate-750 text-slate-300 hover:text-textPearl flex items-center gap-1.5 rounded-xl"
+              >
+                <RefreshCcw className="w-3.5 h-3.5" />
+                <span>Optimize suggestions</span>
+              </Button>
+            </div>
           </div>
+
+          <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex items-start gap-3">
+            <Sparkles className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+            <div className="text-xs text-emerald-950">
+              <strong className="font-extrabold block mb-0.5">Automated Procurement Workflow</strong>
+              <span>You can convert any replenishment recommendation directly into a draft <strong>Purchase Order</strong> to negotiate, dispatch via WhatsApp/Email, and track partial receipts. Alternatively, click <strong>Direct Restock</strong> to quickly check in emergency store purchases.</span>
+            </div>
+          </div>
+
           {suggestions.length === 0 ? (
             <Card className="p-8 text-center border border-dashed border-slate-850 rounded-2xl bg-slate-900/10">
               <Sparkles className="w-10 h-10 text-slate-700 mx-auto mb-2 animate-pulse" />
@@ -1945,7 +2194,12 @@ export const OwnerInventoryManager: React.FC = () => {
                 columns={[
                   {
                     header: 'Replenishment Ingredient',
-                    accessor: (row: IPurchaseSuggestion) => <span className="font-bold text-textPearl">{row?.ingredientName || 'Unknown Ingredient'}</span>
+                    accessor: (row: IPurchaseSuggestion) => (
+                      <div className="space-y-0.5">
+                        <span className="font-bold text-textPearl block">{row?.ingredientName || 'Unknown Ingredient'}</span>
+                        <span className="text-[10px] text-slate-500 font-medium block">ID: {row?.ingredientId}</span>
+                      </div>
+                    )
                   },
                   {
                     header: 'Recommended Order Qty',
@@ -1980,11 +2234,19 @@ export const OwnerInventoryManager: React.FC = () => {
                     header: 'Actions',
                     accessor: (row: IPurchaseSuggestion) => (
                       <div className="flex items-center space-x-2">
+                        <Button
+                          size="sm"
+                          onClick={() => handleConvertSuggestionToPO(row)}
+                          className="text-[10.5px] font-bold py-1 px-2.5 bg-[#16845B] hover:bg-[#126B49] text-white flex items-center gap-1 rounded-lg shadow-xs"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Create PO</span>
+                        </Button>
                         {row?.status === 'pending' ? (
                           <Button
                             size="sm"
                             onClick={() => handleMarkSuggestionOrdered(row?.id)}
-                            className="text-[10px] font-bold py-1 px-2.5 bg-slate-800 border border-slate-750 text-slate-300 hover:text-textPearl"
+                            className="text-[10px] font-bold py-1 px-2 bg-slate-800 border border-slate-750 text-slate-300 hover:text-textPearl rounded-lg"
                           >
                             Mark Ordered
                           </Button>
@@ -1992,9 +2254,9 @@ export const OwnerInventoryManager: React.FC = () => {
                           <Button
                             size="sm"
                             onClick={() => handleCompleteSuggestion(row)}
-                            className="text-[10px] font-bold py-1 px-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-background"
+                            className="text-[10px] font-bold py-1 px-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-background rounded-lg"
                           >
-                            Receive Stock
+                            Direct Restock
                           </Button>
                         )}
                       </div>
@@ -2174,178 +2436,289 @@ export const OwnerInventoryManager: React.FC = () => {
         isOpen={isRecipeModalOpen}
         onClose={() => setIsRecipeModalOpen(false)}
         title={editingRecipe ? `Edit Recipe: ${recipeName}` : 'Create New Recipe'}
+        variant="light"
+        size="2xl"
       >
-        <div className="space-y-4 text-left select-none text-xs">
-          <div className="space-y-1">
-            <label className="font-bold text-slate-500 uppercase block">Select Menu Item</label>
+        <div className="space-y-5 text-left select-none text-xs text-slate-800">
+          {/* Menu Item Selector Section */}
+          <div className="space-y-1.5">
+            <div className="flex justify-between items-center">
+              <label className="font-extrabold text-slate-600 uppercase text-[10px] tracking-wider block">
+                Select Menu Item <span className="text-[#C9533B]">*</span>
+              </label>
+              {isMenuItemsLoading && (
+                <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1">
+                  <RefreshCcw className="w-3 h-3 animate-spin text-[#C9533B]" />
+                  Loading menu items...
+                </span>
+              )}
+            </div>
+
             {editingRecipe ? (
-              <div className="w-full bg-slate-900 border border-slate-850 rounded-xl p-3 text-xs font-semibold text-slate-400">
+              <div className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-700">
                 {selectedRecipeItem?.name || selectedRecipeItem?.menuItemName}
               </div>
+            ) : menuItemsError ? (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between text-xs">
+                <span className="text-red-700 font-semibold flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
+                  Failed to load menu items: {menuItemsError}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMenuItemsReloadCounter(c => c + 1)}
+                  className="px-2.5 py-1 text-[11px] font-bold bg-white border border-red-300 text-red-700 rounded-lg hover:bg-red-50 flex items-center gap-1 shadow-xs"
+                >
+                  <RefreshCcw className="w-3 h-3" />
+                  Retry
+                </button>
+              </div>
             ) : (
-              <select
-                value={selectedRecipeItem?.id || ''}
-                onChange={(e) => {
-                  const item = menuItems.find(m => m.id === e.target.value);
-                  setSelectedRecipeItem(item);
-                  if (item) {
-                    setRecipeName(`${item.name} Standard Recipe`);
-                  }
-                }}
-                className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none"
-              >
-                <option value="">Select Menu Item</option>
-                {menuItems.map(item => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
-              </select>
+              <div>
+                <select
+                  value={selectedRecipeItem?.id || ''}
+                  disabled={isMenuItemsLoading}
+                  onChange={(e) => {
+                    const item = menuItems.find(m => m.id === e.target.value);
+                    setSelectedRecipeItem(item || null);
+                    if (item) {
+                      setRecipeName(`${item.name} Standard Recipe`);
+                    }
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 focus:border-[#C9533B] focus:bg-white rounded-xl p-3 text-xs font-bold text-slate-800 outline-none transition-colors disabled:opacity-50"
+                >
+                  <option value="">
+                    {isMenuItemsLoading 
+                      ? 'Loading menu items...' 
+                      : menuItems.length === 0 
+                        ? 'No menu items found in Menu Management' 
+                        : 'Select Menu Item'}
+                  </option>
+                  {menuItems.map(item => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} {item.category ? `(${item.category})` : ''}
+                    </option>
+                  ))}
+                </select>
+
+                {!isMenuItemsLoading && menuItems.length === 0 && (
+                  <div className="mt-1.5 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-[11px] flex items-center justify-between">
+                    <span>No menu items found. Add menu items in Menu Management before creating recipes.</span>
+                    <a
+                      href="/owner/menu"
+                      className="ml-2 font-bold text-[#C9533B] hover:underline whitespace-nowrap"
+                    >
+                      Go to Menu Management &rarr;
+                    </a>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
-          <div className="space-y-1">
-            <label className="font-bold text-slate-500 uppercase block">Recipe Name</label>
+          {/* Recipe Name */}
+          <div className="space-y-1.5">
+            <label className="font-extrabold text-slate-600 uppercase text-[10px] tracking-wider block">
+              Recipe Name <span className="text-[#C9533B]">*</span>
+            </label>
             <input
               type="text"
-              placeholder="Standard Recipe, Chef Special Recipe, etc."
+              placeholder="E.g. Margherita Pizza Standard Recipe, Chef Special Burger"
               value={recipeName}
               onChange={(e) => setRecipeName(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none"
+              className="w-full bg-slate-50 border border-slate-200 focus:border-[#C9533B] focus:bg-white rounded-xl p-3 text-xs font-semibold text-slate-800 outline-none transition-colors"
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="font-bold text-slate-500 uppercase block">Portion Size</label>
+          {/* Portion Size & Yield */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="font-extrabold text-slate-600 uppercase text-[10px] tracking-wider block">
+                Portion Size
+              </label>
               <input
                 type="text"
-                placeholder="E.g. 250g, 1 plate, Large"
+                placeholder="E.g. 250g, 1 plate, Regular, Large"
                 value={recipePortionSize}
                 onChange={(e) => setRecipePortionSize(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none font-mono"
+                className="w-full bg-slate-50 border border-slate-200 focus:border-[#C9533B] focus:bg-white rounded-xl p-3 text-xs font-semibold text-slate-800 outline-none transition-colors"
               />
             </div>
-            <div className="space-y-1">
-              <label className="font-bold text-slate-500 uppercase block">Preparation Yield (Servings)</label>
+            <div className="space-y-1.5">
+              <label className="font-extrabold text-slate-600 uppercase text-[10px] tracking-wider block">
+                Preparation Yield (Servings) <span className="text-[#C9533B]">*</span>
+              </label>
               <input
                 type="number"
+                min="0.1"
+                step="any"
                 value={recipeYield}
                 onChange={(e) => setRecipeYield(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none font-mono"
+                className="w-full bg-slate-50 border border-slate-200 focus:border-[#C9533B] focus:bg-white rounded-xl p-3 text-xs font-semibold text-slate-800 outline-none transition-colors font-mono"
               />
             </div>
           </div>
 
-          <div className="space-y-1">
-            <label className="font-bold text-slate-500 uppercase block">Cooking Notes (Optional)</label>
+          {/* Cooking Notes */}
+          <div className="space-y-1.5">
+            <label className="font-extrabold text-slate-600 uppercase text-[10px] tracking-wider block">
+              Cooking Notes (Optional)
+            </label>
             <textarea
-              placeholder="Cooking steps, prep instructions, etc."
+              placeholder="Prep steps, secret seasonings, cooking temperature, or plating notes..."
               value={recipeCookingNotes}
               onChange={(e) => setRecipeCookingNotes(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none"
+              className="w-full bg-slate-50 border border-slate-200 focus:border-[#C9533B] focus:bg-white rounded-xl p-3 text-xs font-semibold text-slate-800 outline-none transition-colors resize-none"
               rows={2}
             />
           </div>
 
-          <div className="flex justify-between items-center pb-2 border-b border-slate-850">
-            <span className="font-bold text-slate-400">Ingredient Mapping</span>
-            <button
-              onClick={handleAddIngredientRow}
-              className="text-[10px] text-primary hover:text-primary-hover font-bold uppercase tracking-wider flex items-center gap-1"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Ingredient</span>
-            </button>
-          </div>
+          {/* Ingredient Mapping Section */}
+          <div className="space-y-3 pt-2">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+              <div>
+                <span className="font-extrabold text-slate-800 text-sm">Ingredient Mapping</span>
+                <span className="text-[10px] text-slate-500 block font-medium">Specify stock ingredients consumed per batch/portion</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddIngredientRow}
+                className="text-xs bg-[#C9533B]/10 hover:bg-[#C9533B]/20 text-[#C9533B] font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Ingredient</span>
+              </button>
+            </div>
 
-          {recipeIngredients.length === 0 ? (
-            <p className="text-center py-6 text-slate-500">No ingredients mapped. Click "Add Ingredient" to start.</p>
-          ) : (
-            <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
-              {recipeIngredients.map((row, idx) => (
-                <div key={idx} className="flex flex-col gap-2 p-2.5 bg-slate-900/40 border border-slate-850/50 rounded-xl">
-                  <div className="flex gap-2 items-center">
-                    <div className="flex-1">
-                      <select
-                        value={row.ingredientId}
-                        onChange={(e) => handleUpdateRecipeRow(idx, 'ingredientId', e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-850 focus:border-primary rounded-xl p-2 text-xs font-semibold text-textPearl outline-none"
-                      >
-                        {ingredients.map(ing => (
-                          <option key={ing.id} value={ing.id}>{ing.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="w-24">
+            {recipeIngredients.length === 0 ? (
+              <div className="text-center py-8 px-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl space-y-2">
+                <Package className="w-8 h-8 text-slate-400 mx-auto" />
+                <p className="text-xs font-bold text-slate-700">No ingredients mapped yet</p>
+                <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                  Click "+ Add Ingredient" above to map ingredients from your authorized stock inventory.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                {recipeIngredients.map((row, idx) => {
+                  const selectedIng = ingredients.find(i => i.id === row.ingredientId);
+                  const itemCost = selectedIng ? (selectedIng.purchaseCost || 0) * (parseFloat(row.quantity) || 0) : 0;
+
+                  return (
+                    <div key={idx} className="p-3 bg-slate-50 hover:bg-slate-100/70 border border-slate-200 rounded-xl transition-all space-y-2">
+                      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                        <div className="flex-1 min-w-0">
+                          <label className="text-[9px] font-extrabold uppercase text-slate-500 block mb-0.5">
+                            Ingredient #{idx + 1}
+                          </label>
+                          <select
+                            value={row.ingredientId}
+                            onChange={(e) => handleUpdateRecipeRow(idx, 'ingredientId', e.target.value)}
+                            className="w-full bg-white border border-slate-200 focus:border-[#C9533B] rounded-lg p-2 text-xs font-bold text-slate-800 outline-none"
+                          >
+                            {ingredients.map(ing => (
+                              <option key={ing.id} value={ing.id}>
+                                {ing.name} ({ing.unit}) — {formatPrice(ing.purchaseCost || 0)}/{ing.unit}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="w-full sm:w-28 shrink-0">
+                          <label className="text-[9px] font-extrabold uppercase text-slate-500 block mb-0.5">
+                            Quantity
+                          </label>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              min="0.001"
+                              step="any"
+                              placeholder="Qty"
+                              value={row.quantity}
+                              onChange={(e) => handleUpdateRecipeRow(idx, 'quantity', e.target.value)}
+                              className="w-full bg-white border border-slate-200 focus:border-[#C9533B] rounded-lg p-2 text-xs font-bold text-slate-800 outline-none font-mono"
+                            />
+                            <span className="text-[11px] text-slate-600 font-extrabold w-10 shrink-0 text-center">
+                              {row.unit}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="hidden sm:block text-right w-24 shrink-0">
+                          <span className="text-[9px] font-extrabold uppercase text-slate-400 block">Est. Cost</span>
+                          <span className="text-xs font-mono font-bold text-slate-700">{formatPrice(itemCost)}</span>
+                        </div>
+                        <div className="flex justify-end sm:justify-center items-center">
+                          <button
+                            type="button"
+                            title="Remove ingredient mapping"
+                            onClick={() => handleRemoveRecipeRow(idx)}
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
                       <input
-                        type="number"
-                        placeholder="Qty"
-                        value={row.quantity}
-                        onChange={(e) => handleUpdateRecipeRow(idx, 'quantity', e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-850 focus:border-primary rounded-xl p-2 text-xs font-semibold text-textPearl outline-none font-mono"
+                        type="text"
+                        placeholder="Optional prep note (e.g. diced finely, peeled, chilled)"
+                        value={row.notes || ''}
+                        onChange={(e) => handleUpdateRecipeRow(idx, 'notes', e.target.value)}
+                        className="w-full bg-white border border-slate-200 focus:border-[#C9533B] rounded-lg p-1.5 px-2.5 text-[11px] text-slate-600 outline-none"
                       />
                     </div>
-                    <span className="text-xs text-slate-500 font-bold w-12 truncate">{row.unit}</span>
-                    <button
-                      onClick={() => handleRemoveRecipeRow(idx)}
-                      className="p-1.5 text-slate-500 hover:text-red-500 transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <input
-                    type="text"
-                    placeholder="Optional ingredient note (e.g. diced finely)"
-                    value={row.notes || ''}
-                    onChange={(e) => handleUpdateRecipeRow(idx, 'notes', e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-850 focus:border-primary rounded-xl p-2 text-[10px] font-semibold text-slate-400 outline-none"
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {recipeIngredients.length > 0 && (() => {
-            const totalCost = recipeIngredients.reduce((sum, ri) => {
-              const ing = ingredients.find(i => i.id === ri.ingredientId);
-              const cost = ing ? ing.purchaseCost || 0 : 0;
-              return sum + (parseFloat(ri.quantity || 0) * cost);
-            }, 0);
-            const yieldQty = parseFloat(recipeYield) || 1;
-            const costPerServing = totalCost / yieldQty;
-
-            return (
-              <div className="p-3 bg-slate-900/80 border border-slate-850 rounded-xl space-y-1.5 text-[11px] text-slate-400 font-bold uppercase tracking-wider">
-                <div className="flex justify-between">
-                  <span>Number of Ingredients:</span>
-                  <span className="text-textPearl">{recipeIngredients.length}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Total Ingredients Cost:</span>
-                  <span className="text-emerald-500 font-mono">{formatPrice(totalCost)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Estimated Food Cost / Serving:</span>
-                  <span className="text-emerald-500 font-mono">{formatPrice(costPerServing)}</span>
-                </div>
+                  );
+                })}
               </div>
-            );
-          })()}
+            )}
 
-          <div className="flex items-center space-x-3 pt-4 border-t border-slate-850 mt-4">
+            {/* Food Cost Summary Card */}
+            {recipeIngredients.length > 0 && (() => {
+              const totalCost = recipeIngredients.reduce((sum, ri) => {
+                const ing = ingredients.find(i => i.id === ri.ingredientId);
+                const cost = ing ? ing.purchaseCost || 0 : 0;
+                return sum + (parseFloat(ri.quantity || 0) * cost);
+              }, 0);
+              const yieldQty = Math.max(0.01, parseFloat(recipeYield) || 1);
+              const costPerServing = totalCost / yieldQty;
+
+              return (
+                <div className="p-3.5 bg-[#FAF8F4] border border-[#E5E0D9] rounded-xl space-y-1.5 text-xs text-slate-600 font-medium">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Number of Ingredients:</span>
+                    <span className="font-bold text-slate-800">{recipeIngredients.length} item(s)</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Total Recipe Batch Cost:</span>
+                    <span className="font-mono font-bold text-slate-800">{formatPrice(totalCost)}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-1 border-t border-[#E5E0D9]">
+                    <span className="text-[11px] font-extrabold uppercase text-slate-700 tracking-wider">
+                      Estimated Food Cost / Serving ({yieldQty} serv):
+                    </span>
+                    <span className="font-mono font-extrabold text-emerald-600 text-sm">{formatPrice(costPerServing)}</span>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Modal Actions */}
+          <div className="flex items-center space-x-3 pt-4 border-t border-slate-200 mt-5">
             <Button
               type="button"
               variant="secondary"
-              className="flex-1"
+              className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold border border-slate-200 rounded-xl"
               onClick={() => setIsRecipeModalOpen(false)}
             >
               Cancel
             </Button>
             <Button
+              type="button"
               onClick={handleSaveRecipe}
-              className="flex-1 bg-gradient-to-r from-primary to-amber-600 hover:from-primary-hover hover:to-amber-700 text-background"
+              disabled={isSubmitting || isMenuItemsLoading}
+              className="flex-1 py-2.5 bg-[#C9533B] hover:bg-[#A94332] text-white font-bold rounded-xl shadow-xs transition-colors"
               isLoading={isSubmitting}
             >
-              Save Recipe
+              {editingRecipe ? 'Update Recipe' : 'Save Recipe'}
             </Button>
           </div>
         </div>
@@ -2355,7 +2728,9 @@ export const OwnerInventoryManager: React.FC = () => {
       <Modal
         isOpen={isRecipeViewModalOpen}
         onClose={() => setIsRecipeViewModalOpen(false)}
-        title={`Recipe details: ${viewingRecipe?.recipeName}`}
+        title={`Recipe details: ${viewingRecipe?.recipeName || 'Recipe'}`}
+        variant="light"
+        size="2xl"
       >
         {viewingRecipe && (() => {
           const totalCost = viewingRecipe.ingredients.reduce((sum, ri) => {
@@ -2367,29 +2742,31 @@ export const OwnerInventoryManager: React.FC = () => {
           const costPerServing = totalCost / yieldQty;
 
           return (
-            <div className="space-y-4 text-left select-none text-xs">
-              <div className="grid grid-cols-2 gap-4 pb-3 border-b border-slate-805">
+            <div className="space-y-4 text-left select-none text-xs text-slate-800">
+              <div className="grid grid-cols-2 gap-4 pb-3 border-b border-slate-200">
                 <div>
-                  <span className="text-slate-500 font-bold block uppercase tracking-wider text-[9px] mb-0.5">Menu Item</span>
-                  <strong className="text-textPearl text-sm">{viewingRecipe.menuItemName}</strong>
+                  <span className="text-slate-500 font-extrabold block uppercase tracking-wider text-[9px] mb-0.5">Menu Item</span>
+                  <strong className="text-slate-900 text-sm">{viewingRecipe.menuItemName}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-500 font-bold block uppercase tracking-wider text-[9px] mb-0.5">Portion Size</span>
-                  <strong className="text-textPearl text-sm">{viewingRecipe.portionSize || '1 Portion'}</strong>
+                  <span className="text-slate-500 font-extrabold block uppercase tracking-wider text-[9px] mb-0.5">Portion Size</span>
+                  <strong className="text-slate-900 text-sm">{viewingRecipe.portionSize || '1 Portion'}</strong>
                 </div>
               </div>
 
               {viewingRecipe.cookingNotes && (
                 <div>
-                  <span className="text-slate-500 font-bold block uppercase tracking-wider text-[9px] mb-1">Cooking Notes</span>
-                  <p className="p-3 bg-slate-900 border border-slate-850 rounded-xl text-slate-300 font-semibold leading-relaxed">
+                  <span className="text-slate-500 font-extrabold block uppercase tracking-wider text-[9px] mb-1">Cooking Notes</span>
+                  <p className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 font-medium leading-relaxed">
                     {viewingRecipe.cookingNotes}
                   </p>
                 </div>
               )}
 
               <div>
-                <span className="text-slate-500 font-bold block uppercase tracking-wider text-[9px] mb-2.5">Ingredient Proportions & Cost Breakdown</span>
+                <span className="text-slate-500 font-extrabold block uppercase tracking-wider text-[9px] mb-2.5">
+                  Ingredient Proportions & Cost Breakdown
+                </span>
                 <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                   {viewingRecipe.ingredients.map((ing, idx) => {
                     const ingMaster = ingredients.find(i => i.id === ing.ingredientId);
@@ -2397,14 +2774,14 @@ export const OwnerInventoryManager: React.FC = () => {
                     const ingTotalCost = ing.quantity * cost;
 
                     return (
-                      <div key={idx} className="p-2.5 bg-slate-900/50 border border-slate-850 rounded-xl flex justify-between items-center text-xs">
+                      <div key={idx} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex justify-between items-center text-xs">
                         <div>
-                          <strong className="text-textPearl block font-bold">{ing.ingredientName}</strong>
-                          <span className="text-[10px] text-slate-500 block font-semibold mt-0.5">
+                          <strong className="text-slate-900 block font-bold">{ing.ingredientName}</strong>
+                          <span className="text-[10px] text-slate-500 block font-medium mt-0.5">
                             {ing.quantity} {ing.unit} {ing.notes ? `• ${ing.notes}` : ''}
                           </span>
                         </div>
-                        <span className="font-mono text-emerald-500 font-bold">
+                        <span className="font-mono text-emerald-600 font-bold">
                           {formatPrice(ingTotalCost)}
                         </span>
                       </div>
@@ -2413,22 +2790,25 @@ export const OwnerInventoryManager: React.FC = () => {
                 </div>
               </div>
 
-              <div className="p-3 bg-slate-900 border border-slate-850 rounded-xl space-y-1.5 text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                <div className="flex justify-between">
-                  <span>Ingredients Count:</span>
-                  <span className="text-textPearl">{viewingRecipe.ingredients?.length || 0} items</span>
+              <div className="p-3.5 bg-[#FAF8F4] border border-[#E5E0D9] rounded-xl space-y-1.5 text-xs text-slate-600 font-medium">
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Ingredients Count:</span>
+                  <span className="font-bold text-slate-900">{viewingRecipe.ingredients?.length || 0} items</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Total cost of Ingredients:</span>
-                  <span className="text-emerald-500 font-mono">{formatPrice(totalCost)}</span>
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Total cost of Ingredients:</span>
+                  <span className="text-emerald-600 font-mono font-bold">{formatPrice(totalCost)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Estimated Cost / Serving (Yield {yieldQty}):</span>
-                  <span className="text-emerald-500 font-mono font-extrabold">{formatPrice(costPerServing)}</span>
+                <div className="flex justify-between items-center pt-1 border-t border-[#E5E0D9]">
+                  <span className="text-[11px] font-extrabold uppercase text-slate-700 tracking-wider">Estimated Cost / Serving (Yield {yieldQty}):</span>
+                  <span className="text-emerald-600 font-mono font-extrabold text-sm">{formatPrice(costPerServing)}</span>
                 </div>
               </div>
 
-              <Button onClick={() => setIsRecipeViewModalOpen(false)} className="w-full py-2.5 font-bold">
+              <Button 
+                onClick={() => setIsRecipeViewModalOpen(false)} 
+                className="w-full py-2.5 font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 rounded-xl"
+              >
                 Close Recipe details
               </Button>
             </div>

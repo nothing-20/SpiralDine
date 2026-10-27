@@ -2,7 +2,7 @@ import React from 'react';
 import { cn } from '../../../utils/cn';
 
 export interface ITableColumn<T> {
-  header: string;
+  header: React.ReactNode;
   accessor: (row: T) => React.ReactNode;
   className?: string;
 }

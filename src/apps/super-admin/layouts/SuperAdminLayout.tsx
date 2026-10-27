@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../../context/AuthContext';
 import { 
@@ -17,9 +17,12 @@ import {
   Menu, 
   X,
   ShieldAlert,
-  MessageSquare
+  MessageSquare,
+  ClipboardCheck
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from '../../../shared/firebase/config';
 
 interface INavItem {
   to: string;
@@ -30,6 +33,7 @@ interface INavItem {
 
 const navItems: INavItem[] = [
   { to: '/super-admin/dashboard', label: 'Overview', icon: LayoutDashboard },
+  { to: '/super-admin/applications', label: 'Applications', icon: ClipboardCheck },
   { to: '/super-admin/restaurants', label: 'Restaurants', icon: Building2 },
   { to: '/super-admin/owners', label: 'Owners', icon: Users },
   { to: '/super-admin/customers', label: 'Customers', icon: Contact2 },
@@ -48,6 +52,24 @@ export const SuperAdminLayout: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [pendingAppsCount, setPendingAppsCount] = useState<number>(0);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'restaurantApplications'), (snap) => {
+      let count = 0;
+      snap.forEach((d) => {
+        const data = d.data();
+        if (data.status === 'pending_approval' || !data.status) {
+          count++;
+        }
+      });
+      setPendingAppsCount(count);
+    }, (err) => {
+      console.warn('[SuperAdminLayout] Application count listener error:', err);
+    });
+
+    return () => unsub();
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -125,7 +147,17 @@ export const SuperAdminLayout: React.FC = () => {
                   <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-slate-950' : 'text-slate-500'}`} />
                   <span className="truncate">{item.label}</span>
                 </div>
-                {item.badge && (
+                {item.to === '/super-admin/applications' && pendingAppsCount > 0 ? (
+                  <span className={`
+                    text-[10px] font-extrabold px-1.5 py-0.5 rounded-full animate-pulse
+                    ${isActive 
+                      ? 'bg-slate-950 text-amber-400' 
+                      : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                    }
+                  `}>
+                    {pendingAppsCount}
+                  </span>
+                ) : item.badge ? (
                   <span className={`
                     text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-md
                     ${isActive 
@@ -135,7 +167,7 @@ export const SuperAdminLayout: React.FC = () => {
                   `}>
                     {item.badge}
                   </span>
-                )}
+                ) : null}
               </NavLink>
             );
           })}

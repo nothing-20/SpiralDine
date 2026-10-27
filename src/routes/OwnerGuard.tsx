@@ -32,6 +32,11 @@ export const OwnerGuard: React.FC = () => {
     return <Navigate to="/customer/home" replace />;
   }
 
+  // Pending, rejected, or more_info_required application applicants cannot access owner dashboard
+  if (user?.status && ['pending_approval', 'rejected', 'more_info_required'].includes(user.status)) {
+    return <Navigate to="/application-pending" replace />;
+  }
+
   // Allowed roles for OwnerGuard: owner, admin, manager, waiter, kitchen, cashier, reception
   const allowedRoles = ['owner', 'admin', 'manager', 'waiter', 'kitchen', 'cashier', 'reception'];
   if (!allowedRoles.includes(role)) {

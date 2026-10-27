@@ -16,6 +16,26 @@
       "destination": "/api/super-admin/setup"
     },
     {
+      "source": "/api/send-welcome",
+      "destination": "/api/send-email?type=welcome"
+    },
+    {
+      "source": "/api/send-invoice",
+      "destination": "/api/send-email?type=invoice"
+    },
+    {
+      "source": "/api/send-order-confirmation",
+      "destination": "/api/send-email?type=order_confirmation"
+    },
+    {
+      "source": "/api/send-reservation",
+      "destination": "/api/send-email?type=reservation"
+    },
+    {
+      "source": "/api/notify-admin-registration",
+      "destination": "/api/send-email?type=admin_registration"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },
