@@ -53,6 +53,11 @@ export const WorkspaceGuard: React.FC = () => {
     );
   }
 
+  // Block pending or rejected applications immediately
+  if (validationError === 'application-pending' || (user?.status && ['pending_approval', 'rejected', 'more_info_required'].includes(user.status))) {
+    return <Navigate to="/application-pending" replace />;
+  }
+
   // Redirect to workspace error if validation has failed
   if (validationError) {
     if (isOwner) {

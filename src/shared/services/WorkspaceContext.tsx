@@ -131,6 +131,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       // Step 2: Validate Account Status == "active"
       if (userData.status && userData.status !== 'active') {
+        if (['pending_approval', 'rejected', 'more_info_required'].includes(userData.status)) {
+          console.info('[WorkspaceValidation] Result', { allowed: false, reason: 'APPLICATION_PENDING', status: userData.status });
+          setValidationError('application-pending');
+          setIsLoading(false);
+          return;
+        }
         console.info('[WorkspaceValidation] Result', { allowed: false, reason: 'USER_SUSPENDED' });
         setValidationError('user-suspended');
         setIsLoading(false);
@@ -204,8 +210,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       }
 
-      // Self-heal missing restaurant document for authenticated owner
-      if (!tenantData && isOwner) {
+      // Self-heal missing restaurant document for authenticated active owner
+      if (!tenantData && isOwner && !['pending_approval', 'rejected', 'more_info_required'].includes(userData.status)) {
         tenantId = tenantId || `restaurant-${user.uid.slice(0, 8)}`;
         tenantData = {
           id: tenantId,
@@ -251,12 +257,20 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       }
 
-      // Validate Tenant Status (owners are never locked out with 'tenant-suspended')
-      if (tenantData.status && tenantData.status !== 'active' && !isOwner) {
-        console.info('[WorkspaceValidation] Result', { allowed: false, reason: 'TENANT_DISABLED' });
-        setValidationError('tenant-suspended');
-        setIsLoading(false);
-        return;
+      // Validate Tenant Status (owners are never locked out with 'tenant-suspended', but pending applications must be blocked)
+      if (tenantData.status && tenantData.status !== 'active') {
+        if (['pending_approval', 'rejected', 'more_info_required'].includes(tenantData.status)) {
+          console.info('[WorkspaceValidation] Result', { allowed: false, reason: 'APPLICATION_PENDING', status: tenantData.status });
+          setValidationError('application-pending');
+          setIsLoading(false);
+          return;
+        }
+        if (!isOwner) {
+          console.info('[WorkspaceValidation] Result', { allowed: false, reason: 'TENANT_DISABLED' });
+          setValidationError('tenant-suspended');
+          setIsLoading(false);
+          return;
+        }
       }
 
       // Step 5: Validate Subscription

@@ -34,6 +34,7 @@ const LoginForm = React.lazy(() => import('../features/auth/components/LoginForm
 const StaffLogin = React.lazy(() => import('../features/auth/components/StaffLogin'));
 const StaffActivate = React.lazy(() => import('../features/auth/components/StaffActivate'));
 const WorkspaceError = React.lazy(() => import('../features/auth/components/WorkspaceError'));
+const ApplicationPendingPage = React.lazy(() => import('../features/auth/components/ApplicationPendingPage'));
 const RegisterForm = React.lazy(() => import('../features/auth/components/RegisterForm'));
 const ForgotPasswordForm = React.lazy(() => import('../features/auth/components/ForgotPasswordForm'));
 const VerifyEmail = React.lazy(() => import('../features/auth/components/VerifyEmail'));
@@ -116,6 +117,7 @@ const SuperAdminLayout = React.lazy(() => import('../apps/super-admin/layouts/Su
 const SuperAdminLogin = React.lazy(() => import('../apps/super-admin/pages/SuperAdminLogin'));
 const SuperAdminSetup = React.lazy(() => import('../apps/super-admin/pages/SuperAdminSetup'));
 const SuperAdminOverview = React.lazy(() => import('../apps/super-admin/pages/SuperAdminOverview'));
+const SuperAdminApplications = React.lazy(() => import('../apps/super-admin/pages/SuperAdminApplications'));
 const SuperAdminRestaurants = React.lazy(() => import('../apps/super-admin/pages/SuperAdminRestaurants'));
 const SuperAdminOwners = React.lazy(() => import('../apps/super-admin/pages/SuperAdminOwners'));
 const SuperAdminCustomers = React.lazy(() => import('../apps/super-admin/pages/SuperAdminCustomers'));
@@ -342,6 +344,7 @@ export const AppRoutes: React.FC = () => {
 
         <Route path="/unauthorized" element={<Unauthorized />} />
         <Route path="/workspace-error" element={<WorkspaceError />} />
+        <Route path="/application-pending" element={<ApplicationPendingPage />} />
 
         {/* 2. Public Auth sub-routes gated by PublicGuard redirect interceptor */}
         <Route element={<PublicGuard />}>
@@ -512,6 +515,7 @@ export const AppRoutes: React.FC = () => {
           <Route element={<SuperAdminLayout />}>
             <Route path="/super-admin" element={<Navigate to="/super-admin/dashboard" replace />} />
             <Route path="/super-admin/dashboard" element={<SuperAdminOverview />} />
+            <Route path="/super-admin/applications" element={<SuperAdminApplications />} />
             <Route path="/super-admin/restaurants" element={<SuperAdminRestaurants />} />
             <Route path="/super-admin/tenants" element={<Navigate to="/super-admin/restaurants" replace />} />
             <Route path="/super-admin/owners" element={<SuperAdminOwners />} />

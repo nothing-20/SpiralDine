@@ -143,6 +143,11 @@ export const LoginForm: React.FC = () => {
     }
 
     if (profile.status && profile.status !== 'active') {
+      if (['pending_approval', 'rejected', 'more_info_required'].includes(profile.status)) {
+        console.info(`[AUTH ${method} Login] Account application status:`, profile.status);
+        navigate('/application-pending', { replace: true });
+        return true;
+      }
       console.warn(`[AUTH ${method} Login] Inactive/suspended account:`, profile.status);
       await authService.signOutUser();
       const msg = 'Your account is currently inactive or suspended. Please contact your restaurant administrator.';

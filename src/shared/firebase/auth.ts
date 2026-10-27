@@ -92,7 +92,7 @@ export const signUpOwner = async (
     coverImageUrl: null,
     coverImage: null,
     planTier: 'starter',
-    status: 'active',
+    status: 'pending_approval',
     country: selectedCountry,
     currency: selectedCurrency,
     currencyCode: selectedCurrency,
@@ -116,7 +116,7 @@ export const signUpOwner = async (
     updatedAt: new Date().toISOString()
   });
 
-  // 2. Create corresponding restaurant document with null logo/cover and ownerUid
+  // 2. Create corresponding restaurant document with pending_approval status
   const restaurantRef = doc(db, 'restaurants', tenantId);
   await setDoc(restaurantRef, {
     id: tenantId,
@@ -137,25 +137,70 @@ export const signUpOwner = async (
     rating: 0,
     reviewCount: 0,
     priceRange: '$$',
-    status: 'active',
+    status: 'pending_approval',
     address: { street: '', city: '', zipCode: '' },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   });
 
-  // 3. Create user profile in users/{uid} with ownerUid and tenantId
+  // 3. Create user profile in users/{uid} with pending_approval status
   const userRef = doc(db, 'users', user.uid);
   await setDoc(userRef, {
     uid: user.uid,
-    email,
-    fullName: displayName,
-    displayName,
+    email: email.trim().toLowerCase(),
+    fullName: displayName.trim(),
+    displayName: displayName.trim(),
     tenantId,
     role: 'owner' as TUserRole,
-    status: 'active',
+    status: 'pending_approval',
     branchId: '',
     createdAt: new Date().toISOString()
   });
+
+  // 4. Create restaurant registration application document for Super Admin review
+  const appRef = doc(db, 'restaurantApplications', tenantId);
+  await setDoc(appRef, {
+    id: tenantId,
+    tenantId,
+    restaurantName,
+    ownerUid: user.uid,
+    ownerEmail: email.trim().toLowerCase(),
+    ownerName: displayName.trim(),
+    country: selectedCountry,
+    currency: selectedCurrency,
+    currencyCode: selectedCurrency,
+    currencySymbol: symbol,
+    locale: selectedLocale,
+    status: 'pending_approval',
+    submittedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  // 5. Trigger asynchronous administrator notification (non-blocking)
+  try {
+    const token = await user.getIdToken();
+    fetch('/api/notify-admin-registration', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        applicationId: tenantId,
+        tenantId,
+        restaurantName,
+        ownerEmail: email.trim().toLowerCase(),
+        ownerName: displayName.trim(),
+        country: selectedCountry,
+        currency: selectedCurrency
+      })
+    }).catch((err) => {
+      console.warn('[AUTH signUpOwner] Admin notification dispatched (status handled):', err);
+    });
+  } catch (notifErr) {
+    console.warn('[AUTH signUpOwner] Failed to initiate admin notification fetch:', notifErr);
+  }
 
   // Note: Newly created restaurants start with ZERO mock/demo data.
   // Tables, menus, inventory, staff, and strategies start completely empty.

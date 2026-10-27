@@ -3,7 +3,7 @@ export interface ITenant {
   name: string;
   logoUrl: string;
   planTier: 'starter' | 'pro' | 'enterprise';
-  status: 'active' | 'suspended' | 'trial';
+  status: 'active' | 'suspended' | 'trial' | 'pending_approval' | 'rejected' | 'more_info_required';
   address: {
     street: string;
     city: string;
@@ -53,4 +53,29 @@ export interface IInventoryItem {
   unit: 'pieces' | 'kg' | 'liters' | 'grams';
   reorderThreshold: number;
   lastRestockedAt: string;
+}
+
+export type TApplicationStatus = 'pending_approval' | 'approved' | 'rejected' | 'more_info_required';
+
+export interface IRestaurantApplication {
+  id: string;
+  tenantId: string;
+  restaurantName: string;
+  ownerUid: string;
+  ownerEmail: string;
+  ownerName: string;
+  country: string;
+  currency: string;
+  currencyCode?: string;
+  currencySymbol?: string;
+  locale?: string;
+  status: TApplicationStatus;
+  submittedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewNotes?: string;
+  rejectionReason?: string;
+  moreInfoNotes?: string;
 }
