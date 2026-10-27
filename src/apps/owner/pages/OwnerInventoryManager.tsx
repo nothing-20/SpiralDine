@@ -15,6 +15,7 @@ import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { formatPrice } from '../../../shared/utils/format';
 import { inventoryService } from '../../../shared/services/inventoryService';
+import { getMenuItemPath } from '../../../firebase/collections';
 
 // UI Kit components
 import Button from '../../../components/ui/Button/Button';
@@ -91,6 +92,9 @@ export const OwnerInventoryManager: React.FC = () => {
   const [suggestions, setSuggestions] = useState<IPurchaseSuggestion[]>([]);
   const [wasteLogs, setWasteLogs] = useState<IWasteLog[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
+  const [isMenuItemsLoading, setIsMenuItemsLoading] = useState(true);
+  const [menuItemsError, setMenuItemsError] = useState<string | null>(null);
+  const [menuItemsReloadCounter, setMenuItemsReloadCounter] = useState(0);
   const [goodsReceipts, setGoodsReceipts] = useState<IGoodsReceipt[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<IPurchaseOrder[]>([]);
   const [supplierPrices, setSupplierPrices] = useState<ISupplierPrice[]>([]);
@@ -254,14 +258,26 @@ export const OwnerInventoryManager: React.FC = () => {
       setWasteLogs(list);
     });
 
-    // Menu Items listener (real-time)
-    const unsubMenuItems = onSnapshot(collection(db, 'restaurants', tenantId, 'menuItems'), (snap) => {
-      const list: any[] = [];
-      snap.forEach(docSnap => {
-        list.push({ id: docSnap.id, ...docSnap.data() });
-      });
-      setMenuItems(list);
-    });
+    // Menu Items listener (real-time from canonical path)
+    setIsMenuItemsLoading(true);
+    setMenuItemsError(null);
+    const unsubMenuItems = onSnapshot(
+      collection(db, getMenuItemPath(tenantId)),
+      (snap) => {
+        const list: any[] = [];
+        snap.forEach(docSnap => {
+          list.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        setMenuItems(list);
+        setIsMenuItemsLoading(false);
+        setMenuItemsError(null);
+      },
+      (err) => {
+        console.error('Menu items listener error:', err);
+        setMenuItemsError(err.message || 'Failed to load menu items');
+        setIsMenuItemsLoading(false);
+      }
+    );
 
     // Goods Receipts listener (authoritative received goods expenditure)
     const unsubReceipts = onSnapshot(collection(db, 'restaurants', tenantId, 'goodsReceipts'), (snap) => {
@@ -305,7 +321,7 @@ export const OwnerInventoryManager: React.FC = () => {
       unsubPOs();
       unsubPrices();
     };
-  }, [tenantId]);
+  }, [tenantId, menuItemsReloadCounter]);
 
   // Derived stock overview metrics
   const stockMetrics = useMemo(() => {
@@ -780,12 +796,32 @@ export const OwnerInventoryManager: React.FC = () => {
 
   const handleSaveRecipe = async () => {
     if (!tenantId || !selectedRecipeItem) {
-      toast.error('Please select a Menu Item.');
+      toast.error('Please select a valid Menu Item.');
       return;
     }
     if (!recipeName.trim()) {
       toast.error('Recipe Name is required.');
       return;
+    }
+    const yieldNum = parseFloat(recipeYield);
+    if (isNaN(yieldNum) || yieldNum <= 0) {
+      toast.error('Preparation yield must be a positive number.');
+      return;
+    }
+    if (recipeIngredients.length === 0) {
+      toast.error('Recipe must contain at least one ingredient mapping.');
+      return;
+    }
+    for (const [idx, ing] of recipeIngredients.entries()) {
+      if (!ing.ingredientId) {
+        toast.error(`Please select an ingredient for row #${idx + 1}`);
+        return;
+      }
+      const qty = parseFloat(ing.quantity);
+      if (isNaN(qty) || qty <= 0) {
+        toast.error(`Quantity for "${ing.ingredientName || 'ingredient'}" must be greater than zero.`);
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -797,17 +833,17 @@ export const OwnerInventoryManager: React.FC = () => {
         menuItemId: selectedRecipeItem.id,
         menuItemName: selectedRecipeItem.name,
         version: recipeVersion || 'v1.0',
-        yieldQuantity: parseFloat(recipeYield) || 1,
-        wastePercentage: parseFloat(recipeWastePercent) || 0,
+        yieldQuantity: yieldNum,
+        wastePercentage: Math.max(0, parseFloat(recipeWastePercent) || 0),
         recipeName: recipeName.trim(),
-        portionSize: recipePortionSize.trim(),
-        cookingNotes: recipeCookingNotes.trim(),
+        portionSize: (recipePortionSize || '1 Portion').trim(),
+        cookingNotes: (recipeCookingNotes || '').trim(),
         ingredients: recipeIngredients.map(ing => ({
           ingredientId: ing.ingredientId,
           ingredientName: ing.ingredientName,
           quantity: parseFloat(ing.quantity) || 0,
           unit: ing.unit || 'g',
-          notes: ing.notes || ''
+          notes: (ing.notes || '').trim()
         })),
         updatedAt: new Date().toISOString()
       };
@@ -1613,7 +1649,7 @@ export const OwnerInventoryManager: React.FC = () => {
                 <select
                   value={recipeCategoryFilter}
                   onChange={(e) => setRecipeCategoryFilter(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none"
+                  className="w-full bg-white border border-slate-200 focus:border-[#C9533B] rounded-xl p-3 text-xs font-semibold text-slate-800 outline-none shadow-xs"
                 >
                   <option value="all">All Categories</option>
                   {['Vegetables', 'Meat', 'Dairy', 'Dry Goods', 'Beverages', 'Spices', 'Bakery', 'Other'].map(cat => (
@@ -1624,7 +1660,7 @@ export const OwnerInventoryManager: React.FC = () => {
             </div>
             <Button
               onClick={handleOpenCreateRecipe}
-              className="w-full md:w-auto bg-gradient-to-r from-primary to-amber-600 hover:from-primary-hover hover:to-amber-700 text-background flex items-center justify-center gap-1.5 text-xs font-bold py-3 px-4"
+              className="w-full md:w-auto bg-[#C9533B] hover:bg-[#A94332] text-white flex items-center justify-center gap-1.5 text-xs font-bold py-3 px-4 rounded-xl shadow-xs transition-colors"
             >
               <Plus className="w-4 h-4" />
               <span>Create Recipe</span>
@@ -1632,15 +1668,15 @@ export const OwnerInventoryManager: React.FC = () => {
           </div>
 
           {recipes.length === 0 ? (
-            <Card className="p-10 text-center border border-dashed border-slate-850 rounded-2xl bg-slate-900/10 space-y-4">
-              <BookOpen className="w-12 h-12 text-slate-600 mx-auto mb-2" />
-              <h4 className="text-sm font-bold text-textPearl">No recipes configured yet</h4>
+            <Card className="p-10 text-center border border-dashed border-slate-200 rounded-2xl bg-white space-y-4">
+              <BookOpen className="w-12 h-12 text-slate-400 mx-auto mb-2" />
+              <h4 className="text-sm font-bold text-slate-800">No recipes configured yet</h4>
               <p className="text-xs text-slate-500 max-w-md mx-auto">
                 Map your menu items to ingredients and quantities to estimate costs, calculate yield limits, and automate stock deductions.
               </p>
               <Button
                 onClick={handleOpenCreateRecipe}
-                className="mx-auto text-xs font-bold py-2 px-4 bg-gradient-to-r from-primary to-amber-600 text-background"
+                className="mx-auto text-xs font-bold py-2.5 px-4 bg-[#C9533B] hover:bg-[#A94332] text-white rounded-xl shadow-xs"
               >
                 Create Recipe
               </Button>
@@ -1659,8 +1695,8 @@ export const OwnerInventoryManager: React.FC = () => {
 
                 if (filteredRecipes.length === 0) {
                   return (
-                    <Card className="p-8 text-center border border-dashed border-slate-850 rounded-2xl bg-slate-900/10">
-                      <AlertTriangle className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                    <Card className="p-8 text-center border border-dashed border-slate-200 rounded-2xl bg-white">
+                      <AlertTriangle className="w-8 h-8 text-slate-400 mx-auto mb-2" />
                       <p className="text-xs text-slate-500 font-semibold">No recipes matching your filters.</p>
                     </Card>
                   );
@@ -1676,12 +1712,12 @@ export const OwnerInventoryManager: React.FC = () => {
                       }, 0);
 
                       return (
-                        <Card key={recipe.id} className="p-5 border-slate-850 bg-slate-900/30 flex flex-col justify-between space-y-4">
+                        <Card key={recipe.id} className="p-5 border-slate-200 bg-white shadow-xs rounded-2xl flex flex-col justify-between space-y-4">
                           <div className="space-y-2">
                             <div className="flex justify-between items-start">
                               <div>
-                                <h4 className="font-bold text-textPearl text-base">{recipe.menuItemName}</h4>
-                                <span className="text-[10px] text-primary font-bold uppercase tracking-wider block mt-0.5">
+                                <h4 className="font-bold text-slate-900 text-base">{recipe.menuItemName}</h4>
+                                <span className="text-[10px] text-[#C9533B] font-bold uppercase tracking-wider block mt-0.5">
                                   {recipe.recipeName || 'Standard Recipe'}
                                 </span>
                               </div>
@@ -1689,18 +1725,18 @@ export const OwnerInventoryManager: React.FC = () => {
                                 {recipe.portionSize || '1 Portion'}
                               </Badge>
                             </div>
-                            <div className="grid grid-cols-3 gap-2 py-2.5 border-y border-slate-850/50 text-[10px] text-slate-450 font-bold uppercase tracking-wider">
+                            <div className="grid grid-cols-3 gap-2 py-2.5 border-y border-slate-100 text-[10px] font-bold uppercase tracking-wider">
                               <div>
-                                <span className="text-slate-550 block text-[9px] mb-0.5">Ingredients</span>
-                                <span className="text-xs text-textPearl font-extrabold">{recipe.ingredients?.length || 0} items</span>
+                                <span className="text-slate-400 block text-[9px] mb-0.5">Ingredients</span>
+                                <span className="text-xs text-slate-800 font-extrabold">{recipe.ingredients?.length || 0} items</span>
                               </div>
                               <div>
-                                <span className="text-slate-550 block text-[9px] mb-0.5">Estimated Cost</span>
-                                <span className="text-xs text-emerald-500 font-mono font-extrabold">{formatPrice(estimatedCost)}</span>
+                                <span className="text-slate-400 block text-[9px] mb-0.5">Estimated Cost</span>
+                                <span className="text-xs text-emerald-600 font-mono font-extrabold">{formatPrice(estimatedCost)}</span>
                               </div>
                               <div>
-                                <span className="text-slate-550 block text-[9px] mb-0.5">Yield Servings</span>
-                                <span className="text-xs text-textPearl font-extrabold">{recipe.yieldQuantity || 1} serv</span>
+                                <span className="text-slate-400 block text-[9px] mb-0.5">Yield Servings</span>
+                                <span className="text-xs text-slate-800 font-extrabold">{recipe.yieldQuantity || 1} serv</span>
                               </div>
                             </div>
                             <div className="text-[10px] text-slate-500 font-semibold flex items-center justify-between">
@@ -1712,14 +1748,14 @@ export const OwnerInventoryManager: React.FC = () => {
                             <Button 
                               variant="secondary"
                               onClick={() => handleOpenViewRecipe(recipe)}
-                              className="flex-1 text-xs py-2 px-2.5 font-bold"
+                              className="flex-1 text-xs py-2 px-2.5 font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl"
                             >
                               View
                             </Button>
                             <Button 
                               variant="secondary"
                               onClick={() => handleOpenEditRecipe(recipe)}
-                              className="flex-1 text-xs py-2 px-2.5 font-bold"
+                              className="flex-1 text-xs py-2 px-2.5 font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl"
                             >
                               Edit
                             </Button>
@@ -1729,7 +1765,7 @@ export const OwnerInventoryManager: React.FC = () => {
                                 const targetId = prompt(`Enter target Menu Item ID to copy recipe mapping to:\nOptions:\n${menuItems.filter(m => m.id !== recipe.menuItemId).map(m => `- ${m.id} (${m.name})`).join('\n')}`);
                                 if (targetId) handleDuplicateRecipe(recipe, targetId);
                               }}
-                              className="flex-1 text-[10px] border-slate-800 text-slate-300 font-bold py-2 px-2"
+                              className="flex-1 text-[10px] border-slate-200 hover:bg-slate-50 text-slate-700 font-bold py-2 px-2 rounded-xl"
                             >
                               Duplicate
                             </Button>
@@ -1740,7 +1776,7 @@ export const OwnerInventoryManager: React.FC = () => {
                                   handleDeleteRecipe(recipe.id);
                                 }
                               }}
-                              className="flex-1 text-[10px] border-slate-800 text-red-400 hover:text-red-500 font-bold py-2 px-2"
+                              className="flex-1 text-[10px] border-red-200 hover:bg-red-50 text-red-600 font-bold py-2 px-2 rounded-xl"
                             >
                               Delete
                             </Button>
@@ -2400,178 +2436,289 @@ export const OwnerInventoryManager: React.FC = () => {
         isOpen={isRecipeModalOpen}
         onClose={() => setIsRecipeModalOpen(false)}
         title={editingRecipe ? `Edit Recipe: ${recipeName}` : 'Create New Recipe'}
+        variant="light"
+        size="2xl"
       >
-        <div className="space-y-4 text-left select-none text-xs">
-          <div className="space-y-1">
-            <label className="font-bold text-slate-500 uppercase block">Select Menu Item</label>
+        <div className="space-y-5 text-left select-none text-xs text-slate-800">
+          {/* Menu Item Selector Section */}
+          <div className="space-y-1.5">
+            <div className="flex justify-between items-center">
+              <label className="font-extrabold text-slate-600 uppercase text-[10px] tracking-wider block">
+                Select Menu Item <span className="text-[#C9533B]">*</span>
+              </label>
+              {isMenuItemsLoading && (
+                <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1">
+                  <RefreshCcw className="w-3 h-3 animate-spin text-[#C9533B]" />
+                  Loading menu items...
+                </span>
+              )}
+            </div>
+
             {editingRecipe ? (
-              <div className="w-full bg-slate-900 border border-slate-850 rounded-xl p-3 text-xs font-semibold text-slate-400">
+              <div className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-bold text-slate-700">
                 {selectedRecipeItem?.name || selectedRecipeItem?.menuItemName}
               </div>
+            ) : menuItemsError ? (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between text-xs">
+                <span className="text-red-700 font-semibold flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
+                  Failed to load menu items: {menuItemsError}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMenuItemsReloadCounter(c => c + 1)}
+                  className="px-2.5 py-1 text-[11px] font-bold bg-white border border-red-300 text-red-700 rounded-lg hover:bg-red-50 flex items-center gap-1 shadow-xs"
+                >
+                  <RefreshCcw className="w-3 h-3" />
+                  Retry
+                </button>
+              </div>
             ) : (
-              <select
-                value={selectedRecipeItem?.id || ''}
-                onChange={(e) => {
-                  const item = menuItems.find(m => m.id === e.target.value);
-                  setSelectedRecipeItem(item);
-                  if (item) {
-                    setRecipeName(`${item.name} Standard Recipe`);
-                  }
-                }}
-                className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none"
-              >
-                <option value="">Select Menu Item</option>
-                {menuItems.map(item => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
-              </select>
+              <div>
+                <select
+                  value={selectedRecipeItem?.id || ''}
+                  disabled={isMenuItemsLoading}
+                  onChange={(e) => {
+                    const item = menuItems.find(m => m.id === e.target.value);
+                    setSelectedRecipeItem(item || null);
+                    if (item) {
+                      setRecipeName(`${item.name} Standard Recipe`);
+                    }
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 focus:border-[#C9533B] focus:bg-white rounded-xl p-3 text-xs font-bold text-slate-800 outline-none transition-colors disabled:opacity-50"
+                >
+                  <option value="">
+                    {isMenuItemsLoading 
+                      ? 'Loading menu items...' 
+                      : menuItems.length === 0 
+                        ? 'No menu items found in Menu Management' 
+                        : 'Select Menu Item'}
+                  </option>
+                  {menuItems.map(item => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} {item.category ? `(${item.category})` : ''}
+                    </option>
+                  ))}
+                </select>
+
+                {!isMenuItemsLoading && menuItems.length === 0 && (
+                  <div className="mt-1.5 p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-[11px] flex items-center justify-between">
+                    <span>No menu items found. Add menu items in Menu Management before creating recipes.</span>
+                    <a
+                      href="/owner/menu"
+                      className="ml-2 font-bold text-[#C9533B] hover:underline whitespace-nowrap"
+                    >
+                      Go to Menu Management &rarr;
+                    </a>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
-          <div className="space-y-1">
-            <label className="font-bold text-slate-500 uppercase block">Recipe Name</label>
+          {/* Recipe Name */}
+          <div className="space-y-1.5">
+            <label className="font-extrabold text-slate-600 uppercase text-[10px] tracking-wider block">
+              Recipe Name <span className="text-[#C9533B]">*</span>
+            </label>
             <input
               type="text"
-              placeholder="Standard Recipe, Chef Special Recipe, etc."
+              placeholder="E.g. Margherita Pizza Standard Recipe, Chef Special Burger"
               value={recipeName}
               onChange={(e) => setRecipeName(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none"
+              className="w-full bg-slate-50 border border-slate-200 focus:border-[#C9533B] focus:bg-white rounded-xl p-3 text-xs font-semibold text-slate-800 outline-none transition-colors"
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="font-bold text-slate-500 uppercase block">Portion Size</label>
+          {/* Portion Size & Yield */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="font-extrabold text-slate-600 uppercase text-[10px] tracking-wider block">
+                Portion Size
+              </label>
               <input
                 type="text"
-                placeholder="E.g. 250g, 1 plate, Large"
+                placeholder="E.g. 250g, 1 plate, Regular, Large"
                 value={recipePortionSize}
                 onChange={(e) => setRecipePortionSize(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none font-mono"
+                className="w-full bg-slate-50 border border-slate-200 focus:border-[#C9533B] focus:bg-white rounded-xl p-3 text-xs font-semibold text-slate-800 outline-none transition-colors"
               />
             </div>
-            <div className="space-y-1">
-              <label className="font-bold text-slate-500 uppercase block">Preparation Yield (Servings)</label>
+            <div className="space-y-1.5">
+              <label className="font-extrabold text-slate-600 uppercase text-[10px] tracking-wider block">
+                Preparation Yield (Servings) <span className="text-[#C9533B]">*</span>
+              </label>
               <input
                 type="number"
+                min="0.1"
+                step="any"
                 value={recipeYield}
                 onChange={(e) => setRecipeYield(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none font-mono"
+                className="w-full bg-slate-50 border border-slate-200 focus:border-[#C9533B] focus:bg-white rounded-xl p-3 text-xs font-semibold text-slate-800 outline-none transition-colors font-mono"
               />
             </div>
           </div>
 
-          <div className="space-y-1">
-            <label className="font-bold text-slate-500 uppercase block">Cooking Notes (Optional)</label>
+          {/* Cooking Notes */}
+          <div className="space-y-1.5">
+            <label className="font-extrabold text-slate-600 uppercase text-[10px] tracking-wider block">
+              Cooking Notes (Optional)
+            </label>
             <textarea
-              placeholder="Cooking steps, prep instructions, etc."
+              placeholder="Prep steps, secret seasonings, cooking temperature, or plating notes..."
               value={recipeCookingNotes}
               onChange={(e) => setRecipeCookingNotes(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none"
+              className="w-full bg-slate-50 border border-slate-200 focus:border-[#C9533B] focus:bg-white rounded-xl p-3 text-xs font-semibold text-slate-800 outline-none transition-colors resize-none"
               rows={2}
             />
           </div>
 
-          <div className="flex justify-between items-center pb-2 border-b border-slate-850">
-            <span className="font-bold text-slate-400">Ingredient Mapping</span>
-            <button
-              onClick={handleAddIngredientRow}
-              className="text-[10px] text-primary hover:text-primary-hover font-bold uppercase tracking-wider flex items-center gap-1"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Add Ingredient</span>
-            </button>
-          </div>
+          {/* Ingredient Mapping Section */}
+          <div className="space-y-3 pt-2">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+              <div>
+                <span className="font-extrabold text-slate-800 text-sm">Ingredient Mapping</span>
+                <span className="text-[10px] text-slate-500 block font-medium">Specify stock ingredients consumed per batch/portion</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddIngredientRow}
+                className="text-xs bg-[#C9533B]/10 hover:bg-[#C9533B]/20 text-[#C9533B] font-bold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add Ingredient</span>
+              </button>
+            </div>
 
-          {recipeIngredients.length === 0 ? (
-            <p className="text-center py-6 text-slate-500">No ingredients mapped. Click "Add Ingredient" to start.</p>
-          ) : (
-            <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
-              {recipeIngredients.map((row, idx) => (
-                <div key={idx} className="flex flex-col gap-2 p-2.5 bg-slate-900/40 border border-slate-850/50 rounded-xl">
-                  <div className="flex gap-2 items-center">
-                    <div className="flex-1">
-                      <select
-                        value={row.ingredientId}
-                        onChange={(e) => handleUpdateRecipeRow(idx, 'ingredientId', e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-850 focus:border-primary rounded-xl p-2 text-xs font-semibold text-textPearl outline-none"
-                      >
-                        {ingredients.map(ing => (
-                          <option key={ing.id} value={ing.id}>{ing.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="w-24">
+            {recipeIngredients.length === 0 ? (
+              <div className="text-center py-8 px-4 bg-slate-50 border border-dashed border-slate-200 rounded-xl space-y-2">
+                <Package className="w-8 h-8 text-slate-400 mx-auto" />
+                <p className="text-xs font-bold text-slate-700">No ingredients mapped yet</p>
+                <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                  Click "+ Add Ingredient" above to map ingredients from your authorized stock inventory.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                {recipeIngredients.map((row, idx) => {
+                  const selectedIng = ingredients.find(i => i.id === row.ingredientId);
+                  const itemCost = selectedIng ? (selectedIng.purchaseCost || 0) * (parseFloat(row.quantity) || 0) : 0;
+
+                  return (
+                    <div key={idx} className="p-3 bg-slate-50 hover:bg-slate-100/70 border border-slate-200 rounded-xl transition-all space-y-2">
+                      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                        <div className="flex-1 min-w-0">
+                          <label className="text-[9px] font-extrabold uppercase text-slate-500 block mb-0.5">
+                            Ingredient #{idx + 1}
+                          </label>
+                          <select
+                            value={row.ingredientId}
+                            onChange={(e) => handleUpdateRecipeRow(idx, 'ingredientId', e.target.value)}
+                            className="w-full bg-white border border-slate-200 focus:border-[#C9533B] rounded-lg p-2 text-xs font-bold text-slate-800 outline-none"
+                          >
+                            {ingredients.map(ing => (
+                              <option key={ing.id} value={ing.id}>
+                                {ing.name} ({ing.unit}) — {formatPrice(ing.purchaseCost || 0)}/{ing.unit}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="w-full sm:w-28 shrink-0">
+                          <label className="text-[9px] font-extrabold uppercase text-slate-500 block mb-0.5">
+                            Quantity
+                          </label>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              min="0.001"
+                              step="any"
+                              placeholder="Qty"
+                              value={row.quantity}
+                              onChange={(e) => handleUpdateRecipeRow(idx, 'quantity', e.target.value)}
+                              className="w-full bg-white border border-slate-200 focus:border-[#C9533B] rounded-lg p-2 text-xs font-bold text-slate-800 outline-none font-mono"
+                            />
+                            <span className="text-[11px] text-slate-600 font-extrabold w-10 shrink-0 text-center">
+                              {row.unit}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="hidden sm:block text-right w-24 shrink-0">
+                          <span className="text-[9px] font-extrabold uppercase text-slate-400 block">Est. Cost</span>
+                          <span className="text-xs font-mono font-bold text-slate-700">{formatPrice(itemCost)}</span>
+                        </div>
+                        <div className="flex justify-end sm:justify-center items-center">
+                          <button
+                            type="button"
+                            title="Remove ingredient mapping"
+                            onClick={() => handleRemoveRecipeRow(idx)}
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
                       <input
-                        type="number"
-                        placeholder="Qty"
-                        value={row.quantity}
-                        onChange={(e) => handleUpdateRecipeRow(idx, 'quantity', e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-850 focus:border-primary rounded-xl p-2 text-xs font-semibold text-textPearl outline-none font-mono"
+                        type="text"
+                        placeholder="Optional prep note (e.g. diced finely, peeled, chilled)"
+                        value={row.notes || ''}
+                        onChange={(e) => handleUpdateRecipeRow(idx, 'notes', e.target.value)}
+                        className="w-full bg-white border border-slate-200 focus:border-[#C9533B] rounded-lg p-1.5 px-2.5 text-[11px] text-slate-600 outline-none"
                       />
                     </div>
-                    <span className="text-xs text-slate-500 font-bold w-12 truncate">{row.unit}</span>
-                    <button
-                      onClick={() => handleRemoveRecipeRow(idx)}
-                      className="p-1.5 text-slate-500 hover:text-red-500 transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <input
-                    type="text"
-                    placeholder="Optional ingredient note (e.g. diced finely)"
-                    value={row.notes || ''}
-                    onChange={(e) => handleUpdateRecipeRow(idx, 'notes', e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-850 focus:border-primary rounded-xl p-2 text-[10px] font-semibold text-slate-400 outline-none"
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {recipeIngredients.length > 0 && (() => {
-            const totalCost = recipeIngredients.reduce((sum, ri) => {
-              const ing = ingredients.find(i => i.id === ri.ingredientId);
-              const cost = ing ? ing.purchaseCost || 0 : 0;
-              return sum + (parseFloat(ri.quantity || 0) * cost);
-            }, 0);
-            const yieldQty = parseFloat(recipeYield) || 1;
-            const costPerServing = totalCost / yieldQty;
-
-            return (
-              <div className="p-3 bg-slate-900/80 border border-slate-850 rounded-xl space-y-1.5 text-[11px] text-slate-400 font-bold uppercase tracking-wider">
-                <div className="flex justify-between">
-                  <span>Number of Ingredients:</span>
-                  <span className="text-textPearl">{recipeIngredients.length}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Total Ingredients Cost:</span>
-                  <span className="text-emerald-500 font-mono">{formatPrice(totalCost)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Estimated Food Cost / Serving:</span>
-                  <span className="text-emerald-500 font-mono">{formatPrice(costPerServing)}</span>
-                </div>
+                  );
+                })}
               </div>
-            );
-          })()}
+            )}
 
-          <div className="flex items-center space-x-3 pt-4 border-t border-slate-850 mt-4">
+            {/* Food Cost Summary Card */}
+            {recipeIngredients.length > 0 && (() => {
+              const totalCost = recipeIngredients.reduce((sum, ri) => {
+                const ing = ingredients.find(i => i.id === ri.ingredientId);
+                const cost = ing ? ing.purchaseCost || 0 : 0;
+                return sum + (parseFloat(ri.quantity || 0) * cost);
+              }, 0);
+              const yieldQty = Math.max(0.01, parseFloat(recipeYield) || 1);
+              const costPerServing = totalCost / yieldQty;
+
+              return (
+                <div className="p-3.5 bg-[#FAF8F4] border border-[#E5E0D9] rounded-xl space-y-1.5 text-xs text-slate-600 font-medium">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Number of Ingredients:</span>
+                    <span className="font-bold text-slate-800">{recipeIngredients.length} item(s)</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Total Recipe Batch Cost:</span>
+                    <span className="font-mono font-bold text-slate-800">{formatPrice(totalCost)}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-1 border-t border-[#E5E0D9]">
+                    <span className="text-[11px] font-extrabold uppercase text-slate-700 tracking-wider">
+                      Estimated Food Cost / Serving ({yieldQty} serv):
+                    </span>
+                    <span className="font-mono font-extrabold text-emerald-600 text-sm">{formatPrice(costPerServing)}</span>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* Modal Actions */}
+          <div className="flex items-center space-x-3 pt-4 border-t border-slate-200 mt-5">
             <Button
               type="button"
               variant="secondary"
-              className="flex-1"
+              className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold border border-slate-200 rounded-xl"
               onClick={() => setIsRecipeModalOpen(false)}
             >
               Cancel
             </Button>
             <Button
+              type="button"
               onClick={handleSaveRecipe}
-              className="flex-1 bg-gradient-to-r from-primary to-amber-600 hover:from-primary-hover hover:to-amber-700 text-background"
+              disabled={isSubmitting || isMenuItemsLoading}
+              className="flex-1 py-2.5 bg-[#C9533B] hover:bg-[#A94332] text-white font-bold rounded-xl shadow-xs transition-colors"
               isLoading={isSubmitting}
             >
-              Save Recipe
+              {editingRecipe ? 'Update Recipe' : 'Save Recipe'}
             </Button>
           </div>
         </div>
@@ -2581,7 +2728,9 @@ export const OwnerInventoryManager: React.FC = () => {
       <Modal
         isOpen={isRecipeViewModalOpen}
         onClose={() => setIsRecipeViewModalOpen(false)}
-        title={`Recipe details: ${viewingRecipe?.recipeName}`}
+        title={`Recipe details: ${viewingRecipe?.recipeName || 'Recipe'}`}
+        variant="light"
+        size="2xl"
       >
         {viewingRecipe && (() => {
           const totalCost = viewingRecipe.ingredients.reduce((sum, ri) => {
@@ -2593,29 +2742,31 @@ export const OwnerInventoryManager: React.FC = () => {
           const costPerServing = totalCost / yieldQty;
 
           return (
-            <div className="space-y-4 text-left select-none text-xs">
-              <div className="grid grid-cols-2 gap-4 pb-3 border-b border-slate-805">
+            <div className="space-y-4 text-left select-none text-xs text-slate-800">
+              <div className="grid grid-cols-2 gap-4 pb-3 border-b border-slate-200">
                 <div>
-                  <span className="text-slate-500 font-bold block uppercase tracking-wider text-[9px] mb-0.5">Menu Item</span>
-                  <strong className="text-textPearl text-sm">{viewingRecipe.menuItemName}</strong>
+                  <span className="text-slate-500 font-extrabold block uppercase tracking-wider text-[9px] mb-0.5">Menu Item</span>
+                  <strong className="text-slate-900 text-sm">{viewingRecipe.menuItemName}</strong>
                 </div>
                 <div>
-                  <span className="text-slate-500 font-bold block uppercase tracking-wider text-[9px] mb-0.5">Portion Size</span>
-                  <strong className="text-textPearl text-sm">{viewingRecipe.portionSize || '1 Portion'}</strong>
+                  <span className="text-slate-500 font-extrabold block uppercase tracking-wider text-[9px] mb-0.5">Portion Size</span>
+                  <strong className="text-slate-900 text-sm">{viewingRecipe.portionSize || '1 Portion'}</strong>
                 </div>
               </div>
 
               {viewingRecipe.cookingNotes && (
                 <div>
-                  <span className="text-slate-500 font-bold block uppercase tracking-wider text-[9px] mb-1">Cooking Notes</span>
-                  <p className="p-3 bg-slate-900 border border-slate-850 rounded-xl text-slate-300 font-semibold leading-relaxed">
+                  <span className="text-slate-500 font-extrabold block uppercase tracking-wider text-[9px] mb-1">Cooking Notes</span>
+                  <p className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 font-medium leading-relaxed">
                     {viewingRecipe.cookingNotes}
                   </p>
                 </div>
               )}
 
               <div>
-                <span className="text-slate-500 font-bold block uppercase tracking-wider text-[9px] mb-2.5">Ingredient Proportions & Cost Breakdown</span>
+                <span className="text-slate-500 font-extrabold block uppercase tracking-wider text-[9px] mb-2.5">
+                  Ingredient Proportions & Cost Breakdown
+                </span>
                 <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                   {viewingRecipe.ingredients.map((ing, idx) => {
                     const ingMaster = ingredients.find(i => i.id === ing.ingredientId);
@@ -2623,14 +2774,14 @@ export const OwnerInventoryManager: React.FC = () => {
                     const ingTotalCost = ing.quantity * cost;
 
                     return (
-                      <div key={idx} className="p-2.5 bg-slate-900/50 border border-slate-850 rounded-xl flex justify-between items-center text-xs">
+                      <div key={idx} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex justify-between items-center text-xs">
                         <div>
-                          <strong className="text-textPearl block font-bold">{ing.ingredientName}</strong>
-                          <span className="text-[10px] text-slate-500 block font-semibold mt-0.5">
+                          <strong className="text-slate-900 block font-bold">{ing.ingredientName}</strong>
+                          <span className="text-[10px] text-slate-500 block font-medium mt-0.5">
                             {ing.quantity} {ing.unit} {ing.notes ? `• ${ing.notes}` : ''}
                           </span>
                         </div>
-                        <span className="font-mono text-emerald-500 font-bold">
+                        <span className="font-mono text-emerald-600 font-bold">
                           {formatPrice(ingTotalCost)}
                         </span>
                       </div>
@@ -2639,22 +2790,25 @@ export const OwnerInventoryManager: React.FC = () => {
                 </div>
               </div>
 
-              <div className="p-3 bg-slate-900 border border-slate-850 rounded-xl space-y-1.5 text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                <div className="flex justify-between">
-                  <span>Ingredients Count:</span>
-                  <span className="text-textPearl">{viewingRecipe.ingredients?.length || 0} items</span>
+              <div className="p-3.5 bg-[#FAF8F4] border border-[#E5E0D9] rounded-xl space-y-1.5 text-xs text-slate-600 font-medium">
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Ingredients Count:</span>
+                  <span className="font-bold text-slate-900">{viewingRecipe.ingredients?.length || 0} items</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Total cost of Ingredients:</span>
-                  <span className="text-emerald-500 font-mono">{formatPrice(totalCost)}</span>
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Total cost of Ingredients:</span>
+                  <span className="text-emerald-600 font-mono font-bold">{formatPrice(totalCost)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span>Estimated Cost / Serving (Yield {yieldQty}):</span>
-                  <span className="text-emerald-500 font-mono font-extrabold">{formatPrice(costPerServing)}</span>
+                <div className="flex justify-between items-center pt-1 border-t border-[#E5E0D9]">
+                  <span className="text-[11px] font-extrabold uppercase text-slate-700 tracking-wider">Estimated Cost / Serving (Yield {yieldQty}):</span>
+                  <span className="text-emerald-600 font-mono font-extrabold text-sm">{formatPrice(costPerServing)}</span>
                 </div>
               </div>
 
-              <Button onClick={() => setIsRecipeViewModalOpen(false)} className="w-full py-2.5 font-bold">
+              <Button 
+                onClick={() => setIsRecipeViewModalOpen(false)} 
+                className="w-full py-2.5 font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 rounded-xl"
+              >
                 Close Recipe details
               </Button>
             </div>
