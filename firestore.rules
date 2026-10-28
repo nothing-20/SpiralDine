@@ -186,6 +186,18 @@ service cloud.firestore {
       allow update, delete: if false; // Immutable protection
     }
 
+    // Application Approval Notifications & Dispatch Tracking
+    match /approvalNotifications/{appId} {
+      allow read, write: if isSuperAdmin();
+    }
+
+    // Email dispatch audit logs
+    match /emailLogs/{logId} {
+      allow read: if isSuperAdmin();
+      allow create: if isAuth();
+      allow update, delete: if false;
+    }
+
     // Restaurant registration applications workflow
     match /restaurantApplications/{applicationId} {
       allow read: if isAuth() && (

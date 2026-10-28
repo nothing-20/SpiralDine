@@ -112,7 +112,13 @@ export const SuperAdminApplications: React.FC = () => {
             reviewedBy: r.reviewedBy,
             reviewNotes: r.reviewNotes,
             rejectionReason: r.rejectionReason,
-            moreInfoNotes: r.moreInfoNotes
+            moreInfoNotes: r.moreInfoNotes,
+            approvalNotificationStatus: r.approvalNotificationStatus,
+            approvalNotificationSentAt: r.approvalNotificationSentAt,
+            approvalNotificationEmailId: r.approvalNotificationEmailId,
+            approvalNotificationRecipient: r.approvalNotificationRecipient,
+            approvalNotificationError: r.approvalNotificationError,
+            approvalNotificationAttempts: r.approvalNotificationAttempts
           };
         }));
 
@@ -238,13 +244,23 @@ export const SuperAdminApplications: React.FC = () => {
       }
 
       toast.dismiss(loadingToast);
-      toast.success(
-        reviewAction === 'approve'
-          ? `Application approved! ${selectedApp.restaurantName} is now active.`
-          : reviewAction === 'reject'
-          ? `Application rejected.`
-          : `Requested additional information from applicant.`
-      );
+
+      if (reviewAction === 'approve') {
+        const notif = resData.notification;
+        if (notif?.status === 'sent') {
+          toast.success(`Application approved! Acceptance email sent to ${notif.recipient || selectedApp.ownerEmail}.`, { duration: 5000 });
+        } else if (notif?.status === 'failed') {
+          toast.success(`Application approved! Note: Email delivery failed (${notif.error || 'provider error'}).`, { duration: 6000 });
+        } else if (notif?.status === 'skipped') {
+          toast.success(`Application approved! ${selectedApp.restaurantName} is active (notification already processed).`, { duration: 4000 });
+        } else {
+          toast.success(`Application approved! ${selectedApp.restaurantName} is now active.`);
+        }
+      } else if (reviewAction === 'reject') {
+        toast.success(`Application rejected.`);
+      } else {
+        toast.success(`Requested additional information from applicant.`);
+      }
 
       handleCloseReviewModal();
     } catch (apiErr: any) {
@@ -579,30 +595,44 @@ export const SuperAdminApplications: React.FC = () => {
 
                       {/* Status */}
                       <td className="py-3.5 px-4 whitespace-nowrap">
-                        {status === 'approved' && (
-                          <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Approved</span>
-                          </span>
-                        )}
-                        {status === 'pending_approval' && (
-                          <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse">
-                            <Clock className="w-3.5 h-3.5" />
-                            <span>Pending Review</span>
-                          </span>
-                        )}
-                        {status === 'rejected' && (
-                          <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
-                            <XCircle className="w-3.5 h-3.5" />
-                            <span>Rejected</span>
-                          </span>
-                        )}
-                        {status === 'more_info_required' && (
-                          <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30">
-                            <AlertCircle className="w-3.5 h-3.5" />
-                            <span>More Info</span>
-                          </span>
-                        )}
+                        <div className="space-y-1">
+                          {status === 'approved' && (
+                            <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Approved</span>
+                            </span>
+                          )}
+                          {status === 'pending_approval' && (
+                            <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse">
+                              <Clock className="w-3.5 h-3.5" />
+                              <span>Pending Review</span>
+                            </span>
+                          )}
+                          {status === 'rejected' && (
+                            <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
+                              <XCircle className="w-3.5 h-3.5" />
+                              <span>Rejected</span>
+                            </span>
+                          )}
+                          {status === 'more_info_required' && (
+                            <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/30">
+                              <AlertCircle className="w-3.5 h-3.5" />
+                              <span>More Info</span>
+                            </span>
+                          )}
+                          {app.approvalNotificationStatus === 'sent' && (
+                            <div className="flex items-center space-x-1 text-[10px] text-emerald-400 font-medium">
+                              <Mail className="w-3 h-3 text-emerald-400" />
+                              <span>Email Sent</span>
+                            </div>
+                          )}
+                          {app.approvalNotificationStatus === 'failed' && (
+                            <div className="flex items-center space-x-1 text-[10px] text-rose-400 font-medium" title={app.approvalNotificationError}>
+                              <Mail className="w-3 h-3 text-rose-400" />
+                              <span>Email Failed</span>
+                            </div>
+                          )}
+                        </div>
                       </td>
 
                       {/* Actions */}
@@ -711,6 +741,37 @@ export const SuperAdminApplications: React.FC = () => {
                     </span>
                   </div>
                 </div>
+
+                {selectedApp.approvalNotificationStatus && (
+                  <div className="col-span-1 sm:col-span-2 pt-2 border-t border-slate-800">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Approval Notification Email</span>
+                    <div className="flex items-center space-x-2 mt-1">
+                      {selectedApp.approvalNotificationStatus === 'sent' && (
+                        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Delivered to {selectedApp.approvalNotificationRecipient || selectedApp.ownerEmail}</span>
+                          {selectedApp.approvalNotificationSentAt && (
+                            <span className="text-[10px] text-emerald-500/70 font-normal">
+                              ({new Date(selectedApp.approvalNotificationSentAt).toLocaleString()})
+                            </span>
+                          )}
+                        </span>
+                      )}
+                      {selectedApp.approvalNotificationStatus === 'failed' && (
+                        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
+                          <XCircle className="w-3.5 h-3.5" />
+                          <span>Delivery Failed: {selectedApp.approvalNotificationError || 'Unknown error'}</span>
+                        </span>
+                      )}
+                      {selectedApp.approvalNotificationStatus === 'processing' && (
+                        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>Dispatching Acceptance Email...</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Action Selector Segmented Control */}

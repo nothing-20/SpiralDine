@@ -78,4 +78,10 @@ export interface IRestaurantApplication {
   reviewNotes?: string;
   rejectionReason?: string;
   moreInfoNotes?: string;
+  approvalNotificationStatus?: 'sent' | 'failed' | 'processing' | 'skipped';
+  approvalNotificationSentAt?: string;
+  approvalNotificationEmailId?: string;
+  approvalNotificationRecipient?: string;
+  approvalNotificationError?: string;
+  approvalNotificationAttempts?: number;
 }

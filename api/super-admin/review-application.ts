@@ -8,6 +8,10 @@ import {
   ensureServerAuth
 } from '../_lib/firebaseServer.js';
 import { sendMailWithLogging } from '../_lib/resendHelper.js';
+import { 
+  getRestaurantApprovalHtml, 
+  getRestaurantApprovalText 
+} from '../../src/services/email/approvalEmailTemplate.js';
 
 interface IAdminUser {
   uid: string;
@@ -167,7 +171,224 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 3. Execute State Updates Based on Action
     if (action === 'approve') {
-      // 3.1 Update restaurants/{tenantId} (Authoritative)
+      const previousStatus = appData.status;
+      const wasAlreadyApproved = previousStatus === 'active' || previousStatus === 'approved';
+
+      // 3.1 Idempotency & Notification Lock Inspection
+      const notifDocRef = serverDoc(serverDb, 'approvalNotifications', cleanAppId);
+      let notifData: any = null;
+      try {
+        const notifSnap = await serverGetDoc(notifDocRef);
+        if (notifSnap.exists()) {
+          notifData = notifSnap.data();
+        }
+      } catch (err) {
+        console.warn('[review-application] Secondary notifSnap read note:', err);
+      }
+
+      const safeSetNotifDoc = async (data: any) => {
+        try {
+          await serverSetDoc(notifDocRef, data, { merge: true });
+        } catch (err) {
+          console.warn('[review-application] Secondary notifDoc set note:', err);
+        }
+      };
+
+      let notificationOutcome: {
+        status: 'sent' | 'failed' | 'skipped';
+        recipient: string | null;
+        emailId?: string | null;
+        error?: string | null;
+        reason?: string;
+      } = {
+        status: 'skipped',
+        recipient: ownerEmail || null,
+        emailId: null,
+        error: null,
+      };
+
+      const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const isEmailValid = Boolean(ownerEmail && EMAIL_REGEX.test(ownerEmail));
+
+      const alreadySent = Boolean(
+        (notifData && notifData.status === 'sent') ||
+        appData.approvalNotificationStatus === 'sent'
+      );
+
+      if (wasAlreadyApproved && alreadySent) {
+        // Document was already approved and notification was already delivered
+        notificationOutcome = {
+          status: 'skipped',
+          reason: 'already_approved_and_notified',
+          recipient: ownerEmail || null,
+          emailId: notifData?.emailId || appData.approvalNotificationEmailId || null,
+          error: null
+        };
+      } else if (alreadySent) {
+        // Notification already sent previously
+        notificationOutcome = {
+          status: 'skipped',
+          reason: 'already_sent',
+          recipient: notifData?.recipient || ownerEmail,
+          emailId: notifData?.emailId || appData.approvalNotificationEmailId || null,
+          error: null
+        };
+      } else if (!isEmailValid) {
+        // Recipient could not be resolved from authoritative records
+        const failMsg = 'Authoritative owner email could not be resolved from restaurant or user profile.';
+        console.warn(`[review-application] Approval notification skipped for ${cleanAppId}: ${failMsg}`);
+        
+        await safeSetNotifDoc({
+          applicationId: cleanAppId,
+          tenantId,
+          eventType: 'restaurant_application_approved',
+          status: 'failed',
+          recipient: null,
+          error: failMsg,
+          updatedAt: nowIso,
+          createdAt: notifData?.createdAt || nowIso,
+          reviewerUid: adminUser.uid,
+          attempts: (notifData?.attempts || 0) + 1
+        });
+
+        await serverSetDoc(restDocRef, {
+          approvalNotificationStatus: 'failed',
+          approvalNotificationError: failMsg,
+          approvalNotificationAttempts: (notifData?.attempts || 0) + 1,
+          updatedAt: nowIso
+        }, { merge: true });
+
+        notificationOutcome = {
+          status: 'failed',
+          recipient: null,
+          emailId: null,
+          error: failMsg
+        };
+      } else {
+        // 3.2 Acquire Processing Lock (Prevents duplicate concurrent dispatch)
+        const currentAttempts = (notifData?.attempts || 0) + 1;
+        await safeSetNotifDoc({
+          applicationId: cleanAppId,
+          tenantId,
+          eventType: 'restaurant_application_approved',
+          status: 'processing',
+          recipient: ownerEmail,
+          attempts: currentAttempts,
+          updatedAt: nowIso,
+          createdAt: notifData?.createdAt || nowIso,
+          reviewerUid: adminUser.uid,
+        });
+
+        // 3.3 Prepare Branded HTML & Plain-Text Acceptance Email
+        const supportEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || 'kumbhageethakrishna143@gmail.com';
+        const loginUrl = 'https://spiral-dine.vercel.app/owner/login';
+
+        const approvalHtml = getRestaurantApprovalHtml({
+          ownerName,
+          restaurantName,
+          applicationId: cleanAppId,
+          loginUrl,
+          supportEmail,
+          reviewNotes: cleanNotes || undefined
+        });
+
+        const approvalText = getRestaurantApprovalText({
+          ownerName,
+          restaurantName,
+          applicationId: cleanAppId,
+          loginUrl,
+          supportEmail,
+          reviewNotes: cleanNotes || undefined
+        });
+
+        // 3.4 Dispatch Acceptance Email through Resend
+        try {
+          const emailResult = await sendMailWithLogging({
+            to: ownerEmail,
+            subject: 'Your Restaurant Has Been Approved on SpiralDine!',
+            html: approvalHtml,
+            text: approvalText,
+            tenantId,
+            type: 'restaurant_application_approved',
+            retries: 2
+          });
+
+          if (emailResult.success && emailResult.id) {
+            // Success: Update notification tracker and restaurant document
+            await safeSetNotifDoc({
+              status: 'sent',
+              emailId: emailResult.id,
+              sentAt: nowIso,
+              error: null,
+              updatedAt: nowIso
+            });
+
+            await serverSetDoc(restDocRef, {
+              approvalNotificationStatus: 'sent',
+              approvalNotificationSentAt: nowIso,
+              approvalNotificationEmailId: emailResult.id,
+              approvalNotificationRecipient: ownerEmail,
+              approvalNotificationAttempts: currentAttempts,
+              approvalNotificationError: null,
+              updatedAt: nowIso
+            }, { merge: true });
+
+            notificationOutcome = {
+              status: 'sent',
+              recipient: ownerEmail,
+              emailId: emailResult.id,
+              error: null
+            };
+          } else {
+            // Failure: Record provider error
+            const provErr = emailResult.error || 'Resend provider rejected dispatch';
+            await safeSetNotifDoc({
+              status: 'failed',
+              error: provErr,
+              updatedAt: nowIso
+            });
+
+            await serverSetDoc(restDocRef, {
+              approvalNotificationStatus: 'failed',
+              approvalNotificationError: provErr,
+              approvalNotificationAttempts: currentAttempts,
+              updatedAt: nowIso
+            }, { merge: true });
+
+            notificationOutcome = {
+              status: 'failed',
+              recipient: ownerEmail,
+              emailId: null,
+              error: provErr
+            };
+          }
+        } catch (sendErr: any) {
+          const errDetail = sendErr.message || 'Unknown email dispatch error';
+          console.error('[review-application] Email dispatch caught error:', sendErr);
+
+          await safeSetNotifDoc({
+            status: 'failed',
+            error: errDetail,
+            updatedAt: nowIso
+          });
+
+          await serverSetDoc(restDocRef, {
+            approvalNotificationStatus: 'failed',
+            approvalNotificationError: errDetail,
+            approvalNotificationAttempts: currentAttempts,
+            updatedAt: nowIso
+          }, { merge: true });
+
+          notificationOutcome = {
+            status: 'failed',
+            recipient: ownerEmail,
+            emailId: null,
+            error: errDetail
+          };
+        }
+      }
+
+      // 3.5 Update restaurants/{tenantId} (Authoritative)
       await serverSetDoc(restDocRef, {
         status: 'active',
         reviewedAt: nowIso,
@@ -176,14 +397,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         updatedAt: nowIso
       }, { merge: true });
 
-      // 3.2 Update tenants/{tenantId}
+      // 3.6 Update tenants/{tenantId}
       const tenantDocRef = serverDoc(serverDb, 'tenants', tenantId);
       await serverSetDoc(tenantDocRef, {
         status: 'active',
         updatedAt: nowIso
       }, { merge: true });
 
-      // 3.3 Update users/{ownerUid}
+      // 3.7 Update users/{ownerUid}
       if (ownerUid) {
         const userDocRef = serverDoc(serverDb, 'users', ownerUid);
         await serverSetDoc(userDocRef, {
@@ -192,7 +413,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }, { merge: true });
       }
 
-      // 3.4 Update restaurantApplications (Safe sync)
+      // 3.8 Update restaurantApplications (Safe sync)
       try {
         await serverSetDoc(appDocRef, {
           status: 'approved',
@@ -205,69 +426,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.warn('[review-application] Note: appSync handled:', appSyncErr);
       }
 
-      // 3.5 Dispatch Approval Email to Applicant
-      if (ownerEmail) {
-        const loginUrl = 'https://spiral-dine.vercel.app/owner/login';
-        const approvalHtml = `
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>Application Approved - SpiralDine</title>
-            <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #FCFAF7; color: #17233D; margin: 0; padding: 24px; }
-              .container { max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 16px; border: 1px solid #E8E2D9; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-              .header { background: #1E3A2B; color: #ffffff; padding: 28px 32px; text-align: left; }
-              .header h1 { margin: 0; font-size: 20px; font-weight: 800; }
-              .content { padding: 32px; }
-              .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; background: #ECFDF5; color: #047857; border: 1px solid #A7F3D0; margin-bottom: 20px; }
-              .btn { display: inline-block; background: #C97A52; color: #ffffff !important; padding: 14px 28px; font-size: 14px; font-weight: 700; border-radius: 12px; text-decoration: none; margin-top: 16px; }
-              .footer { padding: 24px 32px; background: #F8F5EE; border-top: 1px solid #E8E2D9; font-size: 12px; color: #64748B; text-align: center; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <div class="header">
-                <h1>SpiralDine</h1>
-                <p style="margin: 6px 0 0 0; font-size: 13px; color: #D1E5DA;">Restaurant Operating System</p>
-              </div>
-              <div class="content">
-                <span class="badge">&check; Approved &bull; Active Access</span>
-                <h2 style="margin: 0 0 12px 0; font-size: 20px; color: #17233D;">Welcome to SpiralDine, ${ownerName}!</h2>
-                <p style="font-size: 14px; color: #475569; line-height: 1.6; margin: 0 0 16px 0;">
-                  We are pleased to inform you that your restaurant application for <strong>${restaurantName}</strong> has been reviewed and <strong>approved</strong> by our administrative team.
-                </p>
-                <p style="font-size: 14px; color: #475569; line-height: 1.6; margin: 0 0 20px 0;">
-                  Your merchant owner dashboard is now active and ready for you to configure menus, floor plans, staff credentials, and inventory controls.
-                </p>
-                ${cleanNotes ? `<div style="background: #F8F5EE; border-left: 4px solid #1E3A2B; padding: 12px 16px; border-radius: 6px; font-size: 13px; color: #334155; margin-bottom: 20px;"><strong>Administrator Note:</strong> ${cleanNotes}</div>` : ''}
-                <div style="text-align: center; margin: 28px 0 16px 0;">
-                  <a href="${loginUrl}" class="btn" target="_blank">Launch Owner Dashboard &rarr;</a>
-                </div>
-              </div>
-              <div class="footer">
-                &copy; ${new Date().getFullYear()} SpiralDine Platform. All rights reserved.
-              </div>
-            </div>
-          </body>
-          </html>
-        `;
-
-        await sendMailWithLogging({
-          to: ownerEmail,
-          subject: `Congratulations! Your SpiralDine Account is Approved (${restaurantName})`,
-          html: approvalHtml,
-          tenantId: tenantId,
-          type: 'restaurant_application_approved'
-        }).catch(err => console.warn('[review-application] Non-blocking email error:', err));
-      }
-
       return res.status(200).json({
         success: true,
         action: 'approve',
         applicationId: cleanAppId,
         status: 'approved',
-        message: 'Application approved successfully. Tenant, restaurant, and owner user are active.'
+        message: 'Application approved successfully. Tenant, restaurant, and owner user are active.',
+        notification: notificationOutcome
       });
     }
 

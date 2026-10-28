@@ -7,6 +7,7 @@ import { getOrderConfirmationTemplate } from './services/email/templates/OrderCo
 import { getReservationTemplate } from './services/email/templates/Reservation';
 import { getInvoiceTemplate } from './services/email/templates/Invoice';
 import { getPasswordResetTemplate } from './services/email/templates/PasswordReset';
+import { getApprovalTemplate } from './services/email/templates/Approval';
 import * as crypto from 'crypto';
 
 if (admin.apps.length === 0) {
@@ -354,4 +355,118 @@ export const createValidatedOrder = functions.https.onCall(async (data, context)
     throw new functions.https.HttpsError('internal', err.message || 'Failed to validate order.');
   }
 });
+
+// 8. onRestaurantApproval (Firestore Cloud Function Trigger)
+export const onRestaurantApproval = functions.firestore
+  .document('restaurants/{tenantId}')
+  .onUpdate(async (change, context) => {
+    const beforeData = change.before.data() || {};
+    const afterData = change.after.data() || {};
+    const tenantId = context.params.tenantId;
+
+    // Trigger ONLY on valid transition to approved/active from non-approved state
+    const wasApproved = beforeData.status === 'active' || beforeData.status === 'approved';
+    const isNowApproved = afterData.status === 'active' || afterData.status === 'approved';
+
+    if (wasApproved || !isNowApproved) {
+      return null;
+    }
+
+    // Check duplicate prevention
+    const notifRef = db.collection('approvalNotifications').doc(tenantId);
+    const notifSnap = await notifRef.get();
+    if (notifSnap.exists && notifSnap.data()?.status === 'sent') {
+      console.log(`[onRestaurantApproval] Notification already sent for ${tenantId}. Skipping.`);
+      return null;
+    }
+
+    let ownerEmail = (afterData.ownerEmail || '').trim().toLowerCase();
+    let ownerName = afterData.ownerName || 'Restaurant Owner';
+    const restaurantName = afterData.restaurantName || afterData.name || 'Your Restaurant';
+
+    // Resolve owner email from users/{ownerUid} if missing
+    if ((!ownerEmail || ownerName === 'Restaurant Owner') && afterData.ownerUid) {
+      try {
+        const uSnap = await db.collection('users').doc(afterData.ownerUid).get();
+        if (uSnap.exists) {
+          const uData = uSnap.data() || {};
+          ownerEmail = ownerEmail || (uData.email || '').trim().toLowerCase();
+          ownerName = ownerName === 'Restaurant Owner' ? (uData.fullName || uData.displayName || 'Restaurant Owner') : ownerName;
+        }
+      } catch (uErr) {
+        console.warn(`[onRestaurantApproval] User lookup note for ${tenantId}:`, uErr);
+      }
+    }
+
+    const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!ownerEmail || !EMAIL_REGEX.test(ownerEmail)) {
+      console.warn(`[onRestaurantApproval] Cannot resolve valid owner email for ${tenantId}.`);
+      await notifRef.set({
+        applicationId: tenantId,
+        tenantId,
+        eventType: 'restaurant_application_approved',
+        status: 'failed',
+        error: 'Missing valid owner email',
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      return null;
+    }
+
+    // Processing lock
+    await notifRef.set({
+      applicationId: tenantId,
+      tenantId,
+      eventType: 'restaurant_application_approved',
+      status: 'processing',
+      recipient: ownerEmail,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+
+    const templateHtml = getApprovalTemplate({
+      ownerName,
+      restaurantName,
+      applicationId: tenantId,
+      loginUrl: 'https://spiral-dine.vercel.app/owner/login',
+      supportEmail: process.env.SUPPORT_NOTIFICATION_EMAIL || 'kumbhageethakrishna143@gmail.com',
+      reviewNotes: afterData.reviewNotes || undefined
+    });
+
+    const res = await resendService.sendEmail(
+      ownerEmail,
+      'Your Restaurant Has Been Approved on SpiralDine!',
+      templateHtml,
+      'restaurant_application_approved'
+    );
+
+    const nowIso = new Date().toISOString();
+    if (res.success && res.id) {
+      await notifRef.set({
+        status: 'sent',
+        emailId: res.id,
+        sentAt: nowIso,
+        error: null,
+        updatedAt: nowIso
+      }, { merge: true });
+
+      await change.after.ref.set({
+        approvalNotificationStatus: 'sent',
+        approvalNotificationSentAt: nowIso,
+        approvalNotificationEmailId: res.id,
+        approvalNotificationRecipient: ownerEmail
+      }, { merge: true });
+    } else {
+      await notifRef.set({
+        status: 'failed',
+        error: res.error || 'Resend error',
+        updatedAt: nowIso
+      }, { merge: true });
+
+      await change.after.ref.set({
+        approvalNotificationStatus: 'failed',
+        approvalNotificationError: res.error || 'Resend error'
+      }, { merge: true });
+    }
+
+    return null;
+  });
 

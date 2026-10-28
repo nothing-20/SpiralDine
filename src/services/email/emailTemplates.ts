@@ -238,3 +238,10 @@ export const getOrderConfirmationTemplate = (data: OrderConfirmationData): strin
   `;
   return getBaseTemplate('Order Placed Successfully', bodyContent);
 };
+
+export {
+  type RestaurantApprovalEmailData,
+  escapeHtml,
+  getRestaurantApprovalHtml,
+  getRestaurantApprovalText
+} from './approvalEmailTemplate';

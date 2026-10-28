@@ -32,6 +32,8 @@ export interface SendMailOptions {
   to: string;
   subject: string;
   html: string;
+  text?: string;
+  from?: string;
   tenantId?: string;
   type: string;
   retries?: number;
@@ -40,7 +42,7 @@ export interface SendMailOptions {
 export const sendMailWithLogging = async (
   options: SendMailOptions
 ): Promise<{ success: boolean; id?: string; error?: string }> => {
-  const { to, subject, html, tenantId, type } = options;
+  const { to, subject, html, text, from, tenantId, type } = options;
   const retriesLeft = options.retries ?? MAX_RETRIES;
   const timestamp = new Date().toISOString();
 
@@ -52,13 +54,19 @@ export const sendMailWithLogging = async (
 
   try {
     const resend = new Resend(apiKey);
+    const fromAddress = from || process.env.RESEND_FROM_EMAIL || 'Spiral Dine <onboarding@resend.dev>';
 
-    const response = await resend.emails.send({
-      from: 'Spiral Dine <onboarding@resend.dev>',
+    const mailPayload: any = {
+      from: fromAddress,
       to: [to],
       subject: subject,
       html: html,
-    });
+    };
+    if (text) {
+      mailPayload.text = text;
+    }
+
+    const response = await resend.emails.send(mailPayload);
 
     if (response.error) {
       throw new Error(response.error.message);

@@ -4,7 +4,9 @@ import {
   getWelcomeTemplate, 
   getInvoiceTemplate, 
   getOrderConfirmationTemplate, 
-  getReservationTemplate 
+  getReservationTemplate,
+  getRestaurantApprovalHtml,
+  getRestaurantApprovalText
 } from '../src/services/email/emailTemplates.js';
 
 interface ITokenUser {
@@ -257,6 +259,73 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
 
       return res.status(200).json({ success: true, emailResult: result });
+    }
+
+    // -----------------------------------------------------------
+    // Case 6: Restaurant Application Approved Notification
+    // -----------------------------------------------------------
+    if (emailType === 'restaurant_application_approved') {
+      const authHeader = req.headers.authorization || '';
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+      if (!token) {
+        return res.status(401).json({ error: 'Unauthorized: Missing Authorization header.' });
+      }
+      const tokenUser = await verifyAuthToken(token);
+      if (!tokenUser || !tokenUser.uid || tokenUser.isAnonymous) {
+        return res.status(401).json({ error: 'Unauthorized: Invalid token.' });
+      }
+
+      const {
+        email,
+        ownerEmail,
+        ownerName,
+        restaurantName,
+        applicationId,
+        tenantId,
+        notes
+      } = body;
+
+      const targetEmail = (email || ownerEmail || '').trim().toLowerCase();
+      const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!targetEmail || !EMAIL_REGEX.test(targetEmail)) {
+        return res.status(400).json({ error: 'Missing or invalid recipient email address.' });
+      }
+
+      const cleanOwnerName = ownerName ? String(ownerName).trim() : 'Restaurant Owner';
+      const cleanRestName = restaurantName ? String(restaurantName).trim() : 'Your Restaurant';
+      const cleanAppId = String(applicationId || tenantId || 'app_approved');
+      const cleanTenantId = String(tenantId || cleanAppId);
+      const supportEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || 'kumbhageethakrishna143@gmail.com';
+      const loginUrl = 'https://spiral-dine.vercel.app/owner/login';
+
+      const approvalHtml = getRestaurantApprovalHtml({
+        ownerName: cleanOwnerName,
+        restaurantName: cleanRestName,
+        applicationId: cleanAppId,
+        loginUrl,
+        supportEmail,
+        reviewNotes: notes || undefined
+      });
+
+      const approvalText = getRestaurantApprovalText({
+        ownerName: cleanOwnerName,
+        restaurantName: cleanRestName,
+        applicationId: cleanAppId,
+        loginUrl,
+        supportEmail,
+        reviewNotes: notes || undefined
+      });
+
+      const result = await sendMailWithLogging({
+        to: targetEmail,
+        subject: 'Your Restaurant Has Been Approved on SpiralDine!',
+        html: approvalHtml,
+        text: approvalText,
+        tenantId: cleanTenantId,
+        type: 'restaurant_application_approved'
+      });
+
+      return res.status(200).json(result);
     }
 
     return res.status(400).json({ error: 'Unrecognized email request configuration.' });
