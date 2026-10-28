@@ -12,15 +12,18 @@ import { useAuth } from '../../../context/AuthContext';
 import { 
   ISatisfactionRatingRecord, 
   calculateRatingSummary, 
-  IRestaurantRatingSummary 
+  IRestaurantRatingSummary,
+  reviewService 
 } from '../../../shared/services/reviewService';
 
 // UI Kit components
 import Card from '../../../components/ui/Card/Card';
 import Badge from '../../../components/ui/Badge/Badge';
 import Button from '../../../components/ui/Button/Button';
+import Dialog from '../../../components/ui/Dialog/Dialog';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner/LoadingSpinner';
 import ReviewCard from '../../customer/components/reviews/ReviewCard';
+import toast from 'react-hot-toast';
 
 // Icons
 import { 
@@ -42,7 +45,8 @@ import {
   CheckCircle2,
   ChevronRight,
   TrendingUp,
-  X
+  X,
+  Trash2
 } from 'lucide-react';
 
 export const OwnerReviews: React.FC = () => {
@@ -63,6 +67,59 @@ export const OwnerReviews: React.FC = () => {
   // Pagination
   const [currentPage, setCurrentPage] = useState<number>(1);
   const itemsPerPage = 10;
+
+  // Deletion & Test Review Purge State
+  const [deleteTarget, setDeleteTarget] = useState<ISatisfactionRatingRecord | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [isPurgeDialogOpen, setIsPurgeDialogOpen] = useState<boolean>(false);
+  const [isPurging, setIsPurging] = useState<boolean>(false);
+
+  const handleConfirmDeleteSingle = async () => {
+    if (!deleteTarget || !deleteTarget.id || !tenantId) return;
+    setIsDeleting(true);
+    try {
+      const res = await reviewService.deleteReview(tenantId, deleteTarget.id);
+      if (res.success) {
+        toast.success('Review deleted from Firestore');
+        setReviews(prev => prev.filter(r => r.id !== deleteTarget.id));
+        setDeleteTarget(null);
+      } else {
+        toast.error(res.error || 'Failed to delete review');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete review');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleConfirmPurgeTest = async () => {
+    if (!tenantId) return;
+    setIsPurging(true);
+    try {
+      const res = await reviewService.purgeTestReviews(tenantId);
+      if (res.success) {
+        toast.success(`Removed ${res.count} test review${res.count !== 1 ? 's' : ''} from Firestore`);
+        setReviews(prev => prev.filter(r => {
+          const notesStr = String(r.notes || r.comments || r.feedback || '').toLowerCase().trim();
+          const orderIdStr = String(r.orderId || '').toUpperCase().trim();
+          const isTest = notesStr === 'super' ||
+            notesStr === 'test' ||
+            orderIdStr === 'ORD-OAPZGOG' ||
+            orderIdStr === 'OAPZGOG' ||
+            (r.id && r.id.startsWith('REV-'));
+          return !isTest;
+        }));
+        setIsPurgeDialogOpen(false);
+      } else {
+        toast.error(res.error || 'Failed to purge test reviews');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Purge failed');
+    } finally {
+      setIsPurging(false);
+    }
+  };
 
   // 1. Subscribe to genuine customer satisfaction ratings for current tenant
   useEffect(() => {
@@ -240,6 +297,17 @@ export const OwnerReviews: React.FC = () => {
 
         {reviews.length > 0 && (
           <div className="flex items-center space-x-2 self-start sm:self-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsPurgeDialogOpen(true)}
+              className="text-xs font-bold border-red-200 text-red-700 hover:bg-red-50 hover:border-red-300 flex items-center space-x-1.5 rounded-xl shadow-2xs"
+              title="Remove fake and testing reviews from Firestore"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-600" />
+              <span>Purge Test Reviews</span>
+            </Button>
+
             <span className="text-[11px] font-bold text-[#16845B] bg-[#EAF7EE] border border-[#C6ECD2] px-3 py-1 rounded-full flex items-center space-x-1.5">
               <CheckCircle2 className="w-3.5 h-3.5 text-[#16845B]" />
               <span>Live Reviews Stream</span>
@@ -589,6 +657,7 @@ export const OwnerReviews: React.FC = () => {
               <ReviewCard
                 key={review.id || `${review.orderId}-${review.submittedAt}`}
                 review={review}
+                onDelete={(rev) => setDeleteTarget(rev)}
               />
             ))}
           </div>
@@ -648,6 +717,32 @@ export const OwnerReviews: React.FC = () => {
             </div>
           )}
         </div>
+      )}
+
+      {/* ── Delete Single Review Confirmation Dialog ── */}
+      {deleteTarget && (
+        <Dialog
+          isOpen={Boolean(deleteTarget)}
+          onClose={() => setDeleteTarget(null)}
+          onConfirm={handleConfirmDeleteSingle}
+          title="Delete Customer Review?"
+          message={`Are you sure you want to permanently delete this review for Order #${deleteTarget.orderId || 'Direct'} from Firestore? This action will permanently remove it and recalculate rating summaries.`}
+          confirmLabel={isDeleting ? 'Deleting...' : 'Delete Review'}
+          isDangerous={true}
+        />
+      )}
+
+      {/* ── Purge Test Reviews Confirmation Dialog ── */}
+      {isPurgeDialogOpen && (
+        <Dialog
+          isOpen={isPurgeDialogOpen}
+          onClose={() => setIsPurgeDialogOpen(false)}
+          onConfirm={handleConfirmPurgeTest}
+          title="Purge All Test Reviews?"
+          message="This will scan your restaurant satisfaction ratings and permanently remove all testing, sample, and duplicate reviews (e.g. repeated test submissions) from Firestore. Only genuine diner reviews will remain."
+          confirmLabel={isPurging ? 'Purging...' : 'Purge Test Reviews'}
+          isDangerous={true}
+        />
       )}
     </div>
   );

@@ -5,12 +5,14 @@ import {
   getDocs, 
   doc, 
   updateDoc, 
+  deleteDoc,
   query, 
   where 
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { restaurantService } from '../../../shared/services/restaurantService';
+import { reviewService } from '../../../shared/services/reviewService';
 import { logAuditEvent } from '../../../shared/services/auditService';
 
 // UI Kit components
@@ -19,6 +21,7 @@ import Badge from '../../../components/ui/Badge/Badge';
 import Button from '../../../components/ui/Button/Button';
 import Input from '../../../components/ui/Input/Input';
 import Modal from '../../../components/ui/Modal/Modal';
+import Dialog from '../../../components/ui/Dialog/Dialog';
 import SearchBar from '../../../components/ui/SearchBar/SearchBar';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner/LoadingSpinner';
 import EmptyState from '../../../components/ui/EmptyState/EmptyState';
@@ -43,7 +46,8 @@ import {
   Frown,
   Send,
   Building2,
-  FileText
+  FileText,
+  Trash2
 } from 'lucide-react';
 
 export interface IFeedbackItem {
@@ -99,6 +103,64 @@ export const OwnerFeedback: React.FC = () => {
   const [selectedStaffAssignee, setSelectedStaffAssignee] = useState<string>('');
   const [selectedNewStatus, setSelectedNewStatus] = useState<string>('');
   const [isSavingAction, setIsSavingAction] = useState<boolean>(false);
+
+  // Deletion & Purge State
+  const [deleteTargetFeedback, setDeleteTargetFeedback] = useState<IFeedbackItem | null>(null);
+  const [isDeletingFeedback, setIsDeletingFeedback] = useState<boolean>(false);
+  const [isPurgeFeedbackOpen, setIsPurgeFeedbackOpen] = useState<boolean>(false);
+  const [isPurgingFeedback, setIsPurgingFeedback] = useState<boolean>(false);
+
+  const handleDeleteSingleFeedback = async () => {
+    if (!deleteTargetFeedback || !deleteTargetFeedback.id) return;
+    setIsDeletingFeedback(true);
+    const targetTenant = deleteTargetFeedback.restaurantId || tenantId || 'default';
+    try {
+      const res = await reviewService.deleteReview(targetTenant, deleteTargetFeedback.id);
+      if (res.success) {
+        toast.success('Feedback record deleted from Firestore');
+        setFeedbacks(prev => prev.filter(f => f.id !== deleteTargetFeedback.id));
+        setDeleteTargetFeedback(null);
+        if (selectedItem?.id === deleteTargetFeedback.id) {
+          setIsDetailsOpen(false);
+          setSelectedItem(null);
+        }
+      } else {
+        toast.error(res.error || 'Failed to delete feedback');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Delete failed');
+    } finally {
+      setIsDeletingFeedback(false);
+    }
+  };
+
+  const handlePurgeTestFeedback = async () => {
+    const targetTenant = tenantId || 'default';
+    setIsPurgingFeedback(true);
+    try {
+      const res = await reviewService.purgeTestReviews(targetTenant);
+      if (res.success) {
+        toast.success(`Purged ${res.count} test feedback record${res.count !== 1 ? 's' : ''} from Firestore`);
+        setFeedbacks(prev => prev.filter(f => {
+          const notesStr = String(f.notes || '').toLowerCase().trim();
+          const orderIdStr = String(f.orderId || '').toUpperCase().trim();
+          const isTest = notesStr === 'super' ||
+            notesStr === 'test' ||
+            orderIdStr === 'ORD-OAPZGOG' ||
+            orderIdStr === 'OAPZGOG' ||
+            (f.id && f.id.startsWith('REV-'));
+          return !isTest;
+        }));
+        setIsPurgeFeedbackOpen(false);
+      } else {
+        toast.error(res.error || 'Failed to purge test feedback');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Purge failed');
+    } finally {
+      setIsPurgingFeedback(false);
+    }
+  };
 
   // 1. Fetch feedbacks from Firestore
   useEffect(() => {
@@ -214,7 +276,7 @@ export const OwnerFeedback: React.FC = () => {
     const complaints = feedbacks.filter(f => f.isComplaint).length;
     const positive = feedbacks.filter(f => f.isPositive).length;
     const resolved = feedbacks.filter(f => f.status === 'Resolved').length;
-    const csatPercent = total > 0 ? Math.round((positive / total) * 100) : 94;
+    const csatPercent = total > 0 ? Math.round((positive / total) * 100) : 100;
 
     return { total, complaints, positive, resolved, csatPercent };
   }, [feedbacks]);
@@ -293,16 +355,31 @@ export const OwnerFeedback: React.FC = () => {
         <div>
           <div className="flex items-center space-x-2">
             <span className="p-2 rounded-xl bg-[#12352D] text-white shadow-sm">
-              <MessageSquareQuote className="w-5 h-5 text-[#C9533B]" />
+              <MessageSquareQuote className="w-5 h-5 text-[#B33E26]" />
             </span>
             <h1 className="text-2xl font-serif font-bold text-[#17202A] tracking-tight">
               Customer Feedback & Complaints
             </h1>
           </div>
-          <p className="text-xs text-[#6B7280] mt-1">
+          <p className="text-xs text-[#475569] mt-1">
             Centralized diner reviews, complaint resolution workflows, and guest satisfaction analytics.
           </p>
         </div>
+
+        {feedbacks.length > 0 && (
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsPurgeFeedbackOpen(true)}
+              className="text-xs font-bold border-red-200 text-red-700 hover:bg-red-50 hover:border-red-300 flex items-center space-x-1.5 rounded-xl shadow-2xs"
+              title="Remove fake and testing feedback records from Firestore"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-red-600" />
+              <span>Purge Test Feedback</span>
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* ── KPI Metric Cards ── */}
@@ -419,10 +496,12 @@ export const OwnerFeedback: React.FC = () => {
             >
               {/* Left Column: Customer & Rating */}
               <div className="flex items-start space-x-3.5 min-w-[280px]">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 shadow-sm ${
-                  item.isComplaint ? 'bg-red-500 text-white' : 'bg-[#12352D] text-white'
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 shadow-2xs border ${
+                  item.isComplaint 
+                    ? 'bg-red-50 text-red-700 border-red-200' 
+                    : 'bg-[#FFF8F2] text-[#B33E26] border-[#F5CBC4]'
                 }`}>
-                  {item.isComplaint ? <AlertTriangle className="w-5 h-5" /> : <Star className="w-5 h-5 text-amber-300 fill-amber-300" />}
+                  {item.isComplaint ? <AlertTriangle className="w-5 h-5 text-red-600" /> : <Star className="w-5 h-5 text-amber-500 fill-amber-500" />}
                 </div>
 
                 <div>
@@ -439,8 +518,8 @@ export const OwnerFeedback: React.FC = () => {
                     "{item.notes}"
                   </p>
 
-                  <div className="flex items-center space-x-3 text-[11px] text-[#6B7280] mt-1.5">
-                    <span className="bg-[#F8F6F2] px-2 py-0.5 rounded font-semibold text-[#12352D]">
+                  <div className="flex items-center space-x-3 text-[11px] text-[#475569] mt-1.5">
+                    <span className="bg-[#F8F6F2] px-2 py-0.5 rounded font-semibold text-[#17202A] border border-[#E5E7EB]">
                       Category: {item.category || 'General'}
                     </span>
                     {item.tableNumber && <span>Table {item.tableNumber}</span>}
@@ -452,7 +531,7 @@ export const OwnerFeedback: React.FC = () => {
               {/* Middle Column: Status & Assignment */}
               <div className="flex items-center space-x-6 text-xs text-[#17202A] border-y md:border-y-0 md:border-x border-[#E5E7EB] py-2 md:py-0 md:px-6">
                 <div>
-                  <p className="text-[10px] uppercase font-bold text-[#6B7280]">Resolution Status</p>
+                  <p className="text-[10px] uppercase font-bold text-[#475569]">Resolution Status</p>
                   <Badge variant={
                     item.status === 'Resolved' ? 'success' :
                     item.status === 'In Progress' ? 'primary' :
@@ -463,15 +542,15 @@ export const OwnerFeedback: React.FC = () => {
                 </div>
 
                 <div>
-                  <p className="text-[10px] uppercase font-bold text-[#6B7280]">Assigned Staff</p>
+                  <p className="text-[10px] uppercase font-bold text-[#475569]">Assigned Staff</p>
                   <p className="font-bold text-[#17202A] mt-0.5 truncate max-w-[130px]">
                     {item.assignedToName || 'Unassigned'}
                   </p>
                 </div>
 
                 <div>
-                  <p className="text-[10px] uppercase font-bold text-[#6B7280]">Submitted</p>
-                  <p className="text-[#6B7280] mt-0.5">
+                  <p className="text-[10px] uppercase font-bold text-[#475569]">Submitted</p>
+                  <p className="text-[#475569] mt-0.5">
                     {new Date(item.submittedAt).toLocaleDateString()}
                   </p>
                 </div>
@@ -487,6 +566,16 @@ export const OwnerFeedback: React.FC = () => {
                   <span>Resolve / Details</span>
                   <ChevronRight className="w-3.5 h-3.5" />
                 </Button>
+
+                <button
+                  type="button"
+                  onClick={() => setDeleteTargetFeedback(item)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition-colors"
+                  title="Delete this feedback from Firestore"
+                  aria-label="Delete feedback"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             </div>
           ))}
@@ -499,20 +588,29 @@ export const OwnerFeedback: React.FC = () => {
           isOpen={isDetailsOpen}
           onClose={() => setIsDetailsOpen(false)}
           title={`Feedback & Complaint Resolution — #${selectedItem.id}`}
+          variant="light"
         >
           <div className="space-y-4 p-1 select-none">
-            {/* Feedback Summary Card */}
-            <div className={`p-4 rounded-2xl text-white ${selectedItem.isComplaint ? 'bg-red-950/80 border border-red-800' : 'bg-[#12352D]'}`}>
+            {/* Feedback Summary Card (Accessible Light Surface) */}
+            <div className={`p-4 rounded-2xl border space-y-3 ${
+              selectedItem.isComplaint 
+                ? 'bg-red-50 border-red-200' 
+                : 'bg-[#F8F6F2] border-[#E5E0D9]'
+            }`}>
               <div className="flex items-start justify-between">
                 <div>
-                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-white/10">
+                  <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full ${
+                    selectedItem.isComplaint
+                      ? 'bg-red-100 text-red-800'
+                      : 'bg-[#E5E0D9] text-[#334155]'
+                  }`}>
                     Category: {selectedItem.category || 'General'}
                   </span>
-                  <h3 className="text-base font-serif font-bold mt-1 text-white">
+                  <h3 className="text-base font-serif font-bold mt-1 text-[#17202A]">
                     {selectedItem.customerName}
                   </h3>
-                  <p className="text-xs text-white/80 mt-0.5">
-                    Order #{selectedItem.orderId || 'Direct'} &middot; Table {selectedItem.tableNumber || 'Walk-in'}
+                  <p className="text-xs text-[#475569] mt-0.5 font-medium">
+                    Order #{selectedItem.orderId || 'Direct'} &middot; Table {selectedItem.tableNumber || 'Walk-in'} &middot; {new Date(selectedItem.submittedAt).toLocaleDateString()}
                   </p>
                 </div>
 
@@ -521,9 +619,11 @@ export const OwnerFeedback: React.FC = () => {
                 </Badge>
               </div>
 
-              <p className="mt-3 text-xs bg-black/20 p-3 rounded-xl italic leading-relaxed text-white">
-                "{selectedItem.notes}"
-              </p>
+              <div className="bg-white border border-[#E5E0D9] p-3 rounded-xl shadow-2xs">
+                <p className="text-xs text-[#17202A] italic leading-relaxed">
+                  "{selectedItem.notes}"
+                </p>
+              </div>
             </div>
 
             {/* Resolution Form Controls */}
@@ -577,37 +677,78 @@ export const OwnerFeedback: React.FC = () => {
               </h4>
               <div className="p-3 rounded-xl bg-[#F8F6F2] border border-[#E5E7EB] space-y-2 max-h-40 overflow-y-auto">
                 {(!selectedItem.resolutionHistory || selectedItem.resolutionHistory.length === 0) ? (
-                  <p className="text-xs text-[#6B7280] text-center py-2">No resolution updates logged yet.</p>
+                  <p className="text-xs text-[#475569] text-center py-2">No resolution updates logged yet.</p>
                 ) : (
                   selectedItem.resolutionHistory.map((h, idx) => (
                     <div key={idx} className="text-xs border-b border-[#E5E7EB] pb-2 last:border-b-0">
                       <div className="flex items-center justify-between text-[11px]">
                         <span className="font-bold text-[#17202A]">{h.action}</span>
-                        <span className="text-[#6B7280]">{new Date(h.timestamp).toLocaleString()}</span>
+                        <span className="text-[#475569]">{new Date(h.timestamp).toLocaleString()}</span>
                       </div>
-                      <p className="text-[11px] text-[#6B7280]">By: {h.by}</p>
-                      {h.notes && <p className="text-[11px] text-[#12352D] mt-0.5 italic">"{h.notes}"</p>}
+                      <p className="text-[11px] text-[#475569]">By: {h.by}</p>
+                      {h.notes && <p className="text-[11px] text-[#17202A] mt-0.5 italic">"{h.notes}"</p>}
                     </div>
                   ))
                 )}
               </div>
             </div>
 
-            <div className="pt-2 flex items-center justify-end space-x-2">
-              <Button variant="secondary" onClick={() => setIsDetailsOpen(false)}>
-                Cancel
-              </Button>
+            <div className="pt-2 flex items-center justify-between">
               <Button 
-                variant="primary" 
-                onClick={handleSaveResolution}
-                disabled={isSavingAction}
-                className="bg-[#12352D] hover:bg-[#1A473C] text-white"
+                variant="secondary" 
+                type="button"
+                onClick={() => {
+                  setDeleteTargetFeedback(selectedItem);
+                  setIsDetailsOpen(false);
+                }}
+                className="text-xs font-bold flex items-center space-x-1.5 border-red-200 text-red-700 hover:bg-red-50 hover:border-red-300 rounded-xl"
               >
-                {isSavingAction ? 'Saving...' : 'Save Resolution'}
+                <Trash2 className="w-3.5 h-3.5 text-red-600" />
+                <span>Delete Feedback</span>
               </Button>
+
+              <div className="flex items-center space-x-2">
+                <Button variant="secondary" onClick={() => setIsDetailsOpen(false)}>
+                  Cancel
+                </Button>
+                <Button 
+                  variant="primary" 
+                  onClick={handleSaveResolution}
+                  disabled={isSavingAction}
+                  className="bg-[#B33E26] hover:bg-[#9B331D] text-white font-bold"
+                >
+                  {isSavingAction ? 'Saving...' : 'Save Resolution'}
+                </Button>
+              </div>
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* ── Delete Single Feedback Confirmation Dialog ── */}
+      {deleteTargetFeedback && (
+        <Dialog
+          isOpen={Boolean(deleteTargetFeedback)}
+          onClose={() => setDeleteTargetFeedback(null)}
+          onConfirm={handleDeleteSingleFeedback}
+          title="Delete Feedback Record?"
+          message={`Are you sure you want to permanently delete this feedback entry for Order #${deleteTargetFeedback.orderId || 'Direct'} from Firestore? This action cannot be undone.`}
+          confirmLabel={isDeletingFeedback ? 'Deleting...' : 'Delete Feedback'}
+          isDangerous={true}
+        />
+      )}
+
+      {/* ── Purge Test Feedback Confirmation Dialog ── */}
+      {isPurgeFeedbackOpen && (
+        <Dialog
+          isOpen={isPurgeFeedbackOpen}
+          onClose={() => setIsPurgeFeedbackOpen(false)}
+          onConfirm={handlePurgeTestFeedback}
+          title="Purge All Test Feedback?"
+          message="This will scan your satisfaction ratings collection and permanently remove all testing and duplicate feedback records (e.g. repeated test submissions) from Firestore. Only genuine diner reviews will remain."
+          confirmLabel={isPurgingFeedback ? 'Purging...' : 'Purge Test Feedback'}
+          isDangerous={true}
+        />
       )}
     </div>
   );

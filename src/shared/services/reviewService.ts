@@ -4,6 +4,8 @@ import {
   getDoc, 
   getDocs, 
   addDoc, 
+  deleteDoc,
+  writeBatch,
   query, 
   where, 
   orderBy, 
@@ -464,6 +466,84 @@ export const reviewService = {
       return { 
         success: false, 
         error: err?.message || 'Failed to submit review. Please check your connection and try again.' 
+      };
+    }
+  },
+
+  /**
+   * Delete a review document directly from Firestore.
+   */
+  async deleteReview(tenantId: string, reviewId: string): Promise<{ success: boolean; error?: string }> {
+    if (!tenantId || !reviewId) {
+      return { success: false, error: 'Restaurant ID and Review ID are required.' };
+    }
+    try {
+      const docRef = doc(db, 'restaurants', tenantId, 'satisfactionRatings', reviewId);
+      await deleteDoc(docRef);
+      return { success: true };
+    } catch (err: any) {
+      console.error('[reviewService] Delete review error:', err);
+      return { 
+        success: false, 
+        error: err?.message || 'Failed to delete review from Firestore.' 
+      };
+    }
+  },
+
+  /**
+   * Purge test / fake reviews directly from Firestore.
+   * Matches test comments like 'super', sample order numbers, demo IDs, or target IDs.
+   */
+  async purgeTestReviews(
+    tenantId: string, 
+    specificIds?: string[]
+  ): Promise<{ success: boolean; count: number; error?: string }> {
+    if (!tenantId) {
+      return { success: false, count: 0, error: 'Restaurant ID is required.' };
+    }
+    try {
+      const colRef = collection(db, 'restaurants', tenantId, 'satisfactionRatings');
+      const snap = await getDocs(colRef);
+      const batch = writeBatch(db);
+      let count = 0;
+
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        const id = docSnap.id;
+        const notesStr = String(data.notes || data.comments || data.feedback || '').toLowerCase().trim();
+        const orderIdStr = String(data.orderId || '').toUpperCase().trim();
+
+        const isTestMatch = specificIds
+          ? specificIds.includes(id)
+          : (
+            notesStr === 'super' ||
+            notesStr === 'test' ||
+            notesStr === 'testing' ||
+            orderIdStr === 'ORD-OAPZGOG' ||
+            orderIdStr === 'OAPZGOG' ||
+            id.startsWith('REV-') ||
+            data.isTest === true ||
+            (data.customerName && String(data.customerName).startsWith('Customer ')) ||
+            notesStr.includes('stunning hospitality and gorgeous fresh flavors')
+          );
+
+        if (isTestMatch) {
+          batch.delete(docSnap.ref);
+          count++;
+        }
+      });
+
+      if (count > 0) {
+        await batch.commit();
+      }
+
+      return { success: true, count };
+    } catch (err: any) {
+      console.error('[reviewService] Purge test reviews error:', err);
+      return { 
+        success: false, 
+        count: 0, 
+        error: err?.message || 'Failed to purge test reviews from Firestore.' 
       };
     }
   }

@@ -68,13 +68,13 @@
    Typography & Text High-Contrast Rules
    ========================================================================== */
 
-/* Headings */
-.owner-theme h1,
-.owner-theme h2,
-.owner-theme h3,
-.owner-theme h4,
-.owner-theme h5,
-.owner-theme h6 {
+/* Headings (default to dark charcoal on light surfaces, preserving white on dark containers) */
+.owner-theme h1:not([class*="text-white"]):not([class*="bg-[#12352D]"] *):not([class*="bg-[#B33E26]"] *):not([class*="bg-[#C9533B]"] *):not([class*="bg-red-"] *):not(.bg-primary *),
+.owner-theme h2:not([class*="text-white"]):not([class*="bg-[#12352D]"] *):not([class*="bg-[#B33E26]"] *):not([class*="bg-[#C9533B]"] *):not([class*="bg-red-"] *):not(.bg-primary *),
+.owner-theme h3:not([class*="text-white"]):not([class*="bg-[#12352D]"] *):not([class*="bg-[#B33E26]"] *):not([class*="bg-[#C9533B]"] *):not([class*="bg-red-"] *):not(.bg-primary *),
+.owner-theme h4:not([class*="text-white"]):not([class*="bg-[#12352D]"] *):not([class*="bg-[#B33E26]"] *):not([class*="bg-[#C9533B]"] *):not([class*="bg-red-"] *):not(.bg-primary *),
+.owner-theme h5:not([class*="text-white"]):not([class*="bg-[#12352D]"] *):not([class*="bg-[#B33E26]"] *):not([class*="bg-[#C9533B]"] *):not([class*="bg-red-"] *):not(.bg-primary *),
+.owner-theme h6:not([class*="text-white"]):not([class*="bg-[#12352D]"] *):not([class*="bg-[#B33E26]"] *):not([class*="bg-[#C9533B]"] *):not([class*="bg-red-"] *):not(.bg-primary *) {
   color: #17202A !important;
 }
 
@@ -105,7 +105,7 @@
 }
 
 /* Prevent white text on light surfaces while preserving text on dark containers */
-.owner-theme .text-white:not(.bg-primary *):not([class*="bg-[#12352D]"] *):not([class*="bg-[#C9533B]"] *):not([class*="bg-emerald-600"] *):not([class*="bg-red-600"] *):not([class*="bg-[#1A473C]"] *) {
+.owner-theme .text-white:not(.bg-primary *):not([class*="bg-[#12352D]"] *):not([class*="bg-[#C9533B]"] *):not([class*="bg-[#B33E26]"] *):not([class*="bg-emerald-600"] *):not([class*="bg-red-600"] *):not([class*="bg-[#1A473C]"] *):not([class*="bg-red-950"] *):not([class*="bg-red-900"] *) {
   color: #17202A;
 }
 

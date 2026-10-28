@@ -1,12 +1,13 @@
 import React from 'react';
-import { Star, Utensils, Sparkles, ShieldCheck, HeartHandshake, CheckCircle2, UserCheck, Shield } from 'lucide-react';
+import { Star, Utensils, Sparkles, ShieldCheck, HeartHandshake, CheckCircle2, UserCheck, Shield, Trash2 } from 'lucide-react';
 import { ISatisfactionRatingRecord, maskCustomerName } from '../../../../shared/services/reviewService';
 
 interface ReviewCardProps {
   review: ISatisfactionRatingRecord;
+  onDelete?: (review: ISatisfactionRatingRecord) => void;
 }
 
-export const ReviewCard: React.FC<ReviewCardProps> = ({ review }) => {
+export const ReviewCard: React.FC<ReviewCardProps> = ({ review, onDelete }) => {
   // Determine customer name to display
   const isAnon = Boolean(review.isAnonymous);
   const displayName = isAnon
@@ -95,55 +96,72 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({ review }) => {
           </div>
         </div>
 
-        {/* Stars */}
-        <div className="flex items-center space-x-1 self-start sm:self-auto bg-[#FFF8F2] px-2.5 py-1 rounded-xl border border-[#EEE7E1]">
-          <div className="flex items-center">
-            {[1, 2, 3, 4, 5].map((star) => (
-              <Star
-                key={star}
-                className={`w-3.5 h-3.5 ${
-                  star <= starScore
-                    ? 'text-[#F4B942] fill-[#F4B942]'
-                    : 'text-[#EEE7E1] fill-none'
-                }`}
-              />
-            ))}
+        {/* Stars & Delete Action */}
+        <div className="flex items-center space-x-2 self-start sm:self-auto">
+          <div className="flex items-center space-x-1 bg-[#FFF8F2] px-2.5 py-1 rounded-xl border border-[#EEE7E1]">
+            <div className="flex items-center">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <Star
+                  key={star}
+                  className={`w-3.5 h-3.5 ${
+                    star <= starScore
+                      ? 'text-[#D98B00] fill-[#D98B00]'
+                      : 'text-[#EEE7E1] fill-none'
+                  }`}
+                />
+              ))}
+            </div>
+            <span className="text-xs font-bold text-[#17202A] ml-1 font-mono">
+              {starScore.toFixed(1)}
+            </span>
           </div>
-          <span className="text-xs font-bold text-[#242424] ml-1 font-mono">
-            {starScore.toFixed(1)}
-          </span>
+
+          {onDelete && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(review);
+              }}
+              className="p-1.5 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-200 transition-colors"
+              title="Delete this review from Firestore"
+              aria-label="Delete review"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
       {/* Subcategory Scores Chips (Food, Service, Cleanliness, Ambience) */}
       <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
         {foodScore && (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-[#FFF8F2] border border-[#EEE7E1] rounded-lg text-[11px] font-semibold text-[#242424]">
-            <Utensils className="w-3 h-3 text-[#E85D3F]" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-[#F8F6F2] border border-[#E5E0D9] rounded-lg text-[11px] font-semibold text-[#17202A]">
+            <Utensils className="w-3 h-3 text-[#B33E26]" />
             <span>Food: {foodScore}★</span>
           </span>
         )}
         {serviceScore && (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-[#FFF8F2] border border-[#EEE7E1] rounded-lg text-[11px] font-semibold text-[#242424]">
-            <Sparkles className="w-3 h-3 text-amber-500" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-[#F8F6F2] border border-[#E5E0D9] rounded-lg text-[11px] font-semibold text-[#17202A]">
+            <Sparkles className="w-3 h-3 text-amber-600" />
             <span>Service: {serviceScore}★</span>
           </span>
         )}
         {cleanScore && (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-[#FFF8F2] border border-[#EEE7E1] rounded-lg text-[11px] font-semibold text-[#242424]">
-            <ShieldCheck className="w-3 h-3 text-emerald-600" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-[#F8F6F2] border border-[#E5E0D9] rounded-lg text-[11px] font-semibold text-[#17202A]">
+            <ShieldCheck className="w-3 h-3 text-emerald-700" />
             <span>Clean: {cleanScore}★</span>
           </span>
         )}
         {ambienceScore && (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-[#FFF8F2] border border-[#EEE7E1] rounded-lg text-[11px] font-semibold text-[#242424]">
-            <HeartHandshake className="w-3 h-3 text-indigo-500" />
+          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-[#F8F6F2] border border-[#E5E0D9] rounded-lg text-[11px] font-semibold text-[#17202A]">
+            <HeartHandshake className="w-3 h-3 text-indigo-700" />
             <span>Ambience: {ambienceScore}★</span>
           </span>
         )}
         {(review.revisitIntention === 'Yes' || review.repeatCustomer) && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-[10px] font-bold ml-auto">
-            <CheckCircle2 className="w-3 h-3" />
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-bold ml-auto">
+            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
             <span>Would visit again</span>
           </span>
         )}
@@ -151,11 +169,11 @@ export const ReviewCard: React.FC<ReviewCardProps> = ({ review }) => {
 
       {/* Written Comment */}
       {hasValidNotes ? (
-        <p className="text-xs sm:text-[13px] text-[#242424] leading-relaxed bg-[#FFFCF9] border border-[#EEE7E1]/70 p-3 rounded-xl italic">
+        <p className="text-xs sm:text-[13px] text-[#17202A] leading-relaxed bg-[#F8F6F2] border border-[#E5E0D9] p-3 rounded-xl italic">
           "{rawNotes}"
         </p>
       ) : (
-        <p className="text-xs sm:text-[12px] text-[#7B8794] italic bg-[#F9F9F8] border border-[#EEE7E1]/50 p-2.5 rounded-xl">
+        <p className="text-xs sm:text-[12px] text-[#52606D] italic bg-[#F9F9F8] border border-[#E5E0D9]/50 p-2.5 rounded-xl">
           No written comment
         </p>
       )}
