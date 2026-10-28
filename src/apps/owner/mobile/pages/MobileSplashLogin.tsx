@@ -3,6 +3,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Utensils, Lock, Mail, Eye, EyeOff, AlertCircle, ArrowRight, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../../../../context/AuthContext';
 import { authService } from '../../../../services/authService';
+import { resolveAuthenticatedUser } from '../../../../shared/services/roleResolver';
+import { getDashboardRoute } from '../../../../utils/navigation';
 
 export const MobileSplashLogin: React.FC = () => {
   const navigate = useNavigate();
@@ -15,10 +17,14 @@ export const MobileSplashLogin: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // If already logged in as owner/admin, redirect to mobile home
+  // If already logged in as owner/admin, redirect appropriately based on approval status
   useEffect(() => {
     if (user && (role === 'owner' || role === 'admin')) {
-      navigate('/owner/dashboard', { replace: true });
+      if (user.status && ['pending_approval', 'rejected', 'more_info_required'].includes(user.status)) {
+        navigate('/application-pending', { replace: true });
+      } else {
+        navigate('/owner/dashboard', { replace: true });
+      }
     }
   }, [user, role, navigate]);
 
@@ -35,7 +41,32 @@ export const MobileSplashLogin: React.FC = () => {
     try {
       const result = await authService.signInWithEmail(email.trim(), password, rememberMe);
       if (result.user) {
-        navigate('/owner/dashboard', { replace: true });
+        const profile = await resolveAuthenticatedUser(result.user);
+        if (!profile) {
+          await authService.signOutUser();
+          setErrorMessage('Profile is missing or not configured for this account.');
+          return;
+        }
+
+        const isApprovedOrActive = profile.status === 'active' || profile.status === 'approved';
+        if (profile.status && !isApprovedOrActive) {
+          if (['pending_approval', 'rejected', 'more_info_required'].includes(profile.status)) {
+            navigate('/application-pending', { replace: true });
+            return;
+          }
+          await authService.signOutUser();
+          setErrorMessage('Your account is currently inactive or suspended. Please contact your restaurant administrator.');
+          return;
+        }
+
+        if (profile.role === 'customer') {
+          await authService.signOutUser();
+          setErrorMessage('This account is registered as a diner account. Please sign in via the Customer Portal.');
+          return;
+        }
+
+        const destination = getDashboardRoute(profile.role);
+        navigate(destination, { replace: true });
       }
     } catch (err: any) {
       console.error('[MobileSplashLogin] Error:', err);

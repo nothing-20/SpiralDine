@@ -129,8 +129,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return;
       }
 
-      // Step 2: Validate Account Status == "active"
-      if (userData.status && userData.status !== 'active') {
+      // Step 2: Validate Account Status == "active" or "approved"
+      const isUserStatusActive = !userData.status || userData.status === 'active' || userData.status === 'approved';
+      if (!isUserStatusActive) {
         if (['pending_approval', 'rejected', 'more_info_required'].includes(userData.status)) {
           console.info('[WorkspaceValidation] Result', { allowed: false, reason: 'APPLICATION_PENDING', status: userData.status });
           setValidationError('application-pending');
@@ -258,7 +259,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       // Validate Tenant Status (owners are never locked out with 'tenant-suspended', but pending applications must be blocked)
-      if (tenantData.status && tenantData.status !== 'active') {
+      const isTenantStatusActive = !tenantData.status || tenantData.status === 'active' || tenantData.status === 'approved';
+      if (!isTenantStatusActive) {
         if (['pending_approval', 'rejected', 'more_info_required'].includes(tenantData.status)) {
           console.info('[WorkspaceValidation] Result', { allowed: false, reason: 'APPLICATION_PENDING', status: tenantData.status });
           setValidationError('application-pending');
@@ -443,7 +445,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   useEffect(() => {
     fetchAndValidateWorkspace();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid, user?.role, user?.tenantId, authStatus, authLoading]);
+  }, [user?.uid, user?.role, user?.tenantId, user?.status, authStatus, authLoading]);
 
   return (
     <WorkspaceContext.Provider 

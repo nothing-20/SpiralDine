@@ -34,7 +34,7 @@ import { Plus, Edit2, Trash2, ShieldAlert, Check, XCircle } from 'lucide-react';
 const tenantFormSchema = z.object({
   name: z.string().min(1, 'Restaurant name is required'),
   planTier: z.enum(['starter', 'pro', 'enterprise']),
-  status: z.enum(['active', 'suspended', 'trial', 'pending_approval', 'rejected', 'more_info_required']),
+  status: z.enum(['active', 'approved', 'suspended', 'trial', 'pending_approval', 'rejected', 'more_info_required']),
   street: z.string().min(1, 'Street is required'),
   city: z.string().min(1, 'City is required'),
   zipCode: z.string().min(1, 'Zip code is required')

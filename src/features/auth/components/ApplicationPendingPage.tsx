@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { 
   Clock, 
@@ -16,16 +16,21 @@ import {
 import { doc, onSnapshot, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../../shared/firebase/config';
 import { useAuth } from '../../../context/AuthContext';
+import { useWorkspace } from '../../../context/WorkspaceContext';
 import { authService } from '../../../shared/services/authService';
 import { IRestaurantApplication, TApplicationStatus } from '../../../shared/domain/restaurant/types';
 import toast from 'react-hot-toast';
 
 export const ApplicationPendingPage: React.FC = () => {
   const { user, logout } = useAuth();
+  const { revalidate } = useWorkspace();
   const navigate = useNavigate();
   const [application, setApplication] = useState<IRestaurantApplication | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
+
+  const hasShownApprovalToastRef = useRef(false);
 
   const tenantId = user?.tenantId || (application?.tenantId ?? '');
   const ownerUid = user?.uid || auth.currentUser?.uid;
@@ -37,109 +42,153 @@ export const ApplicationPendingPage: React.FC = () => {
       return;
     }
 
-    let unsubApp: (() => void) | null = null;
+    let unsubRest: (() => void) | null = null;
+    let unsubUser: (() => void) | null = null;
 
     const setupListener = async () => {
       try {
-        const candidateId = tenantId || ownerUid;
-        
-        // Listen to authoritative restaurants collection
-        const restRef = doc(db, 'restaurants', candidateId);
-        unsubApp = onSnapshot(restRef, (snap) => {
-          if (snap.exists()) {
-            const data = snap.data();
-            const normalizedStatus: TApplicationStatus = 
-              (data.status === 'active' || data.status === 'approved') ? 'approved' :
-              data.status === 'rejected' ? 'rejected' :
-              data.status === 'more_info_required' ? 'more_info_required' :
+        let activeTenantId = tenantId;
+
+        // 1. Listen to users/{ownerUid} for authoritative user account clearance & tenant assignment
+        const userRef = doc(db, 'users', ownerUid);
+        unsubUser = onSnapshot(userRef, (uSnap) => {
+          if (uSnap.exists()) {
+            const uData = uSnap.data();
+            const uStatus: TApplicationStatus = 
+              (uData.status === 'active' || uData.status === 'approved') ? 'approved' :
+              uData.status === 'rejected' ? 'rejected' :
+              uData.status === 'more_info_required' ? 'more_info_required' :
               'pending_approval';
 
-            setApplication({
-              id: candidateId,
-              tenantId: data.tenantId || candidateId,
-              restaurantName: data.restaurantName || data.name || 'Your Restaurant',
-              ownerUid: data.ownerUid || ownerUid,
-              ownerEmail: data.ownerEmail || auth.currentUser?.email || '',
-              ownerName: data.ownerName || data.name || 'Restaurant Owner',
-              country: data.country || 'Global',
-              currency: data.currency || 'USD',
-              status: normalizedStatus,
-              submittedAt: data.createdAt || new Date().toISOString(),
-              createdAt: data.createdAt || new Date().toISOString(),
-              updatedAt: data.updatedAt || data.createdAt || new Date().toISOString(),
-              reviewNotes: data.reviewNotes,
-              rejectionReason: data.rejectionReason,
-              moreInfoNotes: data.moreInfoNotes
-            });
+            const resolvedTenantId = uData.tenantId || activeTenantId || ownerUid;
+            activeTenantId = resolvedTenantId;
+
+            setApplication((prev) => ({
+              id: resolvedTenantId,
+              tenantId: resolvedTenantId,
+              restaurantName: prev?.restaurantName || uData.restaurantName || uData.displayName || 'Your Restaurant',
+              ownerUid: ownerUid,
+              ownerEmail: uData.email || auth.currentUser?.email || prev?.ownerEmail || '',
+              ownerName: uData.fullName || uData.displayName || prev?.ownerName || 'Restaurant Owner',
+              country: uData.country || prev?.country || 'Global',
+              currency: uData.currency || prev?.currency || 'USD',
+              status: uStatus,
+              submittedAt: prev?.submittedAt || uData.createdAt || new Date().toISOString(),
+              createdAt: prev?.createdAt || uData.createdAt || new Date().toISOString(),
+              updatedAt: uData.updatedAt || new Date().toISOString(),
+              reviewNotes: prev?.reviewNotes,
+              rejectionReason: prev?.rejectionReason,
+              moreInfoNotes: prev?.moreInfoNotes
+            }));
+
             setIsLoading(false);
 
-            if (normalizedStatus === 'approved') {
+            // Deduplicated approval toast notification
+            const toastStorageKey = `app_approved_toast_${ownerUid}`;
+            const alreadyShownInStorage = typeof sessionStorage !== 'undefined' && sessionStorage.getItem(toastStorageKey);
+            if (uStatus === 'approved' && !hasShownApprovalToastRef.current && !alreadyShownInStorage) {
+              hasShownApprovalToastRef.current = true;
+              if (typeof sessionStorage !== 'undefined') {
+                sessionStorage.setItem(toastStorageKey, 'true');
+              }
               toast.success('Your restaurant application has been approved! You now have full owner access.', {
                 duration: 6000
               });
             }
-          } else {
-            // Check users/{uid} for status fallback
-            const userRef = doc(db, 'users', ownerUid);
-            getDoc(userRef).then((uSnap) => {
-              if (uSnap.exists()) {
-                const uData = uSnap.data();
-                const uStatus: TApplicationStatus = 
-                  (uData.status === 'active' || uData.status === 'approved') ? 'approved' :
-                  uData.status === 'rejected' ? 'rejected' :
-                  uData.status === 'more_info_required' ? 'more_info_required' :
-                  'pending_approval';
 
-                setApplication({
-                  id: candidateId,
-                  tenantId: uData.tenantId || candidateId,
-                  restaurantName: uData.restaurantName || uData.displayName || 'Your Restaurant',
-                  ownerUid: ownerUid,
-                  ownerEmail: uData.email || auth.currentUser?.email || '',
-                  ownerName: uData.fullName || uData.displayName || '',
-                  country: uData.country || 'Global',
-                  currency: uData.currency || 'USD',
-                  status: uStatus,
-                  submittedAt: uData.createdAt || new Date().toISOString(),
-                  createdAt: uData.createdAt || new Date().toISOString(),
-                  updatedAt: uData.createdAt || new Date().toISOString()
-                });
-              }
-              setIsLoading(false);
-            }).catch(() => setIsLoading(false));
+            // Ensure restaurant document listener is set up with resolvedTenantId
+            if (resolvedTenantId && !unsubRest) {
+              const restRef = doc(db, 'restaurants', resolvedTenantId);
+              unsubRest = onSnapshot(restRef, (rSnap) => {
+                if (rSnap.exists()) {
+                  const rData = rSnap.data();
+                  const rNormalizedStatus: TApplicationStatus = 
+                    (rData.status === 'active' || rData.status === 'approved') ? 'approved' :
+                    rData.status === 'rejected' ? 'rejected' :
+                    rData.status === 'more_info_required' ? 'more_info_required' :
+                    'pending_approval';
+
+                  setApplication((prev) => ({
+                    id: resolvedTenantId,
+                    tenantId: rData.tenantId || resolvedTenantId,
+                    restaurantName: rData.restaurantName || rData.name || prev?.restaurantName || 'Your Restaurant',
+                    ownerUid: rData.ownerUid || ownerUid,
+                    ownerEmail: rData.ownerEmail || auth.currentUser?.email || prev?.ownerEmail || '',
+                    ownerName: rData.ownerName || rData.name || prev?.ownerName || 'Restaurant Owner',
+                    country: rData.country || prev?.country || 'Global',
+                    currency: rData.currency || prev?.currency || 'USD',
+                    status: rNormalizedStatus,
+                    submittedAt: rData.createdAt || prev?.submittedAt || new Date().toISOString(),
+                    createdAt: rData.createdAt || prev?.createdAt || new Date().toISOString(),
+                    updatedAt: rData.updatedAt || new Date().toISOString(),
+                    reviewNotes: rData.reviewNotes,
+                    rejectionReason: rData.rejectionReason,
+                    moreInfoNotes: rData.moreInfoNotes
+                  }));
+
+                  if (rNormalizedStatus === 'approved' && !hasShownApprovalToastRef.current && !alreadyShownInStorage) {
+                    hasShownApprovalToastRef.current = true;
+                    if (typeof sessionStorage !== 'undefined') {
+                      sessionStorage.setItem(toastStorageKey, 'true');
+                    }
+                    toast.success('Your restaurant application has been approved! You now have full owner access.', {
+                      duration: 6000
+                    });
+                  }
+                }
+              });
+            }
           }
-        }, (err) => {
-          console.warn('[ApplicationPendingPage] Restaurants listener note, attempting users fallback:', err);
-          
-          // Fallback to users/{uid}
-          const userRef = doc(db, 'users', ownerUid);
-          getDoc(userRef).then((uSnap) => {
-            if (uSnap.exists()) {
-              const uData = uSnap.data();
-              const uStatus: TApplicationStatus = 
-                (uData.status === 'active' || uData.status === 'approved') ? 'approved' :
-                uData.status === 'rejected' ? 'rejected' :
-                uData.status === 'more_info_required' ? 'more_info_required' :
+        });
+
+        // 2. Also listen directly to candidate restaurant doc if tenantId already available
+        const initialCandidateId = tenantId || ownerUid;
+        if (initialCandidateId) {
+          const restRef = doc(db, 'restaurants', initialCandidateId);
+          unsubRest = onSnapshot(restRef, (snap) => {
+            if (snap.exists()) {
+              const data = snap.data();
+              const normalizedStatus: TApplicationStatus = 
+                (data.status === 'active' || data.status === 'approved') ? 'approved' :
+                data.status === 'rejected' ? 'rejected' :
+                data.status === 'more_info_required' ? 'more_info_required' :
                 'pending_approval';
 
               setApplication({
-                id: candidateId,
-                tenantId: uData.tenantId || candidateId,
-                restaurantName: uData.restaurantName || uData.displayName || 'Your Restaurant',
-                ownerUid: ownerUid,
-                ownerEmail: uData.email || auth.currentUser?.email || '',
-                ownerName: uData.fullName || uData.displayName || '',
-                country: uData.country || 'Global',
-                currency: uData.currency || 'USD',
-                status: uStatus,
-                submittedAt: uData.createdAt || new Date().toISOString(),
-                createdAt: uData.createdAt || new Date().toISOString(),
-                updatedAt: uData.createdAt || new Date().toISOString()
+                id: initialCandidateId,
+                tenantId: data.tenantId || initialCandidateId,
+                restaurantName: data.restaurantName || data.name || 'Your Restaurant',
+                ownerUid: data.ownerUid || ownerUid,
+                ownerEmail: data.ownerEmail || auth.currentUser?.email || '',
+                ownerName: data.ownerName || data.name || 'Restaurant Owner',
+                country: data.country || 'Global',
+                currency: data.currency || 'USD',
+                status: normalizedStatus,
+                submittedAt: data.createdAt || new Date().toISOString(),
+                createdAt: data.createdAt || new Date().toISOString(),
+                updatedAt: data.updatedAt || data.createdAt || new Date().toISOString(),
+                reviewNotes: data.reviewNotes,
+                rejectionReason: data.rejectionReason,
+                moreInfoNotes: data.moreInfoNotes
               });
+              setIsLoading(false);
+
+              const toastStorageKey = `app_approved_toast_${ownerUid}`;
+              const alreadyShownInStorage = typeof sessionStorage !== 'undefined' && sessionStorage.getItem(toastStorageKey);
+              if (normalizedStatus === 'approved' && !hasShownApprovalToastRef.current && !alreadyShownInStorage) {
+                hasShownApprovalToastRef.current = true;
+                if (typeof sessionStorage !== 'undefined') {
+                  sessionStorage.setItem(toastStorageKey, 'true');
+                }
+                toast.success('Your restaurant application has been approved! You now have full owner access.', {
+                  duration: 6000
+                });
+              }
             }
-            setIsLoading(false);
-          }).catch(() => setIsLoading(false));
-        });
+          }, (err) => {
+            console.warn('[ApplicationPendingPage] Secondary restaurant listener note:', err);
+          });
+        }
       } catch (err) {
         console.warn('[ApplicationPendingPage] Setup error:', err);
         setIsLoading(false);
@@ -149,7 +198,8 @@ export const ApplicationPendingPage: React.FC = () => {
     setupListener();
 
     return () => {
-      if (unsubApp) unsubApp();
+      if (unsubRest) unsubRest();
+      if (unsubUser) unsubUser();
     };
   }, [ownerUid, tenantId]);
 
@@ -159,6 +209,8 @@ export const ApplicationPendingPage: React.FC = () => {
       if (auth.currentUser) {
         await auth.currentUser.getIdToken(true);
       }
+      await revalidate();
+
       const candidateId = tenantId || ownerUid || '';
       if (candidateId) {
         const restSnap = await getDoc(doc(db, 'restaurants', candidateId));
@@ -208,8 +260,22 @@ export const ApplicationPendingPage: React.FC = () => {
     }
   };
 
-  const handleGoToDashboard = () => {
-    navigate('/owner/dashboard', { replace: true });
+  const handleGoToDashboard = async () => {
+    if (isNavigating) return;
+    setIsNavigating(true);
+    try {
+      if (auth.currentUser) {
+        await auth.currentUser.getIdToken(true);
+      }
+      // Re-validate workspace to clear any stale application-pending validation error
+      await revalidate();
+      navigate('/owner/dashboard', { replace: true });
+    } catch (err) {
+      console.error('[ApplicationPendingPage] Error navigating to dashboard:', err);
+      navigate('/owner/dashboard', { replace: true });
+    } finally {
+      setIsNavigating(false);
+    }
   };
 
   const status = application?.status || (user?.status as TApplicationStatus) || 'pending_approval';
@@ -272,10 +338,12 @@ export const ApplicationPendingPage: React.FC = () => {
                 </div>
                 <button
                   onClick={handleGoToDashboard}
-                  className="px-4 py-2 bg-white text-emerald-700 font-bold text-xs rounded-xl hover:bg-emerald-50 transition-colors shadow-sm flex items-center space-x-1.5 shrink-0"
+                  disabled={isNavigating}
+                  className="px-4 py-2 bg-white text-emerald-700 font-bold text-xs rounded-xl hover:bg-emerald-50 transition-colors shadow-sm flex items-center space-x-1.5 shrink-0 disabled:opacity-75 disabled:cursor-not-allowed cursor-pointer"
                 >
-                  <span>Go to Dashboard</span>
-                  <ArrowRight className="w-4 h-4" />
+                  {isNavigating && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>{isNavigating ? 'Opening Dashboard...' : 'Go to Dashboard'}</span>
+                  {!isNavigating && <ArrowRight className="w-4 h-4" />}
                 </button>
               </div>
             )}

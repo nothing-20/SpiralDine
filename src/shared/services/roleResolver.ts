@@ -11,7 +11,7 @@ export interface IResolvedUserProfile {
   tenantId: string;
   branchId?: string;
   department?: string;
-  status?: 'active' | 'inactive' | 'pending_approval' | 'rejected' | 'more_info_required';
+  status?: 'active' | 'approved' | 'inactive' | 'pending_approval' | 'rejected' | 'more_info_required';
   phoneNumber?: string;
   createdAt: string;
 }
@@ -192,6 +192,8 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
     if (!snapTenant.empty) {
       const tDoc = snapTenant.docs[0];
       const tData = tDoc.data();
+      const rawStatus = tData.status;
+      const resolvedStatus = (rawStatus === 'active' || rawStatus === 'approved') ? 'active' : (rawStatus || 'pending_approval');
       const resolved: IResolvedUserProfile = {
         uid: fUser.uid,
         email: cleanEmail || tData.email || '',
@@ -200,14 +202,15 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
         tenantId: tDoc.id,
         branchId: '',
         department: 'Management',
-        status: 'active',
+        status: resolvedStatus,
         phoneNumber: tData.phone || '',
         createdAt: tData.createdAt || new Date().toISOString()
       };
       console.log('[AUTH ROLE RESOLVER] Resolved from tenants (ownerUid):', {
         uid: resolved.uid,
         role: resolved.role,
-        tenantId: resolved.tenantId
+        tenantId: resolved.tenantId,
+        status: resolved.status
       });
       try {
         await setDoc(userDocRef, resolved);
@@ -224,6 +227,8 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
     if (!snapRest.empty) {
       const rDoc = snapRest.docs[0];
       const rData = rDoc.data();
+      const rawStatus = rData.status;
+      const resolvedStatus = (rawStatus === 'active' || rawStatus === 'approved') ? 'active' : (rawStatus || 'pending_approval');
       const resolved: IResolvedUserProfile = {
         uid: fUser.uid,
         email: cleanEmail || rData.email || '',
@@ -232,14 +237,15 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
         tenantId: rDoc.id,
         branchId: '',
         department: 'Management',
-        status: 'active',
+        status: resolvedStatus,
         phoneNumber: rData.phone || '',
         createdAt: rData.createdAt || new Date().toISOString()
       };
       console.log('[AUTH ROLE RESOLVER] Resolved from restaurants (ownerUid):', {
         uid: resolved.uid,
         role: resolved.role,
-        tenantId: resolved.tenantId
+        tenantId: resolved.tenantId,
+        status: resolved.status
       });
       try {
         await setDoc(userDocRef, resolved);

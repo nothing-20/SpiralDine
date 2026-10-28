@@ -3,7 +3,7 @@ export interface ITenant {
   name: string;
   logoUrl: string;
   planTier: 'starter' | 'pro' | 'enterprise';
-  status: 'active' | 'suspended' | 'trial' | 'pending_approval' | 'rejected' | 'more_info_required';
+  status: 'active' | 'approved' | 'suspended' | 'trial' | 'pending_approval' | 'rejected' | 'more_info_required';
   address: {
     street: string;
     city: string;

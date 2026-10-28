@@ -142,7 +142,8 @@ export const LoginForm: React.FC = () => {
       return false;
     }
 
-    if (profile.status && profile.status !== 'active') {
+    const isApprovedOrActive = profile.status === 'active' || profile.status === 'approved';
+    if (profile.status && !isApprovedOrActive) {
       if (['pending_approval', 'rejected', 'more_info_required'].includes(profile.status)) {
         console.info(`[AUTH ${method} Login] Account application status:`, profile.status);
         navigate('/application-pending', { replace: true });

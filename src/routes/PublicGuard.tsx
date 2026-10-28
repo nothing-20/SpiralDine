@@ -29,9 +29,15 @@ export const PublicGuard: React.FC = () => {
 
     const isOwnerOrAdmin = ['owner', 'admin'].includes(role);
     const path = location.pathname;
+    const searchParams = new URLSearchParams(location.search);
+    const allowReauth = searchParams.get('switch') === 'true' || searchParams.get('reauth') === 'true';
 
-    // If authenticated owner/admin visits owner login, go directly to owner dashboard
+    // If authenticated owner/admin visits owner login, preserve session and route to owner dashboard
+    // unless explicitly requesting account switch or re-authentication
     if (isOwnerOrAdmin && (path === '/owner/login' || path === '/login')) {
+      if (allowReauth) {
+        return <Outlet />;
+      }
       return <Navigate to="/owner/dashboard" replace />;
     }
 
