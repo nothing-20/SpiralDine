@@ -8,8 +8,8 @@
   --color-background: 40 24% 96%;     /* #F8F6F2 warm cream workspace */
   --color-surface: 0 0% 100%;         /* #FFFFFF pure white card */
   --color-border: 34 17% 88%;         /* #E5E0D9 subtle warm border */
-  --color-primary: 10 56% 51%;        /* #C9533B terracotta brand */
-  --color-primary-hover: 9 54% 43%;   /* #A94332 deep terracotta */
+  --color-primary: 10 65% 42%;        /* #B33E26 terracotta brand (WCAG AA 5.4:1) */
+  --color-primary-hover: 9 66% 36%;   /* #9B331D deep terracotta */
   --color-text: 212 29% 13%;          /* #17202A text primary */
   --color-muted: 209 14% 37%;         /* #52606D text secondary */
   --color-success: 158 71% 30%;       /* #16845B success */
@@ -95,13 +95,13 @@
   color: #52606D !important;
 }
 
-/* Muted secondary labels */
+/* Muted secondary labels (WCAG AA compliant >= 4.5:1 on light backgrounds) */
 .owner-theme .text-slate-500,
 .owner-theme .text-slate-505,
 .owner-theme .text-slate-550,
 .owner-theme .text-slate-600,
 .owner-theme .text-slate-700 {
-  color: #7B8794 !important;
+  color: #475569 !important;
 }
 
 /* Prevent white text on light surfaces while preserving text on dark containers */
@@ -143,16 +143,16 @@
 .owner-theme .btn-primary,
 .owner-theme button.bg-primary,
 .owner-theme a.bg-primary {
-  background-color: #C9533B !important;
+  background-color: #B33E26 !important;
   color: #FFFFFF !important;
   border-color: transparent !important;
-  box-shadow: 0 1px 3px rgba(201, 83, 59, 0.2) !important;
+  box-shadow: 0 1px 3px rgba(179, 62, 38, 0.25) !important;
 }
 
 .owner-theme .btn-primary:hover,
 .owner-theme button.bg-primary:hover,
 .owner-theme a.bg-primary:hover {
-  background-color: #A94332 !important;
+  background-color: #9B331D !important;
 }
 
 /* Secondary / Outline buttons */
@@ -205,7 +205,7 @@
 
 .owner-theme input::placeholder,
 .owner-theme textarea::placeholder {
-  color: #7B8794 !important;
+  color: #52606D !important;
 }
 
 .owner-theme option {
@@ -402,10 +402,10 @@
 .owner-theme .flex.items-center.p-1.rounded-xl button.text-primary,
 .owner-theme [class*="p-1"][class*="rounded-xl"] button.bg-slate-900,
 .owner-theme [class*="p-1"][class*="rounded-xl"] button.text-primary {
-  background-color: #C9533B !important;
+  background-color: #B33E26 !important;
   color: #FFFFFF !important;
-  border-color: #C9533B !important;
-  box-shadow: 0 1px 3px rgba(201, 83, 59, 0.25) !important;
+  border-color: #B33E26 !important;
+  box-shadow: 0 1px 3px rgba(179, 62, 38, 0.25) !important;
 }
 
 .owner-theme .flex.items-center.p-1.rounded-xl button.bg-slate-900 svg,
@@ -413,6 +413,31 @@
 .owner-theme [class*="p-1"][class*="rounded-xl"] button.bg-slate-900 svg,
 .owner-theme [class*="p-1"][class*="rounded-xl"] button.text-primary svg {
   color: #FFFFFF !important;
+}
+
+/* Dropdowns & Menu Panels */
+.owner-theme [role="menu"],
+.owner-theme div[class*="origin-top-right"][class*="rounded-2xl"],
+.owner-theme div[class*="origin-top-right"][class*="bg-slate-900"] {
+  background-color: #FFFFFF !important;
+  border: 1px solid #E5E0D9 !important;
+  color: #17202A !important;
+  box-shadow: 0 10px 25px -5px rgba(23, 32, 42, 0.12), 0 8px 10px -6px rgba(23, 32, 42, 0.08) !important;
+}
+
+.owner-theme [role="menu"] button,
+.owner-theme [role="menu"] a,
+.owner-theme div[class*="origin-top-right"] button,
+.owner-theme div[class*="origin-top-right"] a {
+  color: #17202A !important;
+}
+
+.owner-theme [role="menu"] button:hover,
+.owner-theme [role="menu"] a:hover,
+.owner-theme div[class*="origin-top-right"] button:hover,
+.owner-theme div[class*="origin-top-right"] a:hover {
+  background-color: #F8F6F2 !important;
+  color: #B33E26 !important;
 }
 
 /* Badges variant mapping */

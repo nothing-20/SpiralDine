@@ -16,6 +16,7 @@ import {
   DEFAULT_COST_RANGE,
   SortOption 
 } from '../types/restaurantFilters';
+import { getCurrencySymbol } from '../../../shared/utils/format';
 import { 
   FilterableRestaurant, 
   evaluateRestaurantFilters, 
@@ -203,7 +204,7 @@ const DiscoverPageInner: React.FC = () => {
             const area = String(data.area || data.address?.area || extractAreaFromAddress(street, city)).trim();
 
             const currency = String(data.currency || data.settings?.currency || 'INR');
-            const currencySymbol = String(data.currencySymbol || data.settings?.currencySymbol || (currency === 'INR' || city.toLowerCase() === 'hyderabad' ? '₹' : '$'));
+            const currencySymbol = String(data.currencySymbol || data.settings?.currencySymbol || getCurrencySymbol(currency));
 
             // Safe cuisine string formatting
             let cuisineStr = 'Multi-Cuisine';

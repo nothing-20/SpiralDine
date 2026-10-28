@@ -13,6 +13,7 @@ import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { restaurantService } from '../../../shared/services/restaurantService';
 import { logAuditEvent } from '../../../shared/services/auditService';
+import { formatCurrency } from '../../../utils/format';
 
 // UI Kit components
 import Card from '../../../components/ui/Card/Card';
@@ -399,8 +400,8 @@ export const OwnerMarketing: React.FC = () => {
             <TrendingUp className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[11px] font-semibold text-[#6B7280] uppercase">Revenue Generated</p>
-            <p className="text-xl font-bold font-serif text-[#17202A]">${metrics.totalRevenue}</p>
+            <p className="text-[11px] font-semibold text-[#475569] uppercase">Revenue Generated</p>
+            <p className="text-xl font-bold font-serif text-[#17202A]">{formatCurrency(metrics.totalRevenue)}</p>
           </div>
         </div>
 
@@ -409,8 +410,8 @@ export const OwnerMarketing: React.FC = () => {
             <DollarSign className="w-5 h-5" />
           </div>
           <div>
-            <p className="text-[11px] font-semibold text-[#6B7280] uppercase">Discount Given</p>
-            <p className="text-xl font-bold font-serif text-[#17202A]">${metrics.totalDiscounts}</p>
+            <p className="text-[11px] font-semibold text-[#475569] uppercase">Discount Given</p>
+            <p className="text-xl font-bold font-serif text-[#17202A]">{formatCurrency(metrics.totalDiscounts)}</p>
           </div>
         </div>
       </div>
@@ -509,7 +510,7 @@ export const OwnerMarketing: React.FC = () => {
                   </div>
                   <div className="flex justify-between">
                     <span>Min Order:</span>
-                    <span className="font-semibold text-[#17202A]">${c.minOrderValue || 0}</span>
+                    <span className="font-semibold text-[#17202A]">{formatCurrency(c.minOrderValue || 0)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>Active Period:</span>
@@ -522,12 +523,12 @@ export const OwnerMarketing: React.FC = () => {
                 {/* Performance Analytics Snapshot */}
                 <div className="pt-2 border-t border-[#E5E7EB] grid grid-cols-2 gap-2 text-center text-xs">
                   <div className="p-2 rounded-lg bg-[#F8F6F2]">
-                    <p className="text-[10px] uppercase font-semibold text-[#6B7280]">Redemptions</p>
+                    <p className="text-[10px] uppercase font-semibold text-[#475569]">Redemptions</p>
                     <p className="font-bold font-serif text-[#17202A] mt-0.5">{c.metrics?.redemptions || 0}</p>
                   </div>
                   <div className="p-2 rounded-lg bg-[#F8F6F2]">
-                    <p className="text-[10px] uppercase font-semibold text-[#6B7280]">Revenue</p>
-                    <p className="font-bold font-serif text-[#16845B] mt-0.5">${c.metrics?.revenueGenerated || 0}</p>
+                    <p className="text-[10px] uppercase font-semibold text-[#475569]">Revenue</p>
+                    <p className="font-bold font-serif text-[#16845B] mt-0.5">{formatCurrency(c.metrics?.revenueGenerated || 0)}</p>
                   </div>
                 </div>
               </div>
@@ -592,6 +593,7 @@ export const OwnerMarketing: React.FC = () => {
           isOpen={isFormOpen}
           onClose={() => setIsFormOpen(false)}
           title={isEditing ? 'Edit Marketing Campaign' : 'Create New Promotional Campaign'}
+          variant="light"
         >
           <form onSubmit={handleSaveCampaign} className="space-y-4 p-1">
             <div>

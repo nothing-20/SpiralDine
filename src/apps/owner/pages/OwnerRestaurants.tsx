@@ -1,8 +1,10 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { 
   collection, 
   getDocs, 
   doc, 
+  getDoc,
   setDoc, 
   updateDoc, 
   query, 
@@ -13,6 +15,7 @@ import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { ITenant } from '../../../types';
 import { logAuditEvent } from '../../../shared/services/auditService';
+import { formatCurrency, isTodayInTimezone } from '../../../utils/format';
 
 // UI Kit components
 import Card from '../../../components/ui/Card/Card';
@@ -83,6 +86,9 @@ export const OwnerRestaurants: React.FC = () => {
 
   const [restaurants, setRestaurants] = useState<IRestaurantWithStats[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
+  const [eligibleEmployees, setEligibleEmployees] = useState<any[]>([]);
+  const [isLoadingStaff, setIsLoadingStaff] = useState<boolean>(false);
+  const [staffError, setStaffError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -186,19 +192,27 @@ export const OwnerRestaurants: React.FC = () => {
               const tablesSnap = await getDocs(collection(db, 'restaurants', rest.id, 'tables'));
               tablesCount = tablesSnap.size;
 
-              // 2. Orders summary (today's orders)
+              // 2. Orders summary (today's settled orders)
               const ordersSnap = await getDocs(collection(db, 'restaurants', rest.id, 'orders'));
-              orderCount = ordersSnap.size;
               ordersSnap.forEach(o => {
                 const od = o.data();
-                if (od.total) sales += Number(od.total);
+                if (isTodayInTimezone(od.createdAt)) {
+                  orderCount++;
+                  const pStatus = (od.paymentStatus || '').toLowerCase();
+                  const oStatus = (od.status || '').toUpperCase();
+                  const isPaid = pStatus === 'paid' || pStatus === 'completed' || pStatus === 'settled' || oStatus === 'COMPLETED' || oStatus === 'SERVED';
+                  const isRefundedOrVoid = pStatus === 'refunded' || pStatus === 'voided' || pStatus === 'failed' || oStatus === 'CANCELLED' || oStatus === 'REJECTED';
+                  if (isPaid && !isRefundedOrVoid && od.total) {
+                    sales += Number(od.total);
+                  }
+                }
               });
             } catch (_) {}
 
             return {
               ...rest,
               city: typeof rest.address === 'object' ? rest.address.city : (rest.city || 'Primary City'),
-              todaySales: sales > 1000 ? Math.round(sales / 100) : sales, // Handle cents
+              todaySales: sales, // Canonical amount in INR
               todayOrders: orderCount,
               tableCount: tablesCount
             };
@@ -206,11 +220,17 @@ export const OwnerRestaurants: React.FC = () => {
         );
 
         // Fetch staff directory for manager assignment
-        if (currentTenantId) {
-          const empSnap = await getDocs(query(collection(db, 'employees'), where('tenantId', '==', currentTenantId)));
-          const emps: any[] = [];
-          empSnap.forEach(d => emps.push({ id: d.id, ...d.data() }));
-          if (isMounted) setEmployees(emps);
+        const primaryTenant = currentTenantId || (restList.length > 0 ? restList[0].id : null);
+        if (primaryTenant) {
+          try {
+            const empSnap = await getDocs(query(collection(db, 'employees'), where('tenantId', '==', primaryTenant)));
+            const emps: any[] = [];
+            empSnap.forEach(d => emps.push({ id: d.id, ...d.data() }));
+            if (isMounted) {
+              setEmployees(emps);
+              setEligibleEmployees(emps.filter(e => e.status !== 'archived' && e.status !== 'suspended'));
+            }
+          } catch (_) {}
         }
 
         if (isMounted) {
@@ -414,26 +434,74 @@ export const OwnerRestaurants: React.FC = () => {
     }
   };
 
+  // Fetch staff directory specifically for target restaurant
+  const fetchEmployeesForRestaurant = useCallback(async (rest: IRestaurantWithStats) => {
+    setIsLoadingStaff(true);
+    setStaffError(null);
+    try {
+      const targetTenant = rest.id || rest.tenantId || user?.tenantId;
+      if (!targetTenant) {
+        setEligibleEmployees([]);
+        setIsLoadingStaff(false);
+        return;
+      }
+
+      // Query employees scoped strictly to this restaurant's tenant boundary
+      const q = query(collection(db, 'employees'), where('tenantId', '==', targetTenant));
+      const snap = await getDocs(q);
+      const list: any[] = [];
+      snap.forEach(d => {
+        list.push({ id: d.id, ...d.data() });
+      });
+
+      // Filter eligible employees: active or invited, excluding archived/suspended
+      const eligible = list.filter(e => e.status !== 'archived' && e.status !== 'suspended');
+      setEligibleEmployees(eligible);
+      setEmployees(list);
+    } catch (err: any) {
+      console.error('Failed to load staff for restaurant:', err);
+      setStaffError('Could not load employees for this restaurant.');
+      toast.error('Failed to load employees for this location.');
+    } finally {
+      setIsLoadingStaff(false);
+    }
+  }, [user?.tenantId]);
+
   // Open Manager Assignment Modal
   const handleOpenAssignManager = (rest: IRestaurantWithStats) => {
     setTargetRestaurantForManager(rest);
     setSelectedManagerId(rest.managerId || '');
     setIsAssignManagerOpen(true);
+    fetchEmployeesForRestaurant(rest);
   };
 
   // Confirm Manager Assignment
   const handleSaveManager = async () => {
     if (!targetRestaurantForManager) return;
-    const managerObj = employees.find(e => e.id === selectedManagerId);
+    const allKnown = [...employees, ...eligibleEmployees];
+    const managerObj = allKnown.find(e => e.id === selectedManagerId);
 
     try {
       const updatePayload = {
         managerId: selectedManagerId || null,
-        managerName: managerObj ? (managerObj.fullName || managerObj.name) : null,
+        managerName: managerObj ? (managerObj.fullName || managerObj.name || managerObj.email) : null,
         updatedAt: new Date().toISOString()
       };
 
       await updateDoc(doc(db, 'restaurants', targetRestaurantForManager.id), updatePayload);
+
+      // Keep matching tenant document synchronized if it exists
+      try {
+        const tenantDocRef = doc(db, 'tenants', targetRestaurantForManager.id);
+        const tSnap = await getDoc(tenantDocRef);
+        if (tSnap.exists()) {
+          await updateDoc(tenantDocRef, {
+            managerId: updatePayload.managerId,
+            managerName: updatePayload.managerName,
+            updatedAt: updatePayload.updatedAt
+          });
+        }
+      } catch (_) {}
 
       await logAuditEvent({
         userId: user?.uid || '',
@@ -452,6 +520,14 @@ export const OwnerRestaurants: React.FC = () => {
           ? { ...r, managerId: updatePayload.managerId || undefined, managerName: updatePayload.managerName || undefined } 
           : r
       ));
+
+      if (selectedRestaurant?.id === targetRestaurantForManager.id) {
+        setSelectedRestaurant(prev => prev ? {
+          ...prev,
+          managerId: updatePayload.managerId || undefined,
+          managerName: updatePayload.managerName || undefined
+        } : null);
+      }
 
       toast.success('Branch manager assigned successfully');
       setIsAssignManagerOpen(false);
@@ -742,8 +818,8 @@ export const OwnerRestaurants: React.FC = () => {
                       <p className="font-bold font-serif text-[#17202A] text-sm mt-0.5">{rest.todayOrders || 0}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] font-semibold text-[#6B7280] uppercase">Sales</p>
-                      <p className="font-bold font-serif text-[#16845B] text-sm mt-0.5">${rest.todaySales || 0}</p>
+                      <p className="text-[10px] font-semibold text-[#475569] uppercase">Sales</p>
+                      <p className="font-bold font-serif text-[#16845B] text-sm mt-0.5">{formatCurrency(rest.todaySales || 0)}</p>
                     </div>
                   </div>
                 </div>
@@ -792,6 +868,7 @@ export const OwnerRestaurants: React.FC = () => {
           isOpen={isDetailsOpen} 
           onClose={() => setIsDetailsOpen(false)}
           title={`Branch Operational Summary — ${selectedRestaurant.name}`}
+          variant="light"
         >
           <div className="space-y-5 p-1 select-none">
             {/* Overview Banner */}
@@ -837,9 +914,9 @@ export const OwnerRestaurants: React.FC = () => {
               </h4>
               <div className="grid grid-cols-3 gap-3">
                 <div className="p-3 rounded-xl bg-white border border-[#E5E7EB] text-center">
-                  <p className="text-[11px] text-[#6B7280]">Recorded Sales</p>
+                  <p className="text-[11px] text-[#475569] font-medium">Recorded Sales</p>
                   <p className="text-lg font-serif font-bold text-[#16845B] mt-0.5">
-                    ${selectedRestaurant.todaySales || 0}
+                    {formatCurrency(selectedRestaurant.todaySales || 0)}
                   </p>
                 </div>
                 <div className="p-3 rounded-xl bg-white border border-[#E5E7EB] text-center">
@@ -933,6 +1010,7 @@ export const OwnerRestaurants: React.FC = () => {
           isOpen={isFormOpen} 
           onClose={() => setIsFormOpen(false)}
           title={isEditing ? 'Edit Restaurant' : 'Add New Restaurant'}
+          variant="light"
         >
           <form onSubmit={handleSubmitForm} className="space-y-4 p-1">
             <div>
@@ -1020,27 +1098,64 @@ export const OwnerRestaurants: React.FC = () => {
           isOpen={isAssignManagerOpen}
           onClose={() => setIsAssignManagerOpen(false)}
           title={`Assign Branch Manager — ${targetRestaurantForManager.name}`}
+          variant="light"
         >
           <div className="space-y-4 p-1">
-            <p className="text-xs text-[#6B7280]">
+            <p className="text-xs text-[#475569]">
               Select a team member from your staff directory to act as the primary operational branch manager.
             </p>
 
-            <div>
-              <label className="block text-xs font-bold text-[#17202A] mb-1">Branch Manager</label>
-              <select
-                value={selectedManagerId}
-                onChange={(e) => setSelectedManagerId(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-[#E5E7EB] bg-white text-[#17202A] focus:outline-none focus:ring-1 focus:ring-[#C9533B]"
-              >
-                <option value="">-- No Manager Assigned --</option>
-                {employees.map(emp => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.fullName || emp.name} ({emp.role || 'Staff'}) - {emp.department || 'General'}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {isLoadingStaff ? (
+              <div className="py-6 text-center">
+                <LoadingSpinner label="Loading staff members..." />
+              </div>
+            ) : staffError ? (
+              <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800 space-y-2">
+                <p className="font-medium">{staffError}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => targetRestaurantForManager && fetchEmployeesForRestaurant(targetRestaurantForManager)}
+                  className="text-xs border-red-300 text-red-700 hover:bg-red-100"
+                >
+                  Retry Loading Staff
+                </Button>
+              </div>
+            ) : eligibleEmployees.length === 0 ? (
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-2">
+                <p className="font-semibold text-amber-950">No eligible staff members found</p>
+                <p className="text-amber-800 leading-relaxed">
+                  To assign a branch manager, first invite or create team members in your Staff Management directory for this restaurant or tenant.
+                </p>
+                <div className="pt-1">
+                  <Link
+                    to="/dashboard/owner/staff"
+                    className="inline-flex items-center text-xs font-bold text-[#B33E26] hover:underline"
+                  >
+                    Go to Staff Management &rarr;
+                  </Link>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-bold text-[#17202A] mb-1">Branch Manager</label>
+                <select
+                  value={selectedManagerId}
+                  onChange={(e) => setSelectedManagerId(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-medium rounded-xl border border-[#E5E7EB] bg-white text-[#17202A] focus:outline-none focus:ring-1 focus:ring-[#C9533B]"
+                >
+                  <option value="">-- No Manager Assigned --</option>
+                  {eligibleEmployees.map(emp => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.fullName || emp.name} ({emp.role || 'Staff'}) {emp.department ? `- ${emp.department}` : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-[#475569] mt-1.5">
+                  Showing {eligibleEmployees.length} eligible team member{eligibleEmployees.length !== 1 ? 's' : ''}.
+                </p>
+              </div>
+            )}
 
             <div className="pt-3 flex items-center justify-end space-x-2">
               <Button variant="secondary" onClick={() => setIsAssignManagerOpen(false)}>
@@ -1049,7 +1164,8 @@ export const OwnerRestaurants: React.FC = () => {
               <Button 
                 variant="primary" 
                 onClick={handleSaveManager}
-                className="bg-[#12352D] hover:bg-[#1A473C] text-white"
+                disabled={isLoadingStaff}
+                className="bg-[#12352D] hover:bg-[#1A473C] text-white disabled:opacity-50"
               >
                 Save Assignment
               </Button>
@@ -1064,6 +1180,7 @@ export const OwnerRestaurants: React.FC = () => {
           isOpen={isBranchModalOpen}
           onClose={() => setIsBranchModalOpen(false)}
           title={isEditingBranch ? 'Edit Branch Details' : 'Add New Branch'}
+          variant="light"
         >
           <form onSubmit={handleSubmitBranch} className="space-y-4 p-1">
             <div>

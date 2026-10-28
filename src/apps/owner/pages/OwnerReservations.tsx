@@ -404,7 +404,7 @@ export const OwnerReservations: React.FC = () => {
               Table Reservations
             </h1>
           </div>
-          <p className="text-xs text-[#6B7280] mt-1">
+          <p className="text-xs text-[#475569] mt-1">
             Manage diner bookings, track arrivals, assign seating, and minimize no-shows.
           </p>
         </div>
@@ -412,7 +412,7 @@ export const OwnerReservations: React.FC = () => {
         <Button 
           variant="primary" 
           onClick={handleOpenCreate}
-          className="bg-[#C9533B] hover:bg-[#B34530] text-white flex items-center space-x-2 rounded-xl shadow-md"
+          className="bg-[#B33E26] hover:bg-[#9B331D] text-white flex items-center space-x-2 rounded-xl shadow-md"
         >
           <Plus className="w-4 h-4" />
           <span>New Reservation</span>
@@ -437,12 +437,12 @@ export const OwnerReservations: React.FC = () => {
               className={`px-3.5 py-2 text-xs font-bold rounded-lg transition-all flex items-center space-x-2 whitespace-nowrap ${
                 isActive
                   ? 'bg-[#12352D] text-white shadow-sm'
-                  : 'text-[#6B7280] hover:text-[#17202A] hover:bg-white'
+                  : 'text-[#334155] hover:text-[#0F172A] hover:bg-white'
               }`}
             >
               <span>{tab.label}</span>
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-                isActive ? 'bg-[#C9533B] text-white' : 'bg-[#E5E7EB] text-[#6B7280]'
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                isActive ? 'bg-[#B33E26] text-white' : 'bg-[#E2E8F0] text-[#1E293B]'
               }`}>
                 {tab.count}
               </span>
@@ -655,6 +655,7 @@ export const OwnerReservations: React.FC = () => {
           isOpen={isFormOpen}
           onClose={() => setIsFormOpen(false)}
           title={isEditing ? 'Edit Reservation' : 'Create New Table Reservation'}
+          variant="light"
         >
           <form onSubmit={handleSaveReservation} className="space-y-4 p-1">
             <div className="grid grid-cols-2 gap-3">

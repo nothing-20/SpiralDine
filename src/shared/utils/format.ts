@@ -127,20 +127,28 @@ export function getCurrencySymbol(currencyCode?: string): string {
 
 /**
  * Formats a currency value (in main unit, e.g. rupees or dollars)
- * using dynamic currency and locale settings.
+ * using standard currency and locale settings (defaults to INR / en-IN).
+ * Examples:
+ *   1250 -> ₹1,250.00
+ *   450 -> ₹450.00
+ *   4.5 -> ₹4.50
+ *   0 -> ₹0.00
  */
-export function formatCurrency(value: number, currencyCode?: string, locale?: string): string {
-  const code = currencyCode || currentCurrency;
-  const loc = locale || SUPPORTED_CURRENCIES[code]?.locale || currentLocale;
+export function formatCurrency(value: number | string | null | undefined, currencyCode?: string, locale?: string): string {
+  const num = typeof value === 'number' && !isNaN(value) ? value : Number(value) || 0;
+  const code = currencyCode || currentCurrency || 'INR';
+  const loc = locale || SUPPORTED_CURRENCIES[code]?.locale || currentLocale || 'en-IN';
 
   try {
     return new Intl.NumberFormat(loc, {
       style: 'currency',
-      currency: code
-    }).format(value);
+      currency: code,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(num);
   } catch (e) {
     const symbol = getCurrencySymbol(code);
-    return `${symbol}${value.toFixed(2)}`;
+    return `${symbol}${num.toLocaleString(loc, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
 }
 

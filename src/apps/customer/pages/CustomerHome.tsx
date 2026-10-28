@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { isOrderActive } from '../../../shared/utils/orderUtils';
-import { formatPrice } from '../../../shared/utils/format';
+import { formatPrice, getCurrencySymbol } from '../../../shared/utils/format';
 import { tableService } from '../../../shared/services/tableService';
 import QrScannerModal from '../../../shared/ui/components/QrScannerModal';
 import rightPlateImg from '../../../assets/right_food_plate.png';
@@ -384,7 +384,7 @@ export const CustomerHome: React.FC = () => {
         const area = data.area || data.address?.area || extractAreaFromAddress(street, city);
 
         const currency = data.currency || data.settings?.currency || 'INR';
-        const currencySymbol = data.currencySymbol || data.settings?.currencySymbol || (currency === 'INR' || city === 'Hyderabad' ? '₹' : '$');
+        const currencySymbol = data.currencySymbol || data.settings?.currencySymbol || getCurrencySymbol(currency);
 
         list.push({
           id: d.id,

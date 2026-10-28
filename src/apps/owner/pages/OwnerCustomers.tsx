@@ -10,6 +10,7 @@ import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { ICustomerProfile, IOrder } from '../../../types';
 import { useCurrency } from '../../../context/CurrencyContext';
+import { formatCurrency } from '../../../utils/format';
 
 // UI Kit components
 import Card from '../../../components/ui/Card/Card';
@@ -153,7 +154,7 @@ export const OwnerCustomers: React.FC = () => {
             }
 
             const rawTotal = Number(order.total || 0);
-            const total = rawTotal > 1000 ? Math.round(rawTotal / 100) : rawTotal;
+            const total = rawTotal;
             existing.totalSpend = (existing.totalSpend || 0) + total;
             existing.orderCount = (existing.orderCount || 0) + 1;
             existing.orders?.push(order);
@@ -517,19 +518,20 @@ export const OwnerCustomers: React.FC = () => {
           isOpen={Boolean(selectedCustomer)}
           onClose={() => setSelectedCustomer(null)}
           title={`Customer 360 Profile — ${selectedCustomer.name}`}
+          variant="light"
         >
           <div className="space-y-4 p-1 select-none">
             {/* Top Identity Card */}
             <div className="p-4 rounded-2xl bg-[#12352D] text-white flex items-center justify-between">
               <div className="flex items-center space-x-3.5">
-                <div className="w-12 h-12 rounded-2xl bg-[#C9533B] text-white flex items-center justify-center font-serif font-bold text-xl shadow-sm">
+                <div className="w-12 h-12 rounded-2xl bg-[#B33E26] text-white flex items-center justify-center font-serif font-bold text-xl shadow-sm">
                   {selectedCustomer.name?.charAt(0) || 'D'}
                 </div>
                 <div>
                   <h3 className="font-serif font-bold text-base text-white">
                     {selectedCustomer.name}
                   </h3>
-                  <div className="flex items-center space-x-3 text-xs text-[#A2B5AF] mt-0.5">
+                  <div className="flex items-center space-x-3 text-xs text-[#E2E8F0] mt-0.5">
                     {selectedCustomer.phone && <span>{selectedCustomer.phone}</span>}
                     {selectedCustomer.email && <span>{selectedCustomer.email}</span>}
                   </div>
@@ -556,7 +558,7 @@ export const OwnerCustomers: React.FC = () => {
                   className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
                     activeProfileTab === tab.id
                       ? 'bg-[#12352D] text-white'
-                      : 'text-[#6B7280] hover:text-[#17202A] hover:bg-[#F8F6F2]'
+                      : 'text-[#334155] hover:text-[#0F172A] hover:bg-[#F8F6F2]'
                   }`}
                 >
                   {tab.label}
@@ -573,12 +575,12 @@ export const OwnerCustomers: React.FC = () => {
                     <p className="text-lg font-serif font-bold text-[#17202A] mt-0.5">{selectedCustomer.totalVisits}</p>
                   </div>
                   <div className="p-3 rounded-xl bg-[#F8F6F2] border border-[#E5E7EB]">
-                    <p className="text-[10px] uppercase font-bold text-[#6B7280]">Total Spend</p>
-                    <p className="text-lg font-serif font-bold text-[#16845B] mt-0.5">${selectedCustomer.totalSpend}</p>
+                    <p className="text-[10px] uppercase font-bold text-[#475569]">Total Spend</p>
+                    <p className="text-lg font-serif font-bold text-[#16845B] mt-0.5">{formatCurrency(selectedCustomer.totalSpend)}</p>
                   </div>
                   <div className="p-3 rounded-xl bg-[#F8F6F2] border border-[#E5E7EB]">
-                    <p className="text-[10px] uppercase font-bold text-[#6B7280]">AOV</p>
-                    <p className="text-lg font-serif font-bold text-[#17202A] mt-0.5">${selectedCustomer.averageOrderValue}</p>
+                    <p className="text-[10px] uppercase font-bold text-[#475569]">AOV</p>
+                    <p className="text-lg font-serif font-bold text-[#17202A] mt-0.5">{formatCurrency(selectedCustomer.averageOrderValue)}</p>
                   </div>
                 </div>
 
@@ -615,7 +617,7 @@ export const OwnerCustomers: React.FC = () => {
                         </p>
                       </div>
                       <div className="text-right">
-                        <p className="font-serif font-bold text-[#16845B] text-sm">${o.total ? (o.total > 1000 ? Math.round(o.total / 100) : o.total) : 0}</p>
+                        <p className="font-serif font-bold text-[#16845B] text-sm">{formatCurrency(o.total || 0)}</p>
                         <Badge variant="neutral">{o.status || 'Completed'}</Badge>
                       </div>
                     </div>

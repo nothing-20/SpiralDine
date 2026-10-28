@@ -87,8 +87,8 @@ export const OwnerSettings: React.FC = () => {
   const [coverFileToRetry, setCoverFileToRetry] = useState<File | null>(null);
 
   // Form Fields - Business Settings Tab
-  const [currency, setCurrency] = useState('USD');
-  const [timezone, setTimezone] = useState('GMT');
+  const [currency, setCurrency] = useState('INR');
+  const [timezone, setTimezone] = useState('Asia/Kolkata');
   const [language, setLanguage] = useState('en');
 
   // Form Fields - Tax & Compliance Tab

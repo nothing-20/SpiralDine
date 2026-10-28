@@ -28,7 +28,7 @@ export const Modal: React.FC<IModalProps> = ({
   contentClassName,
   size = 'lg',
   closeAriaLabel = 'Close dialog',
-  variant = 'dark'
+  variant
 }) => {
   // Prevent background scrolling while modal is open & listen for Escape key
   useEffect(() => {
@@ -65,10 +65,21 @@ export const Modal: React.FC<IModalProps> = ({
     max: 'max-w-[95vw]'
   };
 
-  const isLight = variant === 'light' || !!className?.includes('bg-white') || !!className?.includes('bg-[#F');
+  // Context-aware theme detection: if page is in owner portal, kds, or customer portal, default to light
+  const isPageLight = typeof document !== 'undefined' && Boolean(
+    document.querySelector('.owner-theme') || 
+    document.querySelector('.kds-theme') ||
+    document.body.classList.contains('customer-theme-bg') ||
+    document.body.classList.contains('light')
+  );
+  const effectiveVariant = variant || (isPageLight ? 'light' : 'dark');
+  const isLight = effectiveVariant === 'light' || !!className?.includes('bg-white') || !!className?.includes('bg-[#F');
 
   const modalNode = (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 min-[340px]:p-3 sm:p-4 md:p-6 overflow-hidden">
+    <div className={cn(
+      "fixed inset-0 z-[9999] flex items-center justify-center p-2 min-[340px]:p-3 sm:p-4 md:p-6 overflow-hidden",
+      isLight && "owner-theme"
+    )}>
       {/* Background Overlay */}
       <div 
         className={cn(

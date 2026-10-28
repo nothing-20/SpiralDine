@@ -26,13 +26,38 @@
   .font-poppins {
     font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
+  /* Base select styles with adaptive dark/light support */
   select {
-    color: #e2e8f0 !important;
-    background-color: #0f172a !important;
+    color: #e2e8f0;
+    background-color: #0f172a;
   }
   option {
-    background-color: #0f172a !important;
-    color: #e2e8f0 !important;
+    background-color: #0f172a;
+    color: #e2e8f0;
+  }
+
+  /* Scoped light themes or light containers */
+  .owner-theme select,
+  .kds-theme select,
+  body.customer-theme-bg select,
+  .light select,
+  [data-theme="light"] select,
+  select.bg-white,
+  select[class*="bg-white"],
+  select[class*="bg-[#F"] {
+    color: #17202A !important;
+    background-color: #FFFFFF !important;
+  }
+  .owner-theme option,
+  .kds-theme option,
+  body.customer-theme-bg option,
+  .light option,
+  [data-theme="light"] option,
+  select.bg-white option,
+  select[class*="bg-white"] option,
+  select[class*="bg-[#F"] option {
+    background-color: #FFFFFF !important;
+    color: #17202A !important;
   }
 
   /* Restaurant Operations Theme (Kitchen Display System & Waiter Operations) */
