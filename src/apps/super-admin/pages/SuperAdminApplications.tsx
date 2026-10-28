@@ -29,7 +29,10 @@ import {
   Globe,
   DollarSign,
   User,
-  Filter
+  Filter,
+  AlertTriangle,
+  RotateCw,
+  Info
 } from 'lucide-react';
 import { IRestaurantApplication, TApplicationStatus } from '../../../shared/domain/restaurant/types';
 import toast from 'react-hot-toast';
@@ -118,6 +121,7 @@ export const SuperAdminApplications: React.FC = () => {
             approvalNotificationEmailId: r.approvalNotificationEmailId,
             approvalNotificationRecipient: r.approvalNotificationRecipient,
             approvalNotificationError: r.approvalNotificationError,
+            approvalNotificationErrorCategory: r.approvalNotificationErrorCategory,
             approvalNotificationAttempts: r.approvalNotificationAttempts
           };
         }));
@@ -184,6 +188,8 @@ export const SuperAdminApplications: React.FC = () => {
     );
   });
 
+  const [isRetryingEmail, setIsRetryingEmail] = useState(false);
+
   const handleOpenReviewModal = (app: IRestaurantApplication, initialAction: 'approve' | 'reject' | 'request_info' = 'approve') => {
     setSelectedApp(app);
     setReviewAction(initialAction);
@@ -197,6 +203,53 @@ export const SuperAdminApplications: React.FC = () => {
     setRejectionReason('');
     if (highlightedAppId) {
       setSearchParams({});
+    }
+  };
+
+  const handleResendApprovalEmail = async (app: IRestaurantApplication) => {
+    setIsRetryingEmail(true);
+    const retryToast = toast.loading(`Dispatching approval notification to ${app.ownerEmail}...`);
+    try {
+      let token = '';
+      if (auth.currentUser) {
+        token = await auth.currentUser.getIdToken(true);
+      }
+
+      const res = await fetch('/api/super-admin/review-application', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          applicationId: app.id,
+          action: 'resend_email'
+        })
+      });
+
+      const data = await res.json();
+      toast.dismiss(retryToast);
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to dispatch email');
+      }
+
+      const notif = data.notification;
+      if (notif?.status === 'sent') {
+        toast.success(`Approval email accepted by provider for ${notif.recipient || app.ownerEmail}!`);
+      } else {
+        const isDomain = notif?.errorCategory === 'domain_verification_required' || notif?.error?.toLowerCase().includes('domain');
+        if (isDomain) {
+          toast.error(`Domain verification required: Test sender (onboarding@resend.dev) can only deliver to the account owner. Verify a custom domain at resend.com/domains for external delivery.`, { duration: 7000 });
+        } else {
+          toast.error(`Email dispatch failed: ${notif?.error || 'Provider rejected request'}`);
+        }
+      }
+    } catch (err: any) {
+      toast.dismiss(retryToast);
+      toast.error(err.message || 'Error dispatching approval email');
+    } finally {
+      setIsRetryingEmail(false);
     }
   };
 
@@ -248,9 +301,14 @@ export const SuperAdminApplications: React.FC = () => {
       if (reviewAction === 'approve') {
         const notif = resData.notification;
         if (notif?.status === 'sent') {
-          toast.success(`Application approved! Acceptance email sent to ${notif.recipient || selectedApp.ownerEmail}.`, { duration: 5000 });
+          toast.success(`Application approved! Acceptance email accepted by provider for ${notif.recipient || selectedApp.ownerEmail}.`, { duration: 5000 });
         } else if (notif?.status === 'failed') {
-          toast.success(`Application approved! Note: Email delivery failed (${notif.error || 'provider error'}).`, { duration: 6000 });
+          const isDomainNotice = notif.errorCategory === 'domain_verification_required' || notif.error?.toLowerCase().includes('domain');
+          if (isDomainNotice) {
+            toast.success(`Application approved! Restaurant is active. Note: Email held pending domain verification (test sender restricted to account owner).`, { duration: 7000 });
+          } else {
+            toast.success(`Application approved! Restaurant is active. Note: Email provider issue (${notif.error || 'provider rejected'}).`, { duration: 6000 });
+          }
         } else if (notif?.status === 'skipped') {
           toast.success(`Application approved! ${selectedApp.restaurantName} is active (notification already processed).`, { duration: 4000 });
         } else {
@@ -370,6 +428,32 @@ export const SuperAdminApplications: React.FC = () => {
             <span className="hidden sm:inline">Refresh</span>
           </button>
         </div>
+      </div>
+
+      {/* Domain Verification Notice Banner */}
+      <div className="p-4 bg-slate-900/90 border border-slate-800 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+        <div className="flex items-start space-x-3">
+          <div className="w-8 h-8 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+            <Info className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="font-bold text-white flex items-center space-x-2">
+              <span>Email Delivery Environment: Sandbox Mode (<code className="text-amber-400 font-mono text-[11px]">onboarding@resend.dev</code>)</span>
+            </div>
+            <p className="text-slate-400 text-[11px] mt-0.5 max-w-2xl leading-relaxed">
+              Restaurant onboarding approvals activate the tenant immediately in Firestore. Because a custom sending domain is not verified yet, Resend restricts email delivery to the registered account owner. External approval emails will dispatch automatically once a domain is verified in Resend.
+            </p>
+          </div>
+        </div>
+        <a 
+          href="https://resend.com/domains" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="shrink-0 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition-colors inline-flex items-center space-x-1.5"
+        >
+          <span>Resend Domains</span>
+          <ExternalLink className="w-3 h-3 text-slate-400" />
+        </a>
       </div>
 
       {/* Query Error Alert */}
@@ -621,16 +705,29 @@ export const SuperAdminApplications: React.FC = () => {
                             </span>
                           )}
                           {app.approvalNotificationStatus === 'sent' && (
-                            <div className="flex items-center space-x-1 text-[10px] text-emerald-400 font-medium">
+                            <div className="flex items-center space-x-1 text-[10px] text-emerald-400 font-medium" title={`Accepted by provider (Resend ID: ${app.approvalNotificationEmailId || 'available'})`}>
                               <Mail className="w-3 h-3 text-emerald-400" />
                               <span>Email Sent</span>
                             </div>
                           )}
-                          {app.approvalNotificationStatus === 'failed' && (
-                            <div className="flex items-center space-x-1 text-[10px] text-rose-400 font-medium" title={app.approvalNotificationError}>
-                              <Mail className="w-3 h-3 text-rose-400" />
-                              <span>Email Failed</span>
+                          {app.approvalNotificationStatus === 'processing' && (
+                            <div className="flex items-center space-x-1 text-[10px] text-amber-400 font-medium animate-pulse">
+                              <Clock className="w-3 h-3 text-amber-400" />
+                              <span>Email Processing</span>
                             </div>
+                          )}
+                          {app.approvalNotificationStatus === 'failed' && (
+                            (app.approvalNotificationErrorCategory === 'domain_verification_required' || app.approvalNotificationError?.toLowerCase().includes('domain')) ? (
+                              <div className="flex items-center space-x-1 text-[10px] text-amber-400 font-medium" title={app.approvalNotificationError}>
+                                <AlertTriangle className="w-3 h-3 text-amber-400" />
+                                <span>Domain Unverified</span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center space-x-1 text-[10px] text-rose-400 font-medium" title={app.approvalNotificationError}>
+                                <Mail className="w-3 h-3 text-rose-400" />
+                                <span>Email Failed</span>
+                              </div>
+                            )
                           )}
                         </div>
                       </td>
@@ -742,27 +839,74 @@ export const SuperAdminApplications: React.FC = () => {
                   </div>
                 </div>
 
-                {selectedApp.approvalNotificationStatus && (
-                  <div className="col-span-1 sm:col-span-2 pt-2 border-t border-slate-800">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Approval Notification Email</span>
-                    <div className="flex items-center space-x-2 mt-1">
+                {/* Notification State & Action Section */}
+                {selectedApp.approvalNotificationStatus ? (
+                  <div className="col-span-1 sm:col-span-2 pt-3 border-t border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                        Approval Notification Status
+                      </span>
+                      {selectedApp.status === 'approved' && (
+                        <button
+                          type="button"
+                          onClick={() => handleResendApprovalEmail(selectedApp)}
+                          disabled={isRetryingEmail}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition-colors inline-flex items-center space-x-1.5 disabled:opacity-50"
+                        >
+                          <RotateCw className={`w-3 h-3 ${isRetryingEmail ? 'animate-spin' : ''}`} />
+                          <span>{isRetryingEmail ? 'Dispatching...' : 'Retry Email Notification'}</span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="mt-1">
                       {selectedApp.approvalNotificationStatus === 'sent' && (
-                        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Delivered to {selectedApp.approvalNotificationRecipient || selectedApp.ownerEmail}</span>
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                          <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Accepted by Provider &bull; Dispatched to {selectedApp.approvalNotificationRecipient || selectedApp.ownerEmail}</span>
+                          </span>
                           {selectedApp.approvalNotificationSentAt && (
-                            <span className="text-[10px] text-emerald-500/70 font-normal">
+                            <span className="text-[10px] text-slate-400">
                               ({new Date(selectedApp.approvalNotificationSentAt).toLocaleString()})
                             </span>
                           )}
-                        </span>
+                          {selectedApp.approvalNotificationEmailId && (
+                            <span className="text-[10px] font-mono text-slate-500">
+                              ID: {selectedApp.approvalNotificationEmailId}
+                            </span>
+                          )}
+                        </div>
                       )}
+
                       {selectedApp.approvalNotificationStatus === 'failed' && (
-                        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
-                          <XCircle className="w-3.5 h-3.5" />
-                          <span>Delivery Failed: {selectedApp.approvalNotificationError || 'Unknown error'}</span>
-                        </span>
+                        (selectedApp.approvalNotificationErrorCategory === 'domain_verification_required' || selectedApp.approvalNotificationError?.toLowerCase().includes('domain')) ? (
+                          <div className="space-y-2 w-full">
+                            <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              <span>Email Held: Domain Verification Required</span>
+                            </span>
+                            <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-1.5 text-left">
+                              <div className="flex items-center space-x-1.5 text-amber-300 font-bold text-xs">
+                                <Info className="w-3.5 h-3.5 shrink-0" />
+                                <span>Resend Free Sandbox Restriction</span>
+                              </div>
+                              <p className="text-[11px] text-slate-300 leading-relaxed">
+                                SpiralDine is currently operating with Resend's test sender (<code className="text-amber-300 bg-amber-950/40 px-1 py-0.5 rounded">onboarding@resend.dev</code>). Resend restricts test senders exclusively to your registered account owner email.
+                              </p>
+                              <p className="text-[11px] text-slate-400 leading-relaxed">
+                                The restaurant workspace is <strong>active and operational</strong> in Firestore. To dispatch approval emails to external restaurant owners, connect and verify your custom domain in Resend (<a href="https://resend.com/domains" target="_blank" rel="noopener noreferrer" className="text-primary underline">resend.com/domains</a>).
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Delivery Failed: {selectedApp.approvalNotificationError || 'Unknown provider error'}</span>
+                          </span>
+                        )
                       )}
+
                       {selectedApp.approvalNotificationStatus === 'processing' && (
                         <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 animate-pulse">
                           <Clock className="w-3.5 h-3.5" />
@@ -771,7 +915,23 @@ export const SuperAdminApplications: React.FC = () => {
                       )}
                     </div>
                   </div>
-                )}
+                ) : selectedApp.status === 'approved' ? (
+                  <div className="col-span-1 sm:col-span-2 pt-3 border-t border-slate-800 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Approval Notification Email</span>
+                      <div className="text-xs text-slate-400 mt-0.5">Notification not yet dispatched</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleResendApprovalEmail(selectedApp)}
+                      disabled={isRetryingEmail}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition-colors inline-flex items-center space-x-1.5 disabled:opacity-50"
+                    >
+                      <Mail className="w-3 h-3" />
+                      <span>{isRetryingEmail ? 'Dispatching...' : 'Send Approval Email'}</span>
+                    </button>
+                  </div>
+                ) : null}
               </div>
 
               {/* Action Selector Segmented Control */}

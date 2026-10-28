@@ -39,9 +39,18 @@ export interface SendMailOptions {
   retries?: number;
 }
 
+export interface SendMailResult {
+  success: boolean;
+  id?: string;
+  error?: string;
+  errorCategory?: 'domain_verification_required' | 'provider_error' | 'config_missing';
+  statusCode?: number;
+  isDomainRestriction?: boolean;
+}
+
 export const sendMailWithLogging = async (
   options: SendMailOptions
-): Promise<{ success: boolean; id?: string; error?: string }> => {
+): Promise<SendMailResult> => {
   const { to, subject, html, text, from, tenantId, type } = options;
   const retriesLeft = options.retries ?? MAX_RETRIES;
   const timestamp = new Date().toISOString();
@@ -49,7 +58,12 @@ export const sendMailWithLogging = async (
   const apiKey = getResendApiKey();
   if (!apiKey) {
     console.warn('[Vercel API] RESEND_API_KEY is not configured. Email dispatch skipped.');
-    return { success: false, error: 'RESEND_API_KEY is not configured on the server.' };
+    return {
+      success: false,
+      error: 'RESEND_API_KEY is not configured on the server.',
+      errorCategory: 'config_missing',
+      statusCode: 500,
+    };
   }
 
   try {
@@ -69,7 +83,10 @@ export const sendMailWithLogging = async (
     const response = await resend.emails.send(mailPayload);
 
     if (response.error) {
-      throw new Error(response.error.message);
+      const customErr: any = new Error(response.error.message);
+      customErr.name = response.error.name;
+      customErr.statusCode = response.error.statusCode || (response as any).status;
+      throw customErr;
     }
 
     // Task 9: Log success in Firestore emailLogs
@@ -88,14 +105,30 @@ export const sendMailWithLogging = async (
     return { success: true, id: response.data?.id };
   } catch (err: any) {
     const errMsg = err.message || 'Unknown Resend API error';
-    console.warn(`[Vercel API] Failed to send email (${retriesLeft} retries remaining): ${errMsg}`);
+    const statusCode = err.statusCode || err.status || 500;
+    const isDomainRestriction = Boolean(
+      (statusCode === 403 || statusCode === 422) &&
+      (
+        errMsg.toLowerCase().includes('verify a domain') ||
+        errMsg.toLowerCase().includes('testing emails to your own email address') ||
+        errMsg.toLowerCase().includes('testing email address instead of domains') ||
+        errMsg.toLowerCase().includes('validation_error')
+      )
+    );
 
-    if (retriesLeft > 0) {
+    console.warn(`[Vercel API] Email dispatch error (status: ${statusCode}, domainRestriction: ${isDomainRestriction}): ${errMsg}`);
+
+    // If it's a domain/test-sender restriction, retrying is futile and wastes time
+    const isRetryable = !isDomainRestriction && statusCode !== 401 && statusCode !== 403 && statusCode !== 422;
+
+    if (retriesLeft > 0 && isRetryable) {
       await delay(RETRY_DELAY_MS);
       return sendMailWithLogging({ ...options, retries: retriesLeft - 1 });
     }
 
-    // Task 9 & 12: Log failure in Firestore emailLogs on final retry exhaust
+    const category = isDomainRestriction ? 'domain_verification_required' : 'provider_error';
+
+    // Log failure in Firestore emailLogs
     try {
       await addDoc(collection(db, 'emailLogs'), {
         recipient: to,
@@ -106,11 +139,19 @@ export const sendMailWithLogging = async (
         timestamp: timestamp,
         type: type,
         error: errMsg,
+        errorCategory: category,
+        statusCode: statusCode,
       });
     } catch (logErr) {
       console.error('[Vercel API] Failed to write failure log to Firestore:', logErr);
     }
 
-    return { success: false, error: errMsg };
+    return {
+      success: false,
+      error: errMsg,
+      errorCategory: category,
+      statusCode: statusCode,
+      isDomainRestriction: isDomainRestriction,
+    };
   }
 };

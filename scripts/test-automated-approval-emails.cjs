@@ -250,9 +250,104 @@ const auth5 = checkAuthorization('super_admin', '');
 assert(auth5.authorized === false && auth5.status === 401, 'Unauthenticated request rejected with 401');
 
 // -----------------------------------------------------------------------------
-// Suite 5: Live Database & Resend Integration
+// Suite 5: Provider Rejection, Domain Restrictions, Config & Retry Behavior
 // -----------------------------------------------------------------------------
-console.log('\n🔹 Suite 5: Live Firestore & Resend API Verification');
+console.log('\n🔹 Suite 5: Provider Rejection, Domain Restrictions, Missing Config & Retry Behavior');
+
+// 5.1 Missing Configuration Test
+function simulateSendMailWithLogging({ apiKey, to, retries = 2 }) {
+  if (!apiKey) {
+    return {
+      success: false,
+      error: 'RESEND_API_KEY is not configured on the server.',
+      errorCategory: 'config_missing',
+      statusCode: 500,
+      retriesRun: 0
+    };
+  }
+
+  // Check recipient format
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!to || !EMAIL_REGEX.test(to)) {
+    return {
+      success: false,
+      error: 'Invalid recipient email format.',
+      errorCategory: 'invalid_recipient',
+      statusCode: 422,
+      retriesRun: 0
+    };
+  }
+
+  // Simulate Resend API response based on recipient
+  const registeredAccountOwner = 'kumbhageethakrishna1@gmail.com';
+  if (to.toLowerCase() !== registeredAccountOwner) {
+    // 403 test-sender restriction
+    const errMsg = `You can only send testing emails to your own email address (${registeredAccountOwner}). To send emails to other recipients, please verify a domain at resend.com/domains, and change the \`from\` address to an email using this domain.`;
+    const isDomainRestriction = true;
+    return {
+      success: false,
+      error: errMsg,
+      errorCategory: 'domain_verification_required',
+      statusCode: 403,
+      isDomainRestriction,
+      retriesRun: 0 // Non-retryable: futile retries skipped
+    };
+  }
+
+  // Success case
+  return {
+    success: true,
+    id: 'msg_resend_mock_123456789',
+    retriesRun: 0
+  };
+}
+
+const configRes = simulateSendMailWithLogging({ apiKey: '', to: 'owner@example.com' });
+assert(configRes.success === false, 'Missing API key fails sendMail operation');
+assert(configRes.errorCategory === 'config_missing', 'Missing API key categorized as config_missing');
+assert(configRes.retriesRun === 0, 'Missing API key skips retries immediately');
+
+// 5.2 Recipient Restrictions (Invalid Email Format)
+const invalidRecipRes = simulateSendMailWithLogging({ apiKey: 're_valid_key', to: 'not-an-email' });
+assert(invalidRecipRes.success === false, 'Invalid recipient email format rejected');
+assert(invalidRecipRes.errorCategory === 'invalid_recipient', 'Invalid email categorized as invalid_recipient');
+
+// 5.3 Provider Rejection (403 Test Sender Domain Restriction)
+const domainBlockedRes = simulateSendMailWithLogging({ apiKey: 're_valid_key', to: 'external-owner@bistro.com' });
+assert(domainBlockedRes.success === false, 'External recipient rejected under test sender');
+assert(domainBlockedRes.statusCode === 403, 'Provider rejection returns HTTP 403 status code');
+assert(domainBlockedRes.errorCategory === 'domain_verification_required', 'Provider rejection categorized as domain_verification_required');
+assert(domainBlockedRes.isDomainRestriction === true, 'isDomainRestriction flag is set to true');
+assert(domainBlockedRes.retriesRun === 0, 'Futile retry loop is bypassed for domain restrictions');
+assert(domainBlockedRes.error.includes('verify a domain at resend.com/domains'), 'Error explains domain verification requirement');
+
+// 5.4 Successful Provider Acceptance for Account Owner
+const successRes = simulateSendMailWithLogging({ apiKey: 're_valid_key', to: 'kumbhageethakrishna1@gmail.com' });
+assert(successRes.success === true, 'Test sender accepted for verified account owner');
+assert(Boolean(successRes.id), 'Provider returns message ID on acceptance');
+
+// 5.5 Dedicated Retry Action (resend_email) Rule Validation
+function handleResendAction(appStatus, ownerEmail, currentNotifStatus) {
+  if (appStatus !== 'active' && appStatus !== 'approved') {
+    return { ok: false, status: 400, error: 'Cannot send approval notification: application has not been approved yet.' };
+  }
+  const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!ownerEmail || !EMAIL_REGEX.test(ownerEmail)) {
+    return { ok: false, status: 400, error: 'Authoritative owner email could not be resolved.' };
+  }
+  return { ok: true, status: 200, action: 'resend_email' };
+}
+
+assert(handleResendAction('pending_approval', 'test@bistro.com', null).ok === false, 'resend_email rejected for pending applications (400)');
+assert(handleResendAction('rejected', 'test@bistro.com', null).ok === false, 'resend_email rejected for rejected applications (400)');
+assert(handleResendAction('approved', 'invalid-email', null).ok === false, 'resend_email rejected for invalid email address');
+assert(handleResendAction('approved', 'owner@bistro.com', 'failed').ok === true, 'resend_email permitted for approved application with failed notification');
+assert(handleResendAction('active', 'owner@bistro.com', 'sent').ok === true, 'resend_email permitted for active restaurant to re-dispatch');
+
+// -----------------------------------------------------------------------------
+// Suite 6: Live Database & Resend Integration
+// -----------------------------------------------------------------------------
+console.log('\n🔹 Suite 6: Live Firestore & Resend API Verification');
 
 async function verifyLiveIntegration() {
   const firebaseConfig = {

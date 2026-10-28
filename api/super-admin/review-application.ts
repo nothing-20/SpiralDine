@@ -119,8 +119,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Missing required parameters: applicationId and action.' });
   }
 
-  if (!['approve', 'reject', 'request_info'].includes(action)) {
-    return res.status(400).json({ error: 'Invalid action. Must be approve, reject, or request_info.' });
+  if (!['approve', 'reject', 'request_info', 'resend_email'].includes(action)) {
+    return res.status(400).json({ error: 'Invalid action. Must be approve, reject, request_info, or resend_email.' });
   }
 
   try {
@@ -330,6 +330,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               approvalNotificationRecipient: ownerEmail,
               approvalNotificationAttempts: currentAttempts,
               approvalNotificationError: null,
+              approvalNotificationErrorCategory: null,
               updatedAt: nowIso
             }, { merge: true });
 
@@ -340,17 +341,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               error: null
             };
           } else {
-            // Failure: Record provider error
-            const provErr = emailResult.error || 'Resend provider rejected dispatch';
+            // Failure: Record provider error and classify domain restrictions
+            const rawErr = emailResult.error || 'Resend provider rejected dispatch';
+            const isDomainRestriction = Boolean(
+              emailResult.isDomainRestriction ||
+              emailResult.errorCategory === 'domain_verification_required' ||
+              rawErr.toLowerCase().includes('verify a domain') ||
+              rawErr.toLowerCase().includes('testing emails to your own email address') ||
+              rawErr.toLowerCase().includes('testing email address instead of domains')
+            );
+
+            const safeMsg = isDomainRestriction
+              ? 'Domain verification required: Sandbox sender (onboarding@resend.dev) can only send to the account owner (kumbhageethakrishna1@gmail.com). A verified domain is required to send to external restaurant owners.'
+              : rawErr;
+
             await safeSetNotifDoc({
               status: 'failed',
-              error: provErr,
+              error: safeMsg,
+              rawError: rawErr,
+              errorCategory: isDomainRestriction ? 'domain_verification_required' : 'provider_error',
               updatedAt: nowIso
             });
 
             await serverSetDoc(restDocRef, {
               approvalNotificationStatus: 'failed',
-              approvalNotificationError: provErr,
+              approvalNotificationError: safeMsg,
+              approvalNotificationErrorCategory: isDomainRestriction ? 'domain_verification_required' : 'provider_error',
               approvalNotificationAttempts: currentAttempts,
               updatedAt: nowIso
             }, { merge: true });
@@ -359,22 +375,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               status: 'failed',
               recipient: ownerEmail,
               emailId: null,
-              error: provErr
+              error: safeMsg,
+              errorCategory: isDomainRestriction ? 'domain_verification_required' : 'provider_error'
             };
           }
         } catch (sendErr: any) {
           const errDetail = sendErr.message || 'Unknown email dispatch error';
           console.error('[review-application] Email dispatch caught error:', sendErr);
+          const isDomainRestriction = Boolean(
+            errDetail.toLowerCase().includes('verify a domain') ||
+            errDetail.toLowerCase().includes('testing emails to your own email address') ||
+            errDetail.toLowerCase().includes('testing email address instead of domains')
+          );
+
+          const safeMsg = isDomainRestriction
+            ? 'Domain verification required: Sandbox sender (onboarding@resend.dev) can only send to the account owner (kumbhageethakrishna1@gmail.com). A verified domain is required to send to external restaurant owners.'
+            : errDetail;
 
           await safeSetNotifDoc({
             status: 'failed',
-            error: errDetail,
+            error: safeMsg,
+            rawError: errDetail,
+            errorCategory: isDomainRestriction ? 'domain_verification_required' : 'provider_error',
             updatedAt: nowIso
           });
 
           await serverSetDoc(restDocRef, {
             approvalNotificationStatus: 'failed',
-            approvalNotificationError: errDetail,
+            approvalNotificationError: safeMsg,
+            approvalNotificationErrorCategory: isDomainRestriction ? 'domain_verification_required' : 'provider_error',
             approvalNotificationAttempts: currentAttempts,
             updatedAt: nowIso
           }, { merge: true });
@@ -383,7 +412,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             status: 'failed',
             recipient: ownerEmail,
             emailId: null,
-            error: errDetail
+            error: safeMsg,
+            errorCategory: isDomainRestriction ? 'domain_verification_required' : 'provider_error'
           };
         }
       }
@@ -434,6 +464,206 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         message: 'Application approved successfully. Tenant, restaurant, and owner user are active.',
         notification: notificationOutcome
       });
+    }
+
+    // Dedicated action: Resend Approval Notification (for already-approved restaurants)
+    if (action === 'resend_email') {
+      const currentStatus = appData.status;
+      if (currentStatus !== 'active' && currentStatus !== 'approved') {
+        return res.status(400).json({
+          error: 'Cannot send approval notification: application has not been approved yet.'
+        });
+      }
+
+      const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!ownerEmail || !EMAIL_REGEX.test(ownerEmail)) {
+        return res.status(400).json({
+          error: 'Authoritative owner email could not be resolved from restaurant or user profile.'
+        });
+      }
+
+      const notifDocRef = serverDoc(serverDb, 'approvalNotifications', cleanAppId);
+      let notifData: any = null;
+      try {
+        const notifSnap = await serverGetDoc(notifDocRef);
+        if (notifSnap.exists()) {
+          notifData = notifSnap.data();
+        }
+      } catch (err) {
+        console.warn('[review-application] Secondary notifSnap read note:', err);
+      }
+
+      const safeSetNotifDoc = async (data: any) => {
+        try {
+          await serverSetDoc(notifDocRef, data, { merge: true });
+        } catch (err) {
+          console.warn('[review-application] Secondary notifDoc set note:', err);
+        }
+      };
+
+      const currentAttempts = (notifData?.attempts || 0) + 1;
+      await safeSetNotifDoc({
+        applicationId: cleanAppId,
+        tenantId,
+        eventType: 'restaurant_application_approved',
+        status: 'processing',
+        recipient: ownerEmail,
+        attempts: currentAttempts,
+        updatedAt: nowIso,
+        reviewerUid: adminUser.uid,
+      });
+
+      const supportEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || 'kumbhageethakrishna143@gmail.com';
+      const loginUrl = 'https://spiral-dine.vercel.app/owner/login';
+
+      const approvalHtml = getRestaurantApprovalHtml({
+        ownerName,
+        restaurantName,
+        applicationId: cleanAppId,
+        loginUrl,
+        supportEmail,
+        reviewNotes: cleanNotes || undefined
+      });
+
+      const approvalText = getRestaurantApprovalText({
+        ownerName,
+        restaurantName,
+        applicationId: cleanAppId,
+        loginUrl,
+        supportEmail,
+        reviewNotes: cleanNotes || undefined
+      });
+
+      try {
+        const emailResult = await sendMailWithLogging({
+          to: ownerEmail,
+          subject: 'Your Restaurant Has Been Approved on SpiralDine!',
+          html: approvalHtml,
+          text: approvalText,
+          tenantId,
+          type: 'restaurant_application_approved',
+          retries: 2
+        });
+
+        if (emailResult.success && emailResult.id) {
+          await safeSetNotifDoc({
+            status: 'sent',
+            emailId: emailResult.id,
+            sentAt: nowIso,
+            error: null,
+            errorCategory: null,
+            updatedAt: nowIso
+          });
+
+          await serverSetDoc(restDocRef, {
+            approvalNotificationStatus: 'sent',
+            approvalNotificationSentAt: nowIso,
+            approvalNotificationEmailId: emailResult.id,
+            approvalNotificationRecipient: ownerEmail,
+            approvalNotificationAttempts: currentAttempts,
+            approvalNotificationError: null,
+            approvalNotificationErrorCategory: null,
+            updatedAt: nowIso
+          }, { merge: true });
+
+          return res.status(200).json({
+            success: true,
+            action: 'resend_email',
+            applicationId: cleanAppId,
+            message: 'Approval notification dispatched successfully.',
+            notification: {
+              status: 'sent',
+              recipient: ownerEmail,
+              emailId: emailResult.id,
+              error: null
+            }
+          });
+        } else {
+          const rawErr = emailResult.error || 'Resend provider rejected dispatch';
+          const isDomainRestriction = Boolean(
+            emailResult.isDomainRestriction ||
+            emailResult.errorCategory === 'domain_verification_required' ||
+            rawErr.toLowerCase().includes('verify a domain') ||
+            rawErr.toLowerCase().includes('testing emails to your own email address') ||
+            rawErr.toLowerCase().includes('testing email address instead of domains')
+          );
+
+          const safeMsg = isDomainRestriction
+            ? 'Domain verification required: Sandbox sender (onboarding@resend.dev) can only send to the account owner (kumbhageethakrishna1@gmail.com). A verified domain is required to send to external restaurant owners.'
+            : rawErr;
+
+          await safeSetNotifDoc({
+            status: 'failed',
+            error: safeMsg,
+            rawError: rawErr,
+            errorCategory: isDomainRestriction ? 'domain_verification_required' : 'provider_error',
+            updatedAt: nowIso
+          });
+
+          await serverSetDoc(restDocRef, {
+            approvalNotificationStatus: 'failed',
+            approvalNotificationError: safeMsg,
+            approvalNotificationErrorCategory: isDomainRestriction ? 'domain_verification_required' : 'provider_error',
+            approvalNotificationAttempts: currentAttempts,
+            updatedAt: nowIso
+          }, { merge: true });
+
+          return res.status(200).json({
+            success: false,
+            action: 'resend_email',
+            applicationId: cleanAppId,
+            message: 'Failed to dispatch approval notification.',
+            notification: {
+              status: 'failed',
+              recipient: ownerEmail,
+              emailId: null,
+              error: safeMsg,
+              errorCategory: isDomainRestriction ? 'domain_verification_required' : 'provider_error'
+            }
+          });
+        }
+      } catch (sendErr: any) {
+        const errDetail = sendErr.message || 'Unknown email dispatch error';
+        const isDomainRestriction = Boolean(
+          errDetail.toLowerCase().includes('verify a domain') ||
+          errDetail.toLowerCase().includes('testing emails to your own email address') ||
+          errDetail.toLowerCase().includes('testing email address instead of domains')
+        );
+
+        const safeMsg = isDomainRestriction
+          ? 'Domain verification required: Sandbox sender (onboarding@resend.dev) can only send to the account owner (kumbhageethakrishna1@gmail.com). A verified domain is required to send to external restaurant owners.'
+          : errDetail;
+
+        await safeSetNotifDoc({
+          status: 'failed',
+          error: safeMsg,
+          rawError: errDetail,
+          errorCategory: isDomainRestriction ? 'domain_verification_required' : 'provider_error',
+          updatedAt: nowIso
+        });
+
+        await serverSetDoc(restDocRef, {
+          approvalNotificationStatus: 'failed',
+          approvalNotificationError: safeMsg,
+          approvalNotificationErrorCategory: isDomainRestriction ? 'domain_verification_required' : 'provider_error',
+          approvalNotificationAttempts: currentAttempts,
+          updatedAt: nowIso
+        }, { merge: true });
+
+        return res.status(200).json({
+          success: false,
+          action: 'resend_email',
+          applicationId: cleanAppId,
+          message: 'Failed to dispatch approval notification.',
+          notification: {
+            status: 'failed',
+            recipient: ownerEmail,
+            emailId: null,
+            error: safeMsg,
+            errorCategory: isDomainRestriction ? 'domain_verification_required' : 'provider_error'
+          }
+        });
+      }
     }
 
     if (action === 'reject') {

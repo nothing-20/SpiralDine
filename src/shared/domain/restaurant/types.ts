@@ -83,5 +83,6 @@ export interface IRestaurantApplication {
   approvalNotificationEmailId?: string;
   approvalNotificationRecipient?: string;
   approvalNotificationError?: string;
+  approvalNotificationErrorCategory?: 'domain_verification_required' | 'provider_error' | 'invalid_recipient';
   approvalNotificationAttempts?: number;
 }
