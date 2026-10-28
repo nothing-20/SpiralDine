@@ -7,9 +7,11 @@ import Modal from '../../../components/ui/Modal/Modal';
 import { 
   Star, MapPin, Search, Clock, ArrowRight, Heart, ChevronRight, X,
   Utensils, Locate, Filter, Check, Bell, QrCode, Calendar,
-  ChevronDown, Flame, LogOut
+  ChevronDown, Flame, LogOut, ChevronLeft, Sparkles, Tag, Copy
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { IPromotion } from '../../../shared/domain/promotions/types';
+import { isPromotionActive } from '../../../shared/services/promotionEngine';
 import { isOrderActive } from '../../../shared/utils/orderUtils';
 import { formatPrice, getCurrencySymbol } from '../../../shared/utils/format';
 import { tableService } from '../../../shared/services/tableService';
@@ -276,6 +278,10 @@ export const CustomerHome: React.FC = () => {
   // Active Live Order detection
   const [activeOrderBanner, setActiveOrderBanner] = useState<any>(null);
 
+  // Active dynamic restaurant promotions for Customer Home Carousel
+  const [homePromotions, setHomePromotions] = useState<(IPromotion & { restaurantName: string; restaurantId: string })[]>([]);
+  const [activePromoIndex, setActivePromoIndex] = useState<number>(0);
+
   useEffect(() => {
     const checkActiveOrder = () => {
       try {
@@ -455,6 +461,72 @@ export const CustomerHome: React.FC = () => {
       unsubs.forEach(u => u());
     };
   }, [restaurantsList]);
+
+  // Stream active promotions from onboarded restaurants for Customer Home Carousel
+  useEffect(() => {
+    if (restaurantsList.length === 0) return;
+    const topRestaurants = restaurantsList.slice(0, 10);
+    const unsubs: (() => void)[] = [];
+    const promosMap = new Map<string, IPromotion & { restaurantName: string; restaurantId: string }>();
+
+    topRestaurants.forEach((rest) => {
+      try {
+        const promoRef = collection(db, 'restaurants', rest.id, 'promotions');
+        const unsub = onSnapshot(promoRef, (snap) => {
+          for (const [key, p] of promosMap.entries()) {
+            if (p.restaurantId === rest.id) {
+              promosMap.delete(key);
+            }
+          }
+
+          snap.forEach((docSnap) => {
+            const d = docSnap.data();
+            const placementsArr = Array.isArray(d.placements) 
+              ? d.placements 
+              : (d.placement ? [d.placement] : ['restaurant_menu', 'cart_suggestion', 'home_carousel']);
+            
+            const promoObj: any = {
+              id: docSnap.id,
+              ...d,
+              restaurantId: rest.id,
+              restaurantName: rest.name,
+              placements: placementsArr,
+              value: Number(d.value ?? d.discountValue ?? 0),
+              status: d.status || 'active',
+              startDate: d.startDate || new Date().toISOString(),
+              endDate: d.endDate || new Date(Date.now() + 30 * 86400000).toISOString(),
+              startTime: d.startTime || (d.startDate?.includes('T') ? d.startDate.slice(11, 16) : '00:00'),
+              endTime: d.endTime || (d.endDate?.includes('T') ? d.endDate.slice(11, 16) : '23:59')
+            };
+
+            const isHomePlacement = placementsArr.includes('home_carousel') || 
+              placementsArr.includes('HOME_CAROUSEL' as any) || 
+              placementsArr.includes('ALL' as any);
+
+            if (isPromotionActive(promoObj) && isHomePlacement) {
+              promosMap.set(`${rest.id}_${docSnap.id}`, promoObj);
+            }
+          });
+
+          setHomePromotions(Array.from(promosMap.values()));
+        }, () => {});
+        unsubs.push(unsub);
+      } catch (_) {}
+    });
+
+    return () => {
+      unsubs.forEach(u => u());
+    };
+  }, [restaurantsList]);
+
+  // Auto-advance promotion carousel every 5 seconds if multiple promotions exist
+  useEffect(() => {
+    if (homePromotions.length <= 1) return;
+    const timer = setInterval(() => {
+      setActivePromoIndex((prev) => (prev + 1) % homePromotions.length);
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [homePromotions.length]);
 
   // Detect GPS location with smart metro resolution
   const handleDetectLocation = (isAuto = false) => {
@@ -843,53 +915,204 @@ export const CustomerHome: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* SECTION C — FOOD DISCOVERY BANNER                                         */}
+      {/* SECTION C — PROMOTIONS CAROUSEL / FOOD DISCOVERY BANNER                   */}
       {/* ========================================================================= */}
-      <section 
-        className="relative rounded-3xl overflow-hidden border p-3.5 min-[380px]:p-4 sm:p-6 shadow-xs flex flex-col min-[340px]:flex-row items-center justify-between gap-3 min-w-0"
-        style={{ backgroundColor: COLOR_LIGHT_GREEN, borderColor: COLOR_BORDER }}
-      >
-        <div className="space-y-2 sm:space-y-2.5 flex-1 min-w-0 z-10 w-full min-[340px]:w-auto pr-0 min-[340px]:pr-1">
-          <div>
-            <h2 className="text-[10px] min-[340px]:text-[11px] sm:text-xs font-poppins font-extrabold uppercase tracking-wide" style={{ color: COLOR_DEEP_GREEN }}>
-              DISCOVER SOMETHING
-            </h2>
-            <h3 className="text-sm min-[340px]:text-base sm:text-2xl font-poppins font-black uppercase tracking-tight leading-tight" style={{ color: COLOR_TERRACOTTA }}>
-              DELICIOUS
-            </h3>
-          </div>
-          <p className="text-[10px] min-[340px]:text-[10.5px] sm:text-xs font-medium leading-relaxed" style={{ color: COLOR_SECONDARY_TEXT }}>
-            Find your next favourite meal from the best restaurants around you.
-          </p>
-          <div>
-            <button
-              type="button"
-              onClick={() => navigate('/customer/explore')}
-              className="inline-flex items-center justify-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-full text-white text-[11px] sm:text-xs font-poppins font-extrabold shadow-sm hover:opacity-95 active:scale-95 transition-all cursor-pointer whitespace-nowrap w-full min-[340px]:w-auto"
-              style={{ backgroundColor: COLOR_PRIMARY_GREEN }}
+      {homePromotions.length > 0 ? (
+        (() => {
+          const promo = homePromotions[activePromoIndex % homePromotions.length];
+          const discountLabel = promo.badgeText || (
+            promo.type === 'bogo' 
+              ? 'BUY 1 GET 1' 
+              : promo.type === 'fixed_amount' 
+                ? `FLAT ₹${promo.value} OFF` 
+                : `${promo.value}% OFF`
+          );
+
+          let scheduleText = '';
+          try {
+            const endDateObj = new Date(promo.endDate);
+            const dateStr = endDateObj.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+            let timeStr = '';
+            if (promo.endTime) {
+              const [h, m] = promo.endTime.split(':');
+              const hNum = parseInt(h, 10);
+              const ampm = hNum >= 12 ? 'PM' : 'AM';
+              const h12 = hNum % 12 || 12;
+              timeStr = `${h12}:${m || '00'} ${ampm}`;
+            } else {
+              timeStr = endDateObj.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
+            }
+            scheduleText = `${dateStr}, ${timeStr}`;
+          } catch (_) {
+            scheduleText = promo.endDate;
+          }
+
+          return (
+            <section 
+              className="relative rounded-3xl overflow-hidden border p-4 sm:p-6 shadow-sm flex flex-col min-[340px]:flex-row items-center justify-between gap-4 min-w-0 transition-all bg-gradient-to-r from-[#FFF9F6] via-[#FFFDFB] to-[#F0FDF4]"
+              style={{ borderColor: '#FDBA74' }}
             >
-              <span>Explore Restaurants</span>
-              <ArrowRight className="w-3.5 h-3.5 shrink-0" />
-            </button>
+              <div className="space-y-2 sm:space-y-2.5 flex-1 min-w-0 z-10 w-full min-[340px]:w-auto pr-0 min-[340px]:pr-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] sm:text-[11px] font-poppins font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full text-white shadow-xs" style={{ backgroundColor: COLOR_TERRACOTTA }}>
+                    {discountLabel}
+                  </span>
+                  <span className="text-[11px] sm:text-xs font-bold text-[#166534] flex items-center gap-1">
+                    <Utensils className="w-3 h-3 text-[#16A34A]" />
+                    <span>{promo.restaurantName}</span>
+                  </span>
+                </div>
+
+                <div>
+                  <h3 className="text-base sm:text-xl font-poppins font-black text-[#111827] tracking-tight leading-snug">
+                    {promo.name}
+                  </h3>
+                  {promo.description && (
+                    <p className="text-[11px] sm:text-xs text-[#4B5563] font-medium leading-relaxed mt-0.5 line-clamp-2">
+                      {promo.description}
+                      {promo.minOrderValue ? ` • Min Order: ₹${promo.minOrderValue}` : ''}
+                      {promo.maxDiscountAmount ? ` • Max Discount: ₹${promo.maxDiscountAmount}` : ''}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  {(promo.code || promo.couponCode) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const codeVal = promo.code || promo.couponCode || '';
+                        navigator.clipboard.writeText(codeVal);
+                        toast.success(`Coupon "${codeVal}" copied!`);
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white border border-[#FDBA74] text-[#C2410C] font-mono font-extrabold text-xs shadow-2xs hover:bg-[#FFF7ED] transition-all cursor-pointer active:scale-95"
+                      title="Click to copy coupon code"
+                    >
+                      <Tag className="w-3.5 h-3.5" />
+                      <span>CODE: {promo.code || promo.couponCode}</span>
+                      <Copy className="w-3 h-3 opacity-60" />
+                    </button>
+                  )}
+
+                  {scheduleText && (
+                    <span className="text-[10.5px] font-semibold text-[#6B7280] flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-[#EA580C]" />
+                      <span>Valid till {scheduleText}</span>
+                    </span>
+                  )}
+                </div>
+
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/customer/restaurant/${promo.restaurantId}/menu`)}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-full text-white text-xs font-poppins font-extrabold shadow-sm hover:opacity-95 active:scale-95 transition-all cursor-pointer whitespace-nowrap"
+                    style={{ backgroundColor: COLOR_PRIMARY_GREEN }}
+                  >
+                    <span>Order Menu &amp; Redeem</span>
+                    <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Appetizing Food Image or Promo Graphic on Right */}
+              <div className="w-20 h-20 min-[340px]:w-24 min-[340px]:h-24 sm:w-36 sm:h-36 shrink-0 relative flex items-center justify-center">
+                <img
+                  src={promo.imageUrl || rightPlateImg}
+                  alt={promo.name}
+                  className="w-full h-full object-contain drop-shadow-md select-none transition-transform hover:scale-105"
+                />
+              </div>
+
+              {/* Carousel controls if more than 1 promotion */}
+              {homePromotions.length > 1 && (
+                <>
+                  <div className="absolute top-3 right-3 flex items-center gap-1 z-20">
+                    <button
+                      type="button"
+                      onClick={() => setActivePromoIndex((prev) => (prev - 1 + homePromotions.length) % homePromotions.length)}
+                      className="w-6 h-6 rounded-full bg-white/90 border border-slate-200 text-slate-700 hover:text-black flex items-center justify-center text-xs shadow-xs cursor-pointer"
+                      title="Previous offer"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActivePromoIndex((prev) => (prev + 1) % homePromotions.length)}
+                      className="w-6 h-6 rounded-full bg-white/90 border border-slate-200 text-slate-700 hover:text-black flex items-center justify-center text-xs shadow-xs cursor-pointer"
+                      title="Next offer"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-20">
+                    {homePromotions.map((_, idx) => (
+                      <button
+                        type="button"
+                        key={idx}
+                        onClick={() => setActivePromoIndex(idx)}
+                        className={`transition-all rounded-full cursor-pointer ${
+                          idx === activePromoIndex % homePromotions.length
+                            ? 'w-4 h-1.5 bg-[#EA580C]'
+                            : 'w-1.5 h-1.5 bg-slate-300 hover:bg-slate-400'
+                        }`}
+                        title={`Slide ${idx + 1}`}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </section>
+          );
+        })()
+      ) : (
+        <section 
+          className="relative rounded-3xl overflow-hidden border p-3.5 min-[380px]:p-4 sm:p-6 shadow-xs flex flex-col min-[340px]:flex-row items-center justify-between gap-3 min-w-0"
+          style={{ backgroundColor: COLOR_LIGHT_GREEN, borderColor: COLOR_BORDER }}
+        >
+          <div className="space-y-2 sm:space-y-2.5 flex-1 min-w-0 z-10 w-full min-[340px]:w-auto pr-0 min-[340px]:pr-1">
+            <div>
+              <h2 className="text-[10px] min-[340px]:text-[11px] sm:text-xs font-poppins font-extrabold uppercase tracking-wide" style={{ color: COLOR_DEEP_GREEN }}>
+                DISCOVER SOMETHING
+              </h2>
+              <h3 className="text-sm min-[340px]:text-base sm:text-2xl font-poppins font-black uppercase tracking-tight leading-tight" style={{ color: COLOR_TERRACOTTA }}>
+                DELICIOUS
+              </h3>
+            </div>
+            <p className="text-[10px] min-[340px]:text-[10.5px] sm:text-xs font-medium leading-relaxed" style={{ color: COLOR_SECONDARY_TEXT }}>
+              Find your next favourite meal from the best restaurants around you.
+            </p>
+            <div>
+              <button
+                type="button"
+                onClick={() => navigate('/customer/explore')}
+                className="inline-flex items-center justify-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-full text-white text-[11px] sm:text-xs font-poppins font-extrabold shadow-sm hover:opacity-95 active:scale-95 transition-all cursor-pointer whitespace-nowrap w-full min-[340px]:w-auto"
+                style={{ backgroundColor: COLOR_PRIMARY_GREEN }}
+              >
+                <span>Explore Restaurants</span>
+                <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+              </button>
+            </div>
           </div>
-        </div>
 
-        {/* Appetizing Food Image on Right */}
-        <div className="w-16 h-16 min-[340px]:w-20 min-[340px]:h-20 sm:w-36 sm:h-36 md:w-40 md:h-40 shrink-0 relative flex items-center justify-center">
-          <img
-            src={rightPlateImg}
-            alt="Delicious Meals"
-            className="w-full h-full object-contain drop-shadow-md select-none transition-transform hover:scale-105"
-          />
-        </div>
+          {/* Appetizing Food Image on Right */}
+          <div className="w-16 h-16 min-[340px]:w-20 min-[340px]:h-20 sm:w-36 sm:h-36 md:w-40 md:h-40 shrink-0 relative flex items-center justify-center">
+            <img
+              src={rightPlateImg}
+              alt="Delicious Meals"
+              className="w-full h-full object-contain drop-shadow-md select-none transition-transform hover:scale-105"
+            />
+          </div>
 
-        {/* Banner carousel dots */}
-        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: COLOR_PRIMARY_GREEN }} />
-          <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-          <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-        </div>
-      </section>
+          {/* Banner carousel dots */}
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: COLOR_PRIMARY_GREEN }} />
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+          </div>
+        </section>
+      )}
 
       {/* ========================================================================= */}
       {/* SECTION D — EXPLORE BY CUISINE                                            */}

@@ -19,7 +19,8 @@ import {
   Sparkles, 
   X, 
   Check, 
-  RefreshCw 
+  RefreshCw,
+  ArrowLeftRight 
 } from 'lucide-react';
 import { 
   collection, 
@@ -423,6 +424,14 @@ export const MobileInventory: React.FC = () => {
 
         <div className="flex items-center gap-1.5">
           <button
+            onClick={() => navigate('/owner/branch-transfers')}
+            className="w-8 h-8 rounded-full bg-[#FAF8F4] text-[#D94F2B] border border-[#D8DDD6] flex items-center justify-center hover:bg-[#F3E8DF]"
+            title="Inter-Branch Stock Transfers"
+            aria-label="Branch Transfers"
+          >
+            <ArrowLeftRight className="w-3.5 h-3.5" />
+          </button>
+          <button
             onClick={() => {
               if (ingredients.length > 0) {
                 setWasteIngId(ingredients[0].id);
@@ -530,6 +539,13 @@ export const MobileInventory: React.FC = () => {
           }`}
         >
           Replenishment
+        </button>
+        <button
+          onClick={() => navigate('/owner/branch-transfers')}
+          className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-bold transition-all bg-[#FAF8F4] text-[#D94F2B] border border-[#D8DDD6] flex items-center gap-1.5"
+        >
+          <ArrowLeftRight className="w-3 h-3" />
+          <span>Branch Transfers</span>
         </button>
       </div>
 

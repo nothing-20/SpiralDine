@@ -76,8 +76,10 @@ export interface IPromotion {
   maxDiscountAmount?: number; // Cap on percentage discounts in INR
 
   // Time validity
-  startDate: string; // ISO 8601
-  endDate: string;   // ISO 8601
+  startDate: string; // ISO 8601 or YYYY-MM-DD
+  endDate: string;   // ISO 8601 or YYYY-MM-DD
+  startTime?: string; // e.g. '10:00' (24-hour format)
+  endTime?: string;   // e.g. '22:00' (24-hour format)
   status: PromotionStatus;
 
   // Limits

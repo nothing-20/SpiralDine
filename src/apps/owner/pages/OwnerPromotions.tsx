@@ -64,7 +64,9 @@ export const OwnerPromotions: React.FC = () => {
   const [formMinOrderValue, setFormMinOrderValue] = useState<number | ''>('');
   const [formMaxDiscount, setFormMaxDiscount] = useState<number | ''>('');
   const [formStartDate, setFormStartDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [formStartTime, setFormStartTime] = useState<string>('00:00');
   const [formEndDate, setFormEndDate] = useState<string>(() => new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
+  const [formEndTime, setFormEndTime] = useState<string>('23:59');
   const [formGlobalLimit, setFormGlobalLimit] = useState<number | ''>('');
   const [formPlacements, setFormPlacements] = useState<PromotionPlacement[]>(['restaurant_menu', 'cart_suggestion', 'home_carousel']);
   const [formAllowStacking, setFormAllowStacking] = useState<boolean>(false);
@@ -157,7 +159,9 @@ export const OwnerPromotions: React.FC = () => {
     setFormMinOrderValue('');
     setFormMaxDiscount('');
     setFormStartDate(new Date().toISOString().slice(0, 10));
+    setFormStartTime('00:00');
     setFormEndDate(new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10));
+    setFormEndTime('23:59');
     setFormGlobalLimit('');
     setFormPlacements(['restaurant_menu', 'cart_suggestion', 'home_carousel']);
     setFormAllowStacking(false);
@@ -179,7 +183,9 @@ export const OwnerPromotions: React.FC = () => {
     setFormMinOrderValue(p.minOrderValue ?? '');
     setFormMaxDiscount(p.maxDiscountAmount ?? '');
     setFormStartDate((p.startDate || '').slice(0, 10));
+    setFormStartTime(p.startTime || (p.startDate?.includes('T') ? p.startDate.slice(11, 16) : '00:00'));
     setFormEndDate((p.endDate || '').slice(0, 10));
+    setFormEndTime(p.endTime || (p.endDate?.includes('T') ? p.endDate.slice(11, 16) : '23:59'));
     setFormGlobalLimit(p.globalUsageLimit ?? '');
     setFormPlacements(p.placements || ['restaurant_menu']);
     setFormAllowStacking(p.allowStacking || false);
@@ -226,8 +232,15 @@ export const OwnerPromotions: React.FC = () => {
       toast.error('Coupon code promotions require an active promo code.');
       return;
     }
-    if (new Date(formEndDate).getTime() < new Date(formStartDate).getTime()) {
-      toast.error('Expiry date cannot precede start date.');
+    const startDateTime = new Date(`${formStartDate}T${formStartTime || '00:00'}:00`);
+    const endDateTime = new Date(`${formEndDate}T${formEndTime || '23:59'}:00`);
+
+    if (isNaN(startDateTime.getTime()) || isNaN(endDateTime.getTime())) {
+      toast.error('Please enter valid start and end dates and times.');
+      return;
+    }
+    if (endDateTime.getTime() <= startDateTime.getTime()) {
+      toast.error('Expiry date and time must be after start schedule.');
       return;
     }
 
@@ -244,8 +257,10 @@ export const OwnerPromotions: React.FC = () => {
         applicableItemIds: formApplicableItems,
         minOrderValue: formMinOrderValue === '' ? undefined : Number(formMinOrderValue),
         maxDiscountAmount: formMaxDiscount === '' ? undefined : Number(formMaxDiscount),
-        startDate: new Date(formStartDate).toISOString(),
-        endDate: new Date(formEndDate).toISOString(),
+        startDate: startDateTime.toISOString(),
+        endDate: endDateTime.toISOString(),
+        startTime: formStartTime || '00:00',
+        endTime: formEndTime || '23:59',
         globalUsageLimit: formGlobalLimit === '' ? undefined : Number(formGlobalLimit),
         placements: formPlacements,
         allowStacking: formAllowStacking,
@@ -290,6 +305,27 @@ export const OwnerPromotions: React.FC = () => {
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     toast.success(`Copied "${text}" to clipboard`);
+  };
+
+  const formatSchedule = (isoDate: string, timeStr?: string) => {
+    try {
+      const d = new Date(isoDate);
+      if (isNaN(d.getTime())) return isoDate;
+      const datePart = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+      let timePart = '';
+      if (timeStr) {
+        const [h, m] = timeStr.split(':');
+        const hourNum = parseInt(h, 10);
+        const ampm = hourNum >= 12 ? 'PM' : 'AM';
+        const h12 = hourNum % 12 || 12;
+        timePart = `${h12}:${m || '00'} ${ampm}`;
+      } else {
+        timePart = d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
+      }
+      return `${datePart}, ${timePart}`;
+    } catch (_) {
+      return isoDate;
+    }
   };
 
   return (
@@ -507,9 +543,14 @@ export const OwnerPromotions: React.FC = () => {
                       </td>
 
                       <td className="py-3.5 px-4 text-[#5F675F] text-[11px] font-medium">
-                        <div className="flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-[#D94F2B]" />
-                          <span>{new Date(p.startDate).toLocaleDateString()} — {new Date(p.endDate).toLocaleDateString()}</span>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1.5 text-[#202820] font-semibold">
+                            <Clock className="w-3.5 h-3.5 text-[#D94F2B] shrink-0" />
+                            <span>{formatSchedule(p.startDate, p.startTime)}</span>
+                          </div>
+                          <div className="text-[10px] text-[#5F675F] pl-5">
+                            to {formatSchedule(p.endDate, p.endTime)}
+                          </div>
                         </div>
                       </td>
 
@@ -737,32 +778,64 @@ export const OwnerPromotions: React.FC = () => {
               </div>
             </div>
 
-            {/* Validity Dates */}
+            {/* Validity Dates & Times */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="font-bold text-[#202820] block text-xs">
-                  Start Date <span className="text-[#B42318] font-bold">*</span>
-                </label>
-                <input
-                  type="date"
-                  value={formStartDate}
-                  onChange={(e) => setFormStartDate(e.target.value)}
-                  required
-                  className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] outline-none cursor-pointer focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"
-                />
+              <div className="p-3 bg-[#FAF8F4] border border-[#D8DDD6] rounded-2xl space-y-2">
+                <span className="font-extrabold text-[#202820] text-xs flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-[#D94F2B]" />
+                  <span>Start Schedule <span className="text-[#B42318]">*</span></span>
+                </span>
+                <div className="grid grid-cols-1 min-[340px]:grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-[#5F675F] block">Start Date</label>
+                    <input
+                      type="date"
+                      value={formStartDate}
+                      onChange={(e) => setFormStartDate(e.target.value)}
+                      required
+                      className="w-full px-2.5 py-2 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] text-xs outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 cursor-pointer"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-[#5F675F] block">Start Time</label>
+                    <input
+                      type="time"
+                      value={formStartTime}
+                      onChange={(e) => setFormStartTime(e.target.value)}
+                      required
+                      className="w-full px-2.5 py-2 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] text-xs outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 cursor-pointer"
+                    />
+                  </div>
+                </div>
               </div>
 
-              <div className="space-y-1">
-                <label className="font-bold text-[#202820] block text-xs">
-                  End Date <span className="text-[#B42318] font-bold">*</span>
-                </label>
-                <input
-                  type="date"
-                  value={formEndDate}
-                  onChange={(e) => setFormEndDate(e.target.value)}
-                  required
-                  className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] outline-none cursor-pointer focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"
-                />
+              <div className="p-3 bg-[#FAF8F4] border border-[#D8DDD6] rounded-2xl space-y-2">
+                <span className="font-extrabold text-[#202820] text-xs flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-[#D94F2B]" />
+                  <span>End Schedule <span className="text-[#B42318]">*</span></span>
+                </span>
+                <div className="grid grid-cols-1 min-[340px]:grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-[#5F675F] block">End Date</label>
+                    <input
+                      type="date"
+                      value={formEndDate}
+                      onChange={(e) => setFormEndDate(e.target.value)}
+                      required
+                      className="w-full px-2.5 py-2 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] text-xs outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 cursor-pointer"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-[#5F675F] block">End Time</label>
+                    <input
+                      type="time"
+                      value={formEndTime}
+                      onChange={(e) => setFormEndTime(e.target.value)}
+                      required
+                      className="w-full px-2.5 py-2 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] text-xs outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 cursor-pointer"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
 

@@ -22,6 +22,28 @@ import {
 } from '../domain/promotions/types';
 
 /**
+ * Resolves a date string and optional time string ('HH:mm') into a unified millisecond timestamp.
+ */
+export function resolvePromotionTimestamp(dateStr?: string, timeStr?: string, defaultTime = '00:00'): number | null {
+  if (!dateStr) return null;
+  try {
+    if (dateStr.includes('T') && !timeStr) {
+      const ms = new Date(dateStr).getTime();
+      return isNaN(ms) ? null : ms;
+    }
+    const ymd = dateStr.slice(0, 10);
+    const time = (timeStr || (dateStr.includes('T') ? dateStr.slice(11, 16) : defaultTime)).trim();
+    const [hh = '00', mm = '00'] = time.split(':');
+    const d = new Date(`${ymd}T${hh.padStart(2, '0')}:${mm.padStart(2, '0')}:00`);
+    const ms = d.getTime();
+    return isNaN(ms) ? new Date(dateStr).getTime() : ms;
+  } catch (_) {
+    const fallback = new Date(dateStr).getTime();
+    return isNaN(fallback) ? null : fallback;
+  }
+}
+
+/**
  * Checks whether a promotion is currently eligible based on status, validity window, and global limits.
  */
 export function isPromotionActive(promotion: IPromotion, atDate = new Date()): boolean {
@@ -30,12 +52,12 @@ export function isPromotionActive(promotion: IPromotion, atDate = new Date()): b
 
   const now = atDate.getTime();
   if (promotion.startDate) {
-    const start = new Date(promotion.startDate).getTime();
-    if (!isNaN(start) && now < start) return false;
+    const start = resolvePromotionTimestamp(promotion.startDate, promotion.startTime, '00:00');
+    if (start !== null && !isNaN(start) && now < start) return false;
   }
   if (promotion.endDate) {
-    const end = new Date(promotion.endDate).getTime();
-    if (!isNaN(end) && now > end) return false;
+    const end = resolvePromotionTimestamp(promotion.endDate, promotion.endTime, '23:59');
+    if (end !== null && !isNaN(end) && now > end) return false;
   }
 
   if (typeof promotion.globalUsageLimit === 'number' && promotion.globalUsageLimit > 0) {
@@ -398,6 +420,8 @@ export const promotionService = {
           maxDiscountAmount: typeof data.maxDiscountAmount === 'number' ? data.maxDiscountAmount : undefined,
           startDate: data.startDate || new Date().toISOString(),
           endDate: data.endDate || new Date(Date.now() + 30 * 86400000).toISOString(),
+          startTime: data.startTime || (data.startDate?.includes('T') ? data.startDate.slice(11, 16) : '00:00'),
+          endTime: data.endTime || (data.endDate?.includes('T') ? data.endDate.slice(11, 16) : '23:59'),
           status: data.status || 'active',
           globalUsageLimit: typeof data.globalUsageLimit === 'number' ? data.globalUsageLimit : undefined,
           perCustomerLimit: typeof data.perCustomerLimit === 'number' ? data.perCustomerLimit : undefined,
@@ -442,6 +466,8 @@ export const promotionService = {
           discountValue: promoVal,
           code: codeVal,
           couponCode: codeVal,
+          startTime: data.startTime || (data.startDate?.includes('T') ? data.startDate.slice(11, 16) : '00:00'),
+          endTime: data.endTime || (data.endDate?.includes('T') ? data.endDate.slice(11, 16) : '23:59'),
           placements: placementsArr,
           placement: placementsArr[0] || 'restaurant_menu'
         } as IPromotion);
@@ -496,6 +522,8 @@ export const promotionService = {
           maxDiscount: payload.maxDiscountAmount,
           startDate: payload.startDate,
           endDate: payload.endDate,
+          startTime: payload.startTime,
+          endTime: payload.endTime,
           updatedAt: new Date().toISOString()
         }, { merge: true });
       } catch (legacyErr) {

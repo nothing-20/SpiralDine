@@ -289,17 +289,17 @@ export const CartPage: React.FC = () => {
   }, [currency, currencySymbol]);
 
   // 3. Coupon Application Handler
-  const handleApplyCoupon = async (e?: React.FormEvent, codeOverride?: string) => {
+  const handleApplyCoupon = async (e?: React.FormEvent, codeOverride?: string, promoOverride?: IPromotion) => {
     if (e) e.preventDefault();
-    const rawCode = (codeOverride || couponCode).trim().toUpperCase();
-    if (!rawCode) {
+    let promo = promoOverride || (codeOverride ? availableCoupons.find(p => (p.code || p.couponCode)?.toUpperCase() === codeOverride.toUpperCase()) : null);
+    const rawCode = (codeOverride || promo?.code || promo?.couponCode || promo?.badgeText || promo?.name || couponCode).trim().toUpperCase();
+    if (!promo && !rawCode) {
       setCouponError('Please enter a coupon code.');
       return;
     }
     setCouponError('');
     setIsApplyingCoupon(true);
     try {
-      let promo = availableCoupons.find(p => (p.code || p.couponCode)?.toUpperCase() === rawCode);
       if (!promo && activeTenantId) {
         const onlineRes = await promotionService.validateCouponOnline(activeTenantId, rawCode, subtotal, cartItems, user?.uid);
         if (onlineRes.valid && onlineRes.promotion) {
@@ -324,12 +324,13 @@ export const CartPage: React.FC = () => {
         return;
       }
 
+      const appliedDisplayCode = promo.code || promo.couponCode || promo.badgeText || rawCode;
       setAppliedPromotion(promo);
-      setAppliedCouponCode(rawCode);
+      setAppliedCouponCode(appliedDisplayCode);
       setCouponDiscountVal(val.discountAmount || 0);
       setCouponCode('');
       setCouponError('');
-      toast.success(`${rawCode} applied! Savings: ${formatPrice(val.discountAmount || 0)}`);
+      toast.success(`${appliedDisplayCode} applied! Savings: ${formatPrice(val.discountAmount || 0)}`);
     } catch (err: any) {
       console.error('Error applying coupon:', err);
       setCouponError('Unable to apply coupon. Please try again.');
@@ -1094,7 +1095,7 @@ export const CartPage: React.FC = () => {
                               </div>
                               <button
                                 type="button"
-                                onClick={() => handleApplyCoupon(undefined, c.code || c.couponCode || '')}
+                                onClick={() => handleApplyCoupon(undefined, c.code || c.couponCode || '', c)}
                                 disabled={isApplyingCoupon}
                                 className="px-2.5 py-1 text-[11px] font-extrabold text-[#C85A3F] bg-white hover:bg-[#F3E8DF] border border-[#C85A3F]/40 rounded-lg shrink-0 transition-all cursor-pointer active:scale-95"
                               >

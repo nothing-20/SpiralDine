@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { 
   collection, 
   getDocs, 
@@ -50,7 +51,9 @@ import {
   HelpCircle,
   FileText,
   Star,
-  ShoppingCart
+  ShoppingCart,
+  ArrowLeftRight,
+  Building2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -71,6 +74,7 @@ import { PurchaseOrdersTab } from '../inventory/PurchaseOrdersTab';
 import { vendorPurchaseOrderService } from '../../../shared/services/vendorPurchaseOrderService';
 
 export const OwnerInventoryManager: React.FC = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const { currencySymbol } = useCurrency();
   const tenantId = user?.tenantId;
@@ -1232,7 +1236,8 @@ export const OwnerInventoryManager: React.FC = () => {
     { id: 'lowstock', label: 'Low Stock warnings', icon: AlertOctagon },
     { id: 'expiry', label: 'Expiry monitor', icon: Calendar },
     { id: 'waste', label: 'Waste Logs', icon: Trash },
-    { id: 'suggestions', label: 'Suggestions list', icon: Sparkles }
+    { id: 'suggestions', label: 'Suggestions list', icon: Sparkles },
+    { id: 'branch-transfers', label: 'Branch Transfers', icon: ArrowLeftRight }
   ];
 
   return (
@@ -1243,7 +1248,16 @@ export const OwnerInventoryManager: React.FC = () => {
           <h1 className="text-2xl font-display font-extrabold text-textPearl">Inventory Automation</h1>
           <p className="text-xs text-mutedAsh font-semibold">Automatic stock calculations, recipes mappings, waste losses tracking, and replenishment alerts.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button 
+            onClick={() => navigate('/owner/branch-transfers')} 
+            variant="secondary" 
+            className="flex items-center gap-1.5 text-xs font-bold py-2 px-3 border border-[#D8DDD6] hover:border-[#D94F2B]/40 hover:bg-[#FAF8F4] text-[#202820] cursor-pointer shadow-2xs transition-all"
+            title="Inter-restaurant branch stock transfer workspace"
+          >
+            <ArrowLeftRight className="w-3.5 h-3.5 text-[#D94F2B]" />
+            <span>Inter-Branch Transfers</span>
+          </Button>
           <Button onClick={handleOpenWaste} variant="secondary" className="flex items-center gap-1.5 text-xs font-bold py-2 px-3">
             <Trash className="w-3.5 h-3.5" />
             <span>Record Waste</span>
@@ -1258,7 +1272,13 @@ export const OwnerInventoryManager: React.FC = () => {
       <Tabs 
         tabs={navTabs} 
         activeTabId={activeTab} 
-        onTabChange={setActiveTab} 
+        onTabChange={(tabId) => {
+          if (tabId === 'branch-transfers') {
+            navigate('/owner/branch-transfers');
+            return;
+          }
+          setActiveTab(tabId);
+        }} 
       />
 
       {/* Overview tab */}
@@ -1391,6 +1411,36 @@ export const OwnerInventoryManager: React.FC = () => {
                 Annualized consumption / stock
               </span>
             </Card>
+          </div>
+
+          {/* Inter-Restaurant Branch Stock Transfers Shortcut Card */}
+          <div className="bg-gradient-to-r from-white via-[#FAF8F4] to-white border border-[#D8DDD6] p-4 sm:p-5 rounded-2xl shadow-2xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="p-3 bg-[#FAF8F4] border border-[#D8DDD6] rounded-2xl text-[#D94F2B] shrink-0">
+                <ArrowLeftRight className="w-5 h-5" />
+              </div>
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-extrabold text-[#202820]">
+                    Inter-Restaurant Branch Stock Transfers
+                  </h3>
+                  <Badge className="bg-[#FAF8F4] text-[#D94F2B] border border-[#D8DDD6] text-[10px] font-extrabold px-2 py-0.5 rounded-md">
+                    Multi-Branch
+                  </Badge>
+                </div>
+                <p className="text-xs text-[#5F675F] max-w-xl">
+                  Transfer raw materials, ingredients, and kitchen stock seamlessly between your restaurant branches with full dispatch verification and audit trails.
+                </p>
+              </div>
+            </div>
+
+            <Button
+              onClick={() => navigate('/owner/branch-transfers')}
+              className="bg-[#D94F2B] hover:bg-[#C2411F] text-white text-xs font-extrabold px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-xs transition-all cursor-pointer shrink-0 self-stretch sm:self-auto justify-center"
+            >
+              <ArrowLeftRight className="w-3.5 h-3.5" />
+              <span>Open Branch Transfers</span>
+            </Button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

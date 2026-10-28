@@ -1470,6 +1470,7 @@ export const CustomerMenu: React.FC = () => {
                     {menuPromotions[0].description}
                     {menuPromotions[0].minOrderValue ? ` • Min Order: ₹${menuPromotions[0].minOrderValue}` : ''}
                     {menuPromotions[0].maxDiscountAmount ? ` • Max Discount: ₹${menuPromotions[0].maxDiscountAmount}` : ''}
+                    {menuPromotions[0].endDate ? ` • Valid till ${new Date(menuPromotions[0].endDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}${menuPromotions[0].endTime ? ` ${menuPromotions[0].endTime}` : ''}` : ''}
                   </p>
                 </div>
               </div>

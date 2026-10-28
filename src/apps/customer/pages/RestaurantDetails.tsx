@@ -12,9 +12,12 @@ import { formatPrice } from '../../../utils/format';
 import { 
   Star, MapPin, Clock, ArrowLeft, Heart, Check, 
   Phone, Compass, Calendar, Coffee, Utensils, Search, 
-  AlertCircle, ExternalLink, ChevronRight, X, ShieldAlert, Flame
+  AlertCircle, ExternalLink, ChevronRight, X, ShieldAlert, Flame,
+  Sparkles, Tag
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { IPromotion } from '../../../shared/domain/promotions/types';
+import { promotionService, isPromotionActive } from '../../../shared/services/promotionEngine';
 import TableSelectionModal, { ITableData } from '../components/TableSelectionModal';
 import { 
   generateSessionId, 
@@ -93,6 +96,7 @@ export const RestaurantDetails: React.FC = () => {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Filter & Search states
+  const [promotions, setPromotions] = useState<IPromotion[]>([]);
   const [activeTab, setActiveTab] = useState<'menu' | 'reviews' | 'info'>('menu');
   const [reviews, setReviews] = useState<ISatisfactionRatingRecord[]>([]);
   const [ratingSummary, setRatingSummary] = useState<IRestaurantRatingSummary>(() => reviewService.calculateRatingSummary([]));
@@ -365,6 +369,16 @@ export const RestaurantDetails: React.FC = () => {
     return list;
   }, [menuItems, selectedCategory, searchQuery, vegOnly, nonVegOnly, categories]);
 
+  // Subscribe to real-time promotions for this restaurant
+  useEffect(() => {
+    if (!tenantId) return;
+    const unsub = promotionService.subscribeToRestaurantPromotions(tenantId, (promos) => {
+      const active = promos.filter(p => isPromotionActive(p));
+      setPromotions(active);
+    });
+    return () => unsub();
+  }, [tenantId]);
+
   if (isLoading) {
     return <RestaurantDetailsSkeleton />;
   }
@@ -495,6 +509,56 @@ export const RestaurantDetails: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {/* 2.b. Active Promotional Banner for this Restaurant */}
+      {promotions.length > 0 && (
+        <div className="mx-2 sm:mx-4 p-3.5 sm:p-4 bg-gradient-to-r from-[#FFF8F5] via-[#FFFDFB] to-[#FFF8F5] border border-[#D94F2B]/30 rounded-2xl shadow-xs text-left">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-[#FAF8F4] border border-[#D8DDD6] flex items-center justify-center text-[#D94F2B] shrink-0">
+                <Sparkles className="w-4 h-4 animate-pulse" />
+              </div>
+              <div className="space-y-0.5">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-[#D94F2B] text-white px-2 py-0.5 rounded-md shadow-xs">
+                    {promotions[0].badgeText || (promotions[0].type === 'bogo' ? 'BUY 1 GET 1' : `${promotions[0].value}% OFF`)}
+                  </span>
+                  <span className="text-xs sm:text-sm font-extrabold text-[#202820]">
+                    {promotions[0].name}
+                  </span>
+                  {(promotions[0].code || promotions[0].couponCode) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const codeVal = promotions[0].code || promotions[0].couponCode || '';
+                        navigator.clipboard.writeText(codeVal);
+                        toast.success(`Coupon "${codeVal}" copied!`);
+                      }}
+                      className="inline-flex items-center gap-1 text-[10px] font-extrabold text-[#D94F2B] bg-white hover:bg-[#FAF8F4] px-2 py-0.5 rounded-md border border-[#D94F2B]/30 transition-all cursor-pointer active:scale-95"
+                      title="Copy promo code"
+                    >
+                      <Tag className="w-3 h-3" />
+                      <span>CODE: {promotions[0].code || promotions[0].couponCode}</span>
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-[#5F675F] line-clamp-1">
+                  {promotions[0].description}
+                  {promotions[0].minOrderValue ? ` • Min Order: ₹${promotions[0].minOrderValue}` : ''}
+                  {promotions[0].maxDiscountAmount ? ` • Max Discount: ₹${promotions[0].maxDiscountAmount}` : ''}
+                </p>
+              </div>
+            </div>
+
+            <Button
+              onClick={handleOrderNow}
+              className="bg-[#D94F2B] hover:bg-[#C2411F] text-white text-xs font-extrabold px-3 py-1.5 rounded-xl shrink-0 self-start sm:self-auto cursor-pointer"
+            >
+              Order &amp; Apply
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* 3. Section Tabs */}
       <div className="flex space-x-2 border-b border-[#EEE7E1] px-4 overflow-x-auto scrollbar-none">
