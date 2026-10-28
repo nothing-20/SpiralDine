@@ -122,31 +122,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     await ensureServerAuth();
 
-    // 2. Retrieve application document
+    // 2. Retrieve application document from authoritative collection (restaurants), with fallback to restaurantApplications
     const cleanAppId = String(applicationId).trim();
-    const appDocRef = serverDoc(serverDb, 'restaurantApplications', cleanAppId);
-    let appSnap = await serverGetDoc(appDocRef);
+    const restDocRef = serverDoc(serverDb, 'restaurants', cleanAppId);
+    let restSnap = await serverGetDoc(restDocRef);
 
-    if (!appSnap.exists()) {
-      return res.status(404).json({ error: `Application document not found for ID: ${cleanAppId}` });
+    let appData: any = {};
+    const appDocRef = serverDoc(serverDb, 'restaurantApplications', cleanAppId);
+
+    if (restSnap.exists()) {
+      appData = restSnap.data() || {};
+    } else {
+      const appSnap = await serverGetDoc(appDocRef);
+      if (appSnap.exists()) {
+        appData = appSnap.data() || {};
+      } else {
+        return res.status(404).json({ error: `Application document not found for ID: ${cleanAppId}` });
+      }
     }
 
-    const appData = appSnap.data() || {};
     const tenantId = appData.tenantId || cleanAppId;
     const ownerUid = appData.ownerUid;
-    const ownerEmail = (appData.ownerEmail || '').trim().toLowerCase();
-    const ownerName = appData.ownerName || 'Restaurant Owner';
-    const restaurantName = appData.restaurantName || 'Your Restaurant';
+    let ownerEmail = (appData.ownerEmail || '').trim().toLowerCase();
+    let ownerName = appData.ownerName || 'Restaurant Owner';
+    const restaurantName = appData.restaurantName || appData.name || 'Your Restaurant';
     const nowIso = new Date().toISOString();
+
+    // Enrich missing applicant details from users/{ownerUid} if needed
+    if ((!ownerEmail || ownerName === 'Restaurant Owner') && ownerUid) {
+      try {
+        const uSnap = await serverGetDoc(serverDoc(serverDb, 'users', ownerUid));
+        if (uSnap.exists()) {
+          const uData = uSnap.data() || {};
+          ownerEmail = ownerEmail || (uData.email || '').trim().toLowerCase();
+          ownerName = ownerName === 'Restaurant Owner' ? (uData.fullName || uData.displayName || 'Restaurant Owner') : ownerName;
+        }
+      } catch (uErr) {
+        console.warn('[review-application] User profile lookup note:', uErr);
+      }
+    }
 
     const cleanNotes = notes ? String(notes).trim() : '';
     const cleanReason = reason ? String(reason).trim() : cleanNotes;
 
     // 3. Execute State Updates Based on Action
     if (action === 'approve') {
-      // 3.1 Update restaurantApplications
-      await serverSetDoc(appDocRef, {
-        status: 'approved',
+      // 3.1 Update restaurants/{tenantId} (Authoritative)
+      await serverSetDoc(restDocRef, {
+        status: 'active',
         reviewedAt: nowIso,
         reviewedBy: adminUser.uid,
         reviewNotes: cleanNotes,
@@ -160,20 +183,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         updatedAt: nowIso
       }, { merge: true });
 
-      // 3.3 Update restaurants/{tenantId}
-      const restDocRef = serverDoc(serverDb, 'restaurants', tenantId);
-      await serverSetDoc(restDocRef, {
-        status: 'active',
-        updatedAt: nowIso
-      }, { merge: true });
-
-      // 3.4 Update users/{ownerUid}
+      // 3.3 Update users/{ownerUid}
       if (ownerUid) {
         const userDocRef = serverDoc(serverDb, 'users', ownerUid);
         await serverSetDoc(userDocRef, {
           status: 'active',
           updatedAt: nowIso
         }, { merge: true });
+      }
+
+      // 3.4 Update restaurantApplications (Safe sync)
+      try {
+        await serverSetDoc(appDocRef, {
+          status: 'approved',
+          reviewedAt: nowIso,
+          reviewedBy: adminUser.uid,
+          reviewNotes: cleanNotes,
+          updatedAt: nowIso
+        }, { merge: true });
+      } catch (appSyncErr) {
+        console.warn('[review-application] Note: appSync handled:', appSyncErr);
       }
 
       // 3.5 Dispatch Approval Email to Applicant
@@ -245,8 +274,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'reject') {
       const finalReason = cleanReason || 'Application does not meet current platform verification standards.';
 
-      // 3.1 Update restaurantApplications
-      await serverSetDoc(appDocRef, {
+      // 3.1 Update restaurants/{tenantId} (Authoritative)
+      await serverSetDoc(restDocRef, {
         status: 'rejected',
         rejectionReason: finalReason,
         reviewedAt: nowIso,
@@ -261,20 +290,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         updatedAt: nowIso
       }, { merge: true });
 
-      // 3.3 Update restaurants/{tenantId}
-      const restDocRef = serverDoc(serverDb, 'restaurants', tenantId);
-      await serverSetDoc(restDocRef, {
-        status: 'rejected',
-        updatedAt: nowIso
-      }, { merge: true });
-
-      // 3.4 Update users/{ownerUid}
+      // 3.3 Update users/{ownerUid}
       if (ownerUid) {
         const userDocRef = serverDoc(serverDb, 'users', ownerUid);
         await serverSetDoc(userDocRef, {
           status: 'rejected',
           updatedAt: nowIso
         }, { merge: true });
+      }
+
+      // 3.4 Update restaurantApplications (Safe sync)
+      try {
+        await serverSetDoc(appDocRef, {
+          status: 'rejected',
+          rejectionReason: finalReason,
+          reviewedAt: nowIso,
+          reviewedBy: adminUser.uid,
+          updatedAt: nowIso
+        }, { merge: true });
+      } catch (appSyncErr) {
+        console.warn('[review-application] Note: appSync handled on reject:', appSyncErr);
       }
 
       // 3.5 Dispatch Rejection Email
@@ -345,16 +380,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'request_info') {
       const moreInfoNotes = cleanNotes || 'Please provide additional business information to continue processing your restaurant application.';
 
-      // 3.1 Update restaurantApplications
-      await serverSetDoc(appDocRef, {
+      // 3.1 Update restaurants/{tenantId} (Authoritative)
+      await serverSetDoc(restDocRef, {
         status: 'more_info_required',
         moreInfoNotes: moreInfoNotes,
+        reviewNotes: cleanNotes,
         reviewedAt: nowIso,
         reviewedBy: adminUser.uid,
         updatedAt: nowIso
       }, { merge: true });
 
-      // 3.2 Update users/{ownerUid} status to more_info_required
+      // 3.2 Update tenants/{tenantId}
+      const tenantDocRef = serverDoc(serverDb, 'tenants', tenantId);
+      await serverSetDoc(tenantDocRef, {
+        status: 'more_info_required',
+        updatedAt: nowIso
+      }, { merge: true });
+
+      // 3.3 Update users/{ownerUid} status to more_info_required
       if (ownerUid) {
         const userDocRef = serverDoc(serverDb, 'users', ownerUid);
         await serverSetDoc(userDocRef, {
@@ -363,7 +406,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }, { merge: true });
       }
 
-      // 3.3 Dispatch More Info Email
+      // 3.4 Update restaurantApplications (Safe sync)
+      try {
+        await serverSetDoc(appDocRef, {
+          status: 'more_info_required',
+          moreInfoNotes: moreInfoNotes,
+          reviewedAt: nowIso,
+          reviewedBy: adminUser.uid,
+          updatedAt: nowIso
+        }, { merge: true });
+      } catch (appSyncErr) {
+        console.warn('[review-application] Note: appSync handled on request_info:', appSyncErr);
+      }
+
+      // 3.5 Dispatch More Info Email
       if (ownerEmail) {
         const statusUrl = 'https://spiral-dine.vercel.app/application-pending';
         const infoHtml = `

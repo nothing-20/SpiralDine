@@ -90,6 +90,8 @@ export const signUpOwner = async (
     name: restaurantName,
     restaurantName,
     ownerUid: user.uid,
+    ownerEmail: email.trim().toLowerCase(),
+    ownerName: displayName.trim(),
     logoUrl: null,
     logo: null,
     coverImageUrl: null,
@@ -127,6 +129,8 @@ export const signUpOwner = async (
     name: restaurantName,
     restaurantName,
     ownerUid: user.uid,
+    ownerEmail: email.trim().toLowerCase(),
+    ownerName: displayName.trim(),
     logoUrl: null,
     logo: null,
     coverImageUrl: null,
@@ -160,25 +164,29 @@ export const signUpOwner = async (
     createdAt: new Date().toISOString()
   });
 
-  // 4. Create restaurant registration application document for Super Admin review
-  const appRef = doc(db, 'restaurantApplications', tenantId);
-  await setDoc(appRef, {
-    id: tenantId,
-    tenantId,
-    restaurantName,
-    ownerUid: user.uid,
-    ownerEmail: email.trim().toLowerCase(),
-    ownerName: displayName.trim(),
-    country: selectedCountry,
-    currency: selectedCurrency,
-    currencyCode: selectedCurrency,
-    currencySymbol: symbol,
-    locale: selectedLocale,
-    status: 'pending_approval',
-    submittedAt: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  });
+  // 4. Synchronize restaurant registration application document (safe write)
+  try {
+    const appRef = doc(db, 'restaurantApplications', tenantId);
+    await setDoc(appRef, {
+      id: tenantId,
+      tenantId,
+      restaurantName,
+      ownerUid: user.uid,
+      ownerEmail: email.trim().toLowerCase(),
+      ownerName: displayName.trim(),
+      country: selectedCountry,
+      currency: selectedCurrency,
+      currencyCode: selectedCurrency,
+      currencySymbol: symbol,
+      locale: selectedLocale,
+      status: 'pending_approval',
+      submittedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+  } catch (appErr) {
+    console.warn('[AUTH signUpOwner] Note: restaurantApplications sync handled:', appErr);
+  }
 
   // 5. Trigger asynchronous administrator notification (non-blocking)
   try {

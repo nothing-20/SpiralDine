@@ -7,7 +7,8 @@ import {
   orderBy, 
   doc, 
   setDoc,
-  getDocs
+  getDocs,
+  getDoc
 } from 'firebase/firestore';
 import { auth, db } from '../../../shared/firebase/config';
 import { useAuth } from '../../../context/AuthContext';
@@ -40,6 +41,8 @@ export const SuperAdminApplications: React.FC = () => {
 
   const [applications, setApplications] = useState<IRestaurantApplication[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [listenerError, setListenerError] = useState<string | null>(null);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeTab, setActiveTab] = useState<'pending' | 'approved' | 'rejected' | 'more_info' | 'all'>('pending');
 
@@ -50,45 +53,104 @@ export const SuperAdminApplications: React.FC = () => {
   const [rejectionReason, setRejectionReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Subscribe to real-time restaurantApplications collection
+  // Subscribe to authoritative real-time restaurants collection
   useEffect(() => {
     setIsLoading(true);
-    const colRef = collection(db, 'restaurantApplications');
+    setListenerError(null);
+
+    const restColRef = collection(db, 'restaurants');
     
-    const unsub = onSnapshot(colRef, (snapshot) => {
-      const list: IRestaurantApplication[] = [];
-      snapshot.forEach((docSnap) => {
-        list.push({ id: docSnap.id, ...docSnap.data() } as IRestaurantApplication);
-      });
+    const unsub = onSnapshot(restColRef, async (snapshot) => {
+      try {
+        const rawList: any[] = [];
+        snapshot.forEach((docSnap) => {
+          rawList.push({ id: docSnap.id, ...docSnap.data() });
+        });
 
-      // Sort newest first
-      list.sort((a, b) => {
-        const timeA = new Date(a.submittedAt || a.createdAt || 0).getTime();
-        const timeB = new Date(b.submittedAt || b.createdAt || 0).getTime();
-        return timeB - timeA;
-      });
+        // Enrich applicant details from users/{ownerUid} if missing
+        const enrichedList: IRestaurantApplication[] = await Promise.all(rawList.map(async (r) => {
+          let ownerEmail = r.ownerEmail || '';
+          let ownerName = r.ownerName || '';
 
-      setApplications(list);
-      setIsLoading(false);
+          if ((!ownerEmail || !ownerName) && r.ownerUid) {
+            try {
+              const uSnap = await getDoc(doc(db, 'users', r.ownerUid));
+              if (uSnap.exists()) {
+                const u = uSnap.data();
+                ownerEmail = ownerEmail || u.email || '';
+                ownerName = ownerName || u.fullName || u.displayName || '';
+              }
+            } catch (_uErr) {
+              // fallback gracefully
+            }
+          }
 
-      // Auto-open modal if query param is set
-      if (highlightedAppId) {
-        const found = list.find(a => a.id === highlightedAppId || a.tenantId === highlightedAppId);
-        if (found) {
-          setSelectedApp(found);
+          const rawStatus = r.status;
+          const normalizedStatus: TApplicationStatus = 
+            rawStatus === 'pending_approval' ? 'pending_approval' :
+            rawStatus === 'rejected' ? 'rejected' :
+            rawStatus === 'more_info_required' ? 'more_info_required' :
+            'approved';
+
+          return {
+            id: r.id,
+            tenantId: r.tenantId || r.id,
+            restaurantName: r.restaurantName || r.name || 'Unnamed Restaurant',
+            ownerUid: r.ownerUid || '',
+            ownerEmail,
+            ownerName: ownerName || 'Restaurant Owner',
+            country: r.country || 'Global',
+            currency: r.currency || 'USD',
+            currencyCode: r.currencyCode || r.currency || 'USD',
+            currencySymbol: r.currencySymbol || '$',
+            locale: r.locale || 'en-US',
+            status: normalizedStatus,
+            submittedAt: r.submittedAt || r.createdAt || new Date().toISOString(),
+            createdAt: r.createdAt || new Date().toISOString(),
+            updatedAt: r.updatedAt || r.createdAt || new Date().toISOString(),
+            reviewedAt: r.reviewedAt,
+            reviewedBy: r.reviewedBy,
+            reviewNotes: r.reviewNotes,
+            rejectionReason: r.rejectionReason,
+            moreInfoNotes: r.moreInfoNotes
+          };
+        }));
+
+        // Sort newest first
+        enrichedList.sort((a, b) => {
+          const timeA = new Date(a.submittedAt || a.createdAt || 0).getTime();
+          const timeB = new Date(b.submittedAt || b.createdAt || 0).getTime();
+          return timeB - timeA;
+        });
+
+        setApplications(enrichedList);
+        setListenerError(null);
+        setIsLoading(false);
+
+        // Auto-open modal if query param is set
+        if (highlightedAppId) {
+          const found = enrichedList.find(a => a.id === highlightedAppId || a.tenantId === highlightedAppId);
+          if (found) {
+            setSelectedApp(found);
+          }
         }
+      } catch (procErr: any) {
+        console.error('[SuperAdminApplications] Processing error:', procErr);
+        setListenerError(procErr.message || 'Failed to process application records');
+        setIsLoading(false);
       }
     }, (err) => {
       console.error('[SuperAdminApplications] Listener error:', err);
+      setListenerError(err.message || 'Permission denied or network connection failed.');
       setIsLoading(false);
     });
 
     return () => unsub();
-  }, [highlightedAppId]);
+  }, [highlightedAppId, refreshTrigger]);
 
   // Tab filtering
   const counts = {
-    pending: applications.filter(a => a.status === 'pending_approval' || !a.status).length,
+    pending: applications.filter(a => a.status === 'pending_approval').length,
     approved: applications.filter(a => a.status === 'approved').length,
     rejected: applications.filter(a => a.status === 'rejected').length,
     more_info: applications.filter(a => a.status === 'more_info_required').length,
@@ -97,7 +159,7 @@ export const SuperAdminApplications: React.FC = () => {
 
   const filtered = applications.filter((app) => {
     // Status filter
-    if (activeTab === 'pending' && app.status && app.status !== 'pending_approval') return false;
+    if (activeTab === 'pending' && app.status !== 'pending_approval') return false;
     if (activeTab === 'approved' && app.status !== 'approved') return false;
     if (activeTab === 'rejected' && app.status !== 'rejected') return false;
     if (activeTab === 'more_info' && app.status !== 'more_info_required') return false;
@@ -198,9 +260,12 @@ export const SuperAdminApplications: React.FC = () => {
             ? 'rejected' 
             : 'more_info_required';
 
-        // 1. Update application doc
-        await setDoc(doc(db, 'restaurantApplications', selectedApp.id), {
-          status: targetStatus,
+        const restaurantStatus = reviewAction === 'approve' ? 'active' : reviewAction === 'reject' ? 'rejected' : 'more_info_required';
+        const tenantStatus = reviewAction === 'approve' ? 'active' : reviewAction === 'reject' ? 'rejected' : 'more_info_required';
+
+        // 1. Update restaurant doc (Authoritative)
+        await setDoc(doc(db, 'restaurants', selectedApp.tenantId), {
+          status: restaurantStatus,
           reviewedAt: nowIso,
           reviewedBy: user?.uid || 'super-admin',
           reviewNotes: reviewNotes.trim(),
@@ -210,24 +275,32 @@ export const SuperAdminApplications: React.FC = () => {
         }, { merge: true });
 
         // 2. Update tenant doc
-        const tenantStatus = reviewAction === 'approve' ? 'active' : reviewAction === 'reject' ? 'rejected' : 'pending_approval';
         await setDoc(doc(db, 'tenants', selectedApp.tenantId), {
           status: tenantStatus,
           updatedAt: nowIso
         }, { merge: true });
 
-        // 3. Update restaurant doc
-        await setDoc(doc(db, 'restaurants', selectedApp.tenantId), {
-          status: tenantStatus,
-          updatedAt: nowIso
-        }, { merge: true });
-
-        // 4. Update user doc
+        // 3. Update user doc
         if (selectedApp.ownerUid) {
           await setDoc(doc(db, 'users', selectedApp.ownerUid), {
             status: tenantStatus,
             updatedAt: nowIso
           }, { merge: true });
+        }
+
+        // 4. Safe sync to restaurantApplications doc
+        try {
+          await setDoc(doc(db, 'restaurantApplications', selectedApp.id), {
+            status: targetStatus,
+            reviewedAt: nowIso,
+            reviewedBy: user?.uid || 'super-admin',
+            reviewNotes: reviewNotes.trim(),
+            rejectionReason: reviewAction === 'reject' ? rejectionReason.trim() : null,
+            moreInfoNotes: reviewAction === 'request_info' ? reviewNotes.trim() : null,
+            updatedAt: nowIso
+          }, { merge: true });
+        } catch (_syncErr) {
+          console.warn('[SuperAdminApplications] Note: direct app sync handled:', _syncErr);
         }
 
         toast.dismiss(loadingToast);
@@ -262,7 +335,7 @@ export const SuperAdminApplications: React.FC = () => {
           </div>
         </div>
 
-        {/* Counter Pill */}
+        {/* Actions & Counter Pill */}
         <div className="flex items-center space-x-2">
           {counts.pending > 0 && (
             <div className="flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold animate-pulse">
@@ -270,8 +343,36 @@ export const SuperAdminApplications: React.FC = () => {
               <span>{counts.pending} Application{counts.pending === 1 ? '' : 's'} Pending Review</span>
             </div>
           )}
+
+          <button
+            onClick={() => setRefreshTrigger(prev => prev + 1)}
+            disabled={isLoading}
+            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center space-x-1.5 disabled:opacity-50"
+            title="Refresh applications from database"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
         </div>
       </div>
+
+      {/* Query Error Alert */}
+      {listenerError && (
+        <div className="p-4 sm:p-5 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-start space-x-3.5 text-rose-300">
+          <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <h3 className="text-sm font-bold text-white">Database Query Problem</h3>
+            <p className="text-xs text-rose-300/80 mt-1">{listenerError}</p>
+            <button
+              onClick={() => setRefreshTrigger(prev => prev + 1)}
+              className="mt-3 px-3.5 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 rounded-xl text-xs font-bold transition-colors inline-flex items-center space-x-1.5"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Retry Query</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Tabs & Search Filter Bar */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#0A0F17] p-3 rounded-2xl border border-slate-800">

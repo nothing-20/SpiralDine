@@ -41,17 +41,39 @@ export const ApplicationPendingPage: React.FC = () => {
 
     const setupListener = async () => {
       try {
-        // Resolve application document (id is either tenantId or app_${tenantId})
         const candidateId = tenantId || ownerUid;
-        const appRef = doc(db, 'restaurantApplications', candidateId);
         
-        unsubApp = onSnapshot(appRef, (snap) => {
+        // Listen to authoritative restaurants collection
+        const restRef = doc(db, 'restaurants', candidateId);
+        unsubApp = onSnapshot(restRef, (snap) => {
           if (snap.exists()) {
-            const data = snap.data() as IRestaurantApplication;
-            setApplication(data);
+            const data = snap.data();
+            const normalizedStatus: TApplicationStatus = 
+              (data.status === 'active' || data.status === 'approved') ? 'approved' :
+              data.status === 'rejected' ? 'rejected' :
+              data.status === 'more_info_required' ? 'more_info_required' :
+              'pending_approval';
+
+            setApplication({
+              id: candidateId,
+              tenantId: data.tenantId || candidateId,
+              restaurantName: data.restaurantName || data.name || 'Your Restaurant',
+              ownerUid: data.ownerUid || ownerUid,
+              ownerEmail: data.ownerEmail || auth.currentUser?.email || '',
+              ownerName: data.ownerName || data.name || 'Restaurant Owner',
+              country: data.country || 'Global',
+              currency: data.currency || 'USD',
+              status: normalizedStatus,
+              submittedAt: data.createdAt || new Date().toISOString(),
+              createdAt: data.createdAt || new Date().toISOString(),
+              updatedAt: data.updatedAt || data.createdAt || new Date().toISOString(),
+              reviewNotes: data.reviewNotes,
+              rejectionReason: data.rejectionReason,
+              moreInfoNotes: data.moreInfoNotes
+            });
             setIsLoading(false);
 
-            if (data.status === 'approved') {
+            if (normalizedStatus === 'approved') {
               toast.success('Your restaurant application has been approved! You now have full owner access.', {
                 duration: 6000
               });
@@ -62,6 +84,12 @@ export const ApplicationPendingPage: React.FC = () => {
             getDoc(userRef).then((uSnap) => {
               if (uSnap.exists()) {
                 const uData = uSnap.data();
+                const uStatus: TApplicationStatus = 
+                  (uData.status === 'active' || uData.status === 'approved') ? 'approved' :
+                  uData.status === 'rejected' ? 'rejected' :
+                  uData.status === 'more_info_required' ? 'more_info_required' :
+                  'pending_approval';
+
                 setApplication({
                   id: candidateId,
                   tenantId: uData.tenantId || candidateId,
@@ -71,7 +99,7 @@ export const ApplicationPendingPage: React.FC = () => {
                   ownerName: uData.fullName || uData.displayName || '',
                   country: uData.country || 'Global',
                   currency: uData.currency || 'USD',
-                  status: (uData.status as TApplicationStatus) || 'pending_approval',
+                  status: uStatus,
                   submittedAt: uData.createdAt || new Date().toISOString(),
                   createdAt: uData.createdAt || new Date().toISOString(),
                   updatedAt: uData.createdAt || new Date().toISOString()
@@ -81,8 +109,36 @@ export const ApplicationPendingPage: React.FC = () => {
             }).catch(() => setIsLoading(false));
           }
         }, (err) => {
-          console.warn('[ApplicationPendingPage] Listener error:', err);
-          setIsLoading(false);
+          console.warn('[ApplicationPendingPage] Restaurants listener note, attempting users fallback:', err);
+          
+          // Fallback to users/{uid}
+          const userRef = doc(db, 'users', ownerUid);
+          getDoc(userRef).then((uSnap) => {
+            if (uSnap.exists()) {
+              const uData = uSnap.data();
+              const uStatus: TApplicationStatus = 
+                (uData.status === 'active' || uData.status === 'approved') ? 'approved' :
+                uData.status === 'rejected' ? 'rejected' :
+                uData.status === 'more_info_required' ? 'more_info_required' :
+                'pending_approval';
+
+              setApplication({
+                id: candidateId,
+                tenantId: uData.tenantId || candidateId,
+                restaurantName: uData.restaurantName || uData.displayName || 'Your Restaurant',
+                ownerUid: ownerUid,
+                ownerEmail: uData.email || auth.currentUser?.email || '',
+                ownerName: uData.fullName || uData.displayName || '',
+                country: uData.country || 'Global',
+                currency: uData.currency || 'USD',
+                status: uStatus,
+                submittedAt: uData.createdAt || new Date().toISOString(),
+                createdAt: uData.createdAt || new Date().toISOString(),
+                updatedAt: uData.createdAt || new Date().toISOString()
+              });
+            }
+            setIsLoading(false);
+          }).catch(() => setIsLoading(false));
         });
       } catch (err) {
         console.warn('[ApplicationPendingPage] Setup error:', err);
@@ -105,9 +161,32 @@ export const ApplicationPendingPage: React.FC = () => {
       }
       const candidateId = tenantId || ownerUid || '';
       if (candidateId) {
-        const snap = await getDoc(doc(db, 'restaurantApplications', candidateId));
-        if (snap.exists()) {
-          setApplication(snap.data() as IRestaurantApplication);
+        const restSnap = await getDoc(doc(db, 'restaurants', candidateId));
+        if (restSnap.exists()) {
+          const rData = restSnap.data();
+          const normalizedStatus: TApplicationStatus = 
+            (rData.status === 'active' || rData.status === 'approved') ? 'approved' :
+            rData.status === 'rejected' ? 'rejected' :
+            rData.status === 'more_info_required' ? 'more_info_required' :
+            'pending_approval';
+
+          setApplication({
+            id: candidateId,
+            tenantId: rData.tenantId || candidateId,
+            restaurantName: rData.restaurantName || rData.name || 'Your Restaurant',
+            ownerUid: rData.ownerUid || ownerUid,
+            ownerEmail: rData.ownerEmail || auth.currentUser?.email || '',
+            ownerName: rData.ownerName || rData.name || 'Restaurant Owner',
+            country: rData.country || 'Global',
+            currency: rData.currency || 'USD',
+            status: normalizedStatus,
+            submittedAt: rData.createdAt || new Date().toISOString(),
+            createdAt: rData.createdAt || new Date().toISOString(),
+            updatedAt: rData.updatedAt || rData.createdAt || new Date().toISOString(),
+            reviewNotes: rData.reviewNotes,
+            rejectionReason: rData.rejectionReason,
+            moreInfoNotes: rData.moreInfoNotes
+          });
         }
       }
       toast.success('Application status refreshed');

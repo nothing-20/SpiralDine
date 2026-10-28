@@ -55,11 +55,11 @@ export const SuperAdminLayout: React.FC = () => {
   const [pendingAppsCount, setPendingAppsCount] = useState<number>(0);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'restaurantApplications'), (snap) => {
+    const unsub = onSnapshot(collection(db, 'restaurants'), (snap) => {
       let count = 0;
       snap.forEach((d) => {
         const data = d.data();
-        if (data.status === 'pending_approval' || !data.status) {
+        if (data.status === 'pending_approval') {
           count++;
         }
       });
