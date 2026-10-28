@@ -16,7 +16,10 @@ import {
   ApplicationVerifier,
   linkWithPhoneNumber,
   linkWithCredential,
-  EmailAuthProvider
+  EmailAuthProvider,
+  ActionCodeSettings,
+  verifyPasswordResetCode as firebaseVerifyPasswordResetCode,
+  confirmPasswordReset as firebaseConfirmPasswordReset
 } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from './config';
@@ -264,8 +267,27 @@ export const signUpCustomer = async (
   return userCredential;
 };
 
-export const resetPassword = async (email: string): Promise<void> => {
-  return sendPasswordResetEmail(auth, email);
+export const getResetActionCodeSettings = (): ActionCodeSettings => {
+  const origin = typeof window !== 'undefined' && window.location.origin
+    ? window.location.origin
+    : 'https://spiral-dine.vercel.app';
+  return {
+    url: `${origin}/reset-password`,
+    handleCodeInApp: true,
+  };
+};
+
+export const resetPassword = async (email: string, actionCodeSettings?: ActionCodeSettings): Promise<void> => {
+  const settings = actionCodeSettings || getResetActionCodeSettings();
+  return sendPasswordResetEmail(auth, email, settings);
+};
+
+export const verifyPasswordResetCode = async (actionCode: string): Promise<string> => {
+  return firebaseVerifyPasswordResetCode(auth, actionCode);
+};
+
+export const confirmPasswordReset = async (actionCode: string, newPassword: string): Promise<void> => {
+  return firebaseConfirmPasswordReset(auth, actionCode, newPassword);
 };
 
 export const signOut = async (): Promise<void> => {

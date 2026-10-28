@@ -7,6 +7,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../../config/firebase';
+import { getResetActionCodeSettings } from '../../../shared/firebase/auth';
 import { useAuth } from '../../../context/AuthContext';
 import { 
   ShieldCheck, 
@@ -133,7 +134,7 @@ export const SuperAdminLogin: React.FC = () => {
 
     setResetStatus('loading');
     try {
-      await sendPasswordResetEmail(auth, cleanEmail);
+      await sendPasswordResetEmail(auth, cleanEmail, getResetActionCodeSettings());
       setResetStatus('success');
       setResetMessage('Password reset instructions have been dispatched to your email.');
       toast.success('Reset email sent.');

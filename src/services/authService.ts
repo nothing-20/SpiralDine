@@ -1,4 +1,4 @@
-import { User, UserCredential, ConfirmationResult, ApplicationVerifier, RecaptchaVerifier } from 'firebase/auth';
+import { User, UserCredential, ConfirmationResult, ApplicationVerifier, RecaptchaVerifier, ActionCodeSettings } from 'firebase/auth';
 import { TUserRole } from '../types';
 import * as firebaseAuth from '../firebase/auth';
 
@@ -28,8 +28,16 @@ export const authService = {
     return firebaseAuth.signUpCustomer(email, password, fullName, phoneNumber);
   },
 
-  async resetPassword(email: string): Promise<void> {
-    return firebaseAuth.resetPassword(email);
+  async resetPassword(email: string, actionCodeSettings?: ActionCodeSettings): Promise<void> {
+    return firebaseAuth.resetPassword(email, actionCodeSettings);
+  },
+
+  async verifyPasswordResetCode(actionCode: string): Promise<string> {
+    return firebaseAuth.verifyPasswordResetCode(actionCode);
+  },
+
+  async confirmPasswordReset(actionCode: string, newPassword: string): Promise<void> {
+    return firebaseAuth.confirmPasswordReset(actionCode, newPassword);
   },
 
   async signOutUser(): Promise<void> {

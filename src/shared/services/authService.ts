@@ -1,4 +1,4 @@
-import { User, UserCredential } from 'firebase/auth';
+import { User, UserCredential, ActionCodeSettings } from 'firebase/auth';
 import { TUserRole } from '../types';
 import * as firebaseAuth from '../firebase/auth';
 
@@ -75,8 +75,29 @@ export const authService = {
    * @param email - The email address to reset the password for.
    * @returns A promise that resolves when the reset email is sent.
    */
-  async resetPassword(email: string): Promise<void> {
-    return firebaseAuth.resetPassword(email);
+  async resetPassword(email: string, actionCodeSettings?: ActionCodeSettings): Promise<void> {
+    return firebaseAuth.resetPassword(email, actionCodeSettings);
+  },
+
+  /**
+   * Verifies a password reset oobCode and retrieves the associated email.
+   * 
+   * @param actionCode - The oobCode from the reset link.
+   * @returns A promise resolving to the user's email address.
+   */
+  async verifyPasswordResetCode(actionCode: string): Promise<string> {
+    return firebaseAuth.verifyPasswordResetCode(actionCode);
+  },
+
+  /**
+   * Confirms a password reset with the valid oobCode and new password.
+   * 
+   * @param actionCode - The oobCode from the reset link.
+   * @param newPassword - The new password.
+   * @returns A promise that resolves when the password is confirmed.
+   */
+  async confirmPasswordReset(actionCode: string, newPassword: string): Promise<void> {
+    return firebaseAuth.confirmPasswordReset(actionCode, newPassword);
   },
 
   /**

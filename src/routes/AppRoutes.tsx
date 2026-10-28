@@ -37,6 +37,7 @@ const WorkspaceError = React.lazy(() => import('../features/auth/components/Work
 const ApplicationPendingPage = React.lazy(() => import('../features/auth/components/ApplicationPendingPage'));
 const RegisterForm = React.lazy(() => import('../features/auth/components/RegisterForm'));
 const ForgotPasswordForm = React.lazy(() => import('../features/auth/components/ForgotPasswordForm'));
+const ResetPasswordPage = React.lazy(() => import('../features/auth/components/ResetPasswordPage'));
 const VerifyEmail = React.lazy(() => import('../features/auth/components/VerifyEmail'));
 const SessionExpired = React.lazy(() => import('../features/auth/components/SessionExpired'));
 const Maintenance = React.lazy(() => import('../features/auth/components/Maintenance'));
@@ -265,9 +266,15 @@ const NotFound: React.FC = () => (
 
 export const AppRoutes: React.FC = () => {
   const { profileError, logout } = useAuth();
-  const isActivatingStaff = typeof window !== 'undefined' && window.location.pathname.startsWith('/staff/activate');
+  const isAuthAction = typeof window !== 'undefined' && (
+    window.location.pathname.startsWith('/staff/activate') ||
+    window.location.pathname.startsWith('/reset-password') ||
+    window.location.pathname.startsWith('/auth/action') ||
+    window.location.pathname.startsWith('/__/auth/action') ||
+    window.location.pathname.startsWith('/forgot-password')
+  );
 
-  if (profileError && !isActivatingStaff) {
+  if (profileError && !isAuthAction) {
     return <ProfileErrorScreen message={profileError} onLogout={logout} />;
   }
 
@@ -309,6 +316,11 @@ export const AppRoutes: React.FC = () => {
         <Route path="/customer/register" element={<CustomerRegister />} />
         {/* Staff activation — public, no auth guard needed (employee activates before they have an account) */}
         <Route path="/staff/activate" element={<StaffActivate />} />
+        
+        {/* Custom Password Reset & Firebase Action Handlers (Accessible whether authenticated or unauthenticated) */}
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/auth/action" element={<ResetPasswordPage />} />
+        <Route path="/__/auth/action" element={<ResetPasswordPage />} />
         
         {/* Customer routes with layout */}
         <Route element={<CustomerLayout />}>
