@@ -196,7 +196,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const cleanCountry = country ? String(country).trim() : 'Global';
       const cleanCurrency = currency ? String(currency).trim() : 'USD';
 
-      const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || 'admin@spiraldine.com';
+      const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || 'kumbhageethakrishna143@gmail.com';
       const portalUrl = `https://spiral-dine.vercel.app/super-admin/applications?id=${encodeURIComponent(cleanAppId)}`;
 
       const subject = `[New Restaurant Application] ${cleanRestName} (Pending Approval)`;

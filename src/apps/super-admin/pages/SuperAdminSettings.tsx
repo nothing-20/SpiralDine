@@ -10,7 +10,7 @@ export const SuperAdminSettings: React.FC = () => {
     requireEmailVerification: true,
     maxTablesPerTenant: 150,
     platformGstPercent: 5,
-    supportNotificationEmail: 'support@spiraldine.com'
+    supportNotificationEmail: 'kumbhageethakrishna143@gmail.com'
   });
   const [saving, setSaving] = useState(false);
 

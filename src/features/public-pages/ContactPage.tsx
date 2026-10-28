@@ -90,17 +90,17 @@ export const ContactPage: React.FC = () => {
         // Backend service is unconfigured or unavailable
         setStatus('unavailable');
         setStatusMessage(
-          'Contact form submission is currently unavailable. Please reach out directly to our configured support email: support@restaurantos.com'
+          'Contact form submission is currently unavailable. Please reach out directly to our configured support email: kumbhageethakrishna143@gmail.com'
         );
       } else {
         setStatus('error');
-        setStatusMessage(data.error || 'Failed to submit form. Please try again or email support@restaurantos.com');
+        setStatusMessage(data.error || 'Failed to submit form. Please try again or email kumbhageethakrishna143@gmail.com');
       }
     } catch (err: any) {
       console.warn('[ContactPage] Submission error:', err);
       setStatus('unavailable');
       setStatusMessage(
-        'Contact form submission is currently unavailable. Please reach out directly to our configured support email: support@restaurantos.com'
+        'Contact form submission is currently unavailable. Please reach out directly to our configured support email: kumbhageethakrishna143@gmail.com'
       );
     }
   };
@@ -151,8 +151,8 @@ export const ContactPage: React.FC = () => {
                       Official Support Email
                     </span>
                     <p className="text-xs font-bold text-[#17202A] mt-0.5">
-                      <a href="mailto:support@restaurantos.com" className="hover:text-[#D65336] transition-colors">
-                        support@restaurantos.com
+                      <a href="mailto:kumbhageethakrishna143@gmail.com" className="hover:text-[#D65336] transition-colors">
+                        kumbhageethakrishna143@gmail.com
                       </a>
                     </p>
                   </div>
@@ -240,8 +240,8 @@ export const ContactPage: React.FC = () => {
                     <p className="font-semibold">{statusMessage}</p>
                     <p className="text-[11px] text-red-600">
                       You can send your details directly via email to{' '}
-                      <a href="mailto:support@restaurantos.com" className="font-bold underline">
-                        support@restaurantos.com
+                      <a href="mailto:kumbhageethakrishna143@gmail.com" className="font-bold underline">
+                        kumbhageethakrishna143@gmail.com
                       </a>
                       .
                     </p>

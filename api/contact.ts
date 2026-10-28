@@ -27,13 +27,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       status: 'pending',
     };
 
+    const supportEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || process.env.ADMIN_NOTIFICATION_EMAIL || 'kumbhageethakrishna143@gmail.com';
+
     const apiKey = process.env.RESEND_API_KEY;
     if (!apiKey) {
       // Per instructions: Do not pretend message was sent if backend email service is unconfigured
       return res.status(503).json({
         success: false,
         error: 'Contact email dispatch is currently unavailable on the server.',
-        fallbackEmail: 'support@restaurantos.com',
+        fallbackEmail: supportEmail,
       });
     }
 
@@ -55,7 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const response = await resend.emails.send({
       from: 'Spiral Dine <onboarding@resend.dev>',
-      to: ['support@restaurantos.com'],
+      to: [supportEmail],
       subject: `[SpiralDine Contact] ${submissionData.subject} - ${submissionData.restaurantName || submissionData.name}`,
       html: emailHtml,
     });
@@ -64,7 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(502).json({
         success: false,
         error: response.error.message || 'Failed to deliver message.',
-        fallbackEmail: 'support@restaurantos.com',
+        fallbackEmail: supportEmail,
       });
     }
 
@@ -75,10 +77,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (err: any) {
     console.error('[Vercel API /contact] Error processing request:', err);
+    const fallbackSupportEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || process.env.ADMIN_NOTIFICATION_EMAIL || 'kumbhageethakrishna143@gmail.com';
     return res.status(500).json({
       success: false,
       error: 'An internal server error occurred while processing your request.',
-      fallbackEmail: 'support@restaurantos.com',
+      fallbackEmail: fallbackSupportEmail,
     });
   }
 }

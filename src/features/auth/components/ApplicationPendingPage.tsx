@@ -337,7 +337,7 @@ export const ApplicationPendingPage: React.FC = () => {
                     {application?.moreInfoNotes || 'Please contact our onboarding team to provide additional verification documents for your restaurant registration.'}
                   </div>
                   <div className="text-xs text-blue-700">
-                    Please reply to the notification email or write to <a href="mailto:support@spiraldine.com" className="underline font-bold">support@spiraldine.com</a> with the requested details.
+                    Please reply to the notification email or write to <a href="mailto:kumbhageethakrishna143@gmail.com" className="underline font-bold">kumbhageethakrishna143@gmail.com</a> with the requested details.
                   </div>
                 </div>
               )}
@@ -351,7 +351,7 @@ export const ApplicationPendingPage: React.FC = () => {
                     {application?.rejectionReason || 'The application did not satisfy our restaurant verification criteria or contained incomplete business details.'}
                   </div>
                   <div className="text-xs text-rose-700">
-                    If you believe this was an error or wish to appeal, please contact <a href="mailto:support@spiraldine.com" className="underline font-bold">support@spiraldine.com</a>.
+                    If you believe this was an error or wish to appeal, please contact <a href="mailto:kumbhageethakrishna143@gmail.com" className="underline font-bold">kumbhageethakrishna143@gmail.com</a>.
                   </div>
                 </div>
               )}
@@ -364,7 +364,7 @@ export const ApplicationPendingPage: React.FC = () => {
                 </div>
                 <div className="flex items-center space-x-4">
                   <a 
-                    href="mailto:support@spiraldine.com" 
+                    href="mailto:kumbhageethakrishna143@gmail.com" 
                     className="font-bold text-[#C97A52] hover:underline"
                   >
                     Contact Onboarding Support

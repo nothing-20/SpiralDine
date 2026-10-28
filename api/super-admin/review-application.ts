@@ -313,7 +313,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   ${finalReason}
                 </div>
                 <p style="font-size: 13px; color: #64748B; line-height: 1.5;">
-                  If you have questions or believe this decision was made in error, please contact our onboarding support team at <a href="mailto:support@spiraldine.com" style="color: #C97A52; font-weight: 700;">support@spiraldine.com</a>.
+                  If you have questions or believe this decision was made in error, please contact our onboarding support team at <a href="mailto:kumbhageethakrishna143@gmail.com" style="color: #C97A52; font-weight: 700;">kumbhageethakrishna143@gmail.com</a>.
                 </p>
               </div>
               <div class="footer">
