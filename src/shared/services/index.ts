@@ -18,3 +18,5 @@ export * from './customerService';
 export * from './recommendationEngine';
 export * from './restaurantService';
 export * from './reservationService';
+
+export * from './alertService';

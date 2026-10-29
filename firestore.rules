@@ -434,6 +434,12 @@ service cloud.firestore {
         allow update, delete: if isTenantStaff(tenantId);
       }
 
+      // Operational Alerts & Incident Warnings subcollection
+      match /alerts/{alertId} {
+        allow read: if isTenantStaff(tenantId) || isSuperAdmin();
+        allow create, update, delete: if isTenantStaff(tenantId) || isSuperAdmin();
+      }
+
       // Canonical Bills - strictly isolated by tenant, branch, staff role and authentic order verification
       match /bills/{billId} {
         // Staff can get bills in their tenant/branch; Authentic owner (customer or authenticated guest) can get their own bill
