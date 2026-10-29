@@ -512,7 +512,15 @@ export const OwnerRestaurants: React.FC = () => {
         restaurantName: targetRestaurantForManager.name,
         module: 'Restaurants',
         action: 'UPDATE',
-        targetEntity: `Assigned Branch Manager: ${updatePayload.managerName || 'Unassigned'}`
+        targetEntity: `Assigned Branch Manager: ${updatePayload.managerName || 'Unassigned'}`,
+        previousValue: {
+          managerId: targetRestaurantForManager.managerId || null,
+          managerName: targetRestaurantForManager.managerName || 'Unassigned'
+        },
+        newValue: {
+          managerId: updatePayload.managerId || null,
+          managerName: updatePayload.managerName || 'Unassigned'
+        }
       });
 
       setRestaurants(prev => prev.map(r => 
