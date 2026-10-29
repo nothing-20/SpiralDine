@@ -158,12 +158,29 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     return Math.round(val / gridSize) * gridSize;
   }, [gridSnap, gridSize]);
 
-  // ── Mouse Wheel Zoom ──
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-    setZoom((prev) => Math.min(Math.max(prev * zoomFactor, 0.4), 2.5));
-  };
+    // ── Mouse Wheel & Webpage Scroll Interaction ──
+  // Default behavior: Standard mouse-wheel scrolling bubbles naturally to allow normal vertical webpage scrolling.
+  // Intentional canvas zoom occurs ONLY if the user explicitly holds Ctrl (or Cmd on macOS / pinch-to-zoom on trackpad).
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        // Explicit modifier zoom: prevent browser whole-page zoom and zoom the canvas
+        e.preventDefault();
+        const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+        setZoom((prev) => Math.min(Math.max(prev * zoomFactor, 0.4), 2.5));
+      }
+      // When Ctrl/Cmd is NOT held: do NOT call preventDefault(), do NOT change canvas zoom.
+      // The wheel event propagates naturally, enabling standard vertical scrolling of the webpage.
+    };
+
+    container.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      container.removeEventListener('wheel', onWheel);
+    };
+  }, []);
 
   // ── Fit to Screen ──
   const handleFitToScreen = () => {
@@ -868,7 +885,6 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   return (
     <div 
       ref={containerRef}
-      onWheel={handleWheel}
       onMouseDown={handleMouseDownBackground}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
@@ -933,7 +949,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
       </svg>
 
       {/* ── Floating Canvas Control Bar (Zoom, Fit, Reset) — positioned bottom-left to prevent occlusion by drawer ── */}
-      <div className="absolute bottom-4 left-4 sm:left-6 flex items-center space-x-1.5 bg-white/95 backdrop-blur-md border border-[#D8DDD6] shadow-md rounded-2xl p-1.5 z-20">
+      <div className="absolute bottom-4 right-4 flex items-center space-x-1.5 bg-white/95 backdrop-blur-md border border-[#D8DDD6] shadow-md rounded-2xl p-1.5 z-20">
         <button
           type="button"
           onClick={() => setZoom(z => Math.min(z + 0.15, 2.5))}
@@ -942,7 +958,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         >
           <ZoomIn className="w-4 h-4" />
         </button>
-        <span className="text-xs font-mono font-bold text-[#5F675F] px-1 select-none">
+        <span title="Zoom Scale (Use buttons or Ctrl + Scroll to zoom)" className="text-xs font-mono font-bold text-[#5F675F] px-1 select-none cursor-default">
           {Math.round(zoom * 100)}%
         </span>
         <button

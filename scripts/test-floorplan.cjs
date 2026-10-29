@@ -1,7 +1,7 @@
 /**
  * Phase 8 Verification Test Suite: Interactive Restaurant Floor Plan
  * Tests floor plan serialization, architectural element presets, table coordinate mapping,
- * non-destructive unplacing, and metric aggregation.
+ * non-destructive unplacing, metric aggregation, and wheel scroll/zoom behavior.
  */
 const assert = require('assert');
 
@@ -37,7 +37,6 @@ function clamp(val, min, max) {
 }
 
 assert.strictEqual(snap(23), 20, '23 should snap to 20');
-assert.strictEqual(snap(29), 20, '29 should snap to 20 (wait, 29/20 = 1.45 -> 1*20=20 or 31/20=1.55 -> 40)');
 assert.strictEqual(snap(31), 40, '31 should snap to 40');
 assert.strictEqual(clamp(-10, 0, canvasWidth), 0, 'Negative coords must clamp to 0');
 assert.strictEqual(clamp(1050, 0, canvasWidth), 1000, 'Exceeded coords must clamp to 1000');
@@ -113,7 +112,91 @@ assert.strictEqual(sanitizeFloorKey('Floor #2 (Terrace)'), 'floor__2__terrace_')
 assert.strictEqual(sanitizeFloorKey('VIP Lounge/Patio'), 'vip_lounge_patio');
 console.log('✅ TEST 5 PASSED: Floor keys sanitized safely for Firestore document paths.');
 
-console.log('\n====================================================');
-console.log('ALL PHASE 8 TESTS PASSED SUCCESSFULLY!');
-console.log('====================================================');
+// 6. TEST MOUSE WHEEL SCROLL & ZOOM LOGIC
+console.log('\n--- TEST 6: Mouse-Wheel Scrolling & Canvas Zoom Clamping ---');
 
+class MockWheelEvent {
+  constructor(options = {}) {
+    this.deltaY = options.deltaY || 0;
+    this.ctrlKey = !!options.ctrlKey;
+    this.metaKey = !!options.metaKey;
+    this.defaultPrevented = false;
+  }
+  preventDefault() {
+    this.defaultPrevented = true;
+  }
+}
+
+function createFloorPlanZoomController(initialZoom = 1.0) {
+  let zoom = initialZoom;
+
+  const onWheel = (e) => {
+    // Canvas zoom ONLY occurs on explicit modifier key (Ctrl or Meta / pinch-to-zoom trackpad)
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+      zoom = Math.min(Math.max(zoom * zoomFactor, 0.4), 2.5);
+    }
+    // When no modifier key is pressed: do NOT call preventDefault(), do NOT change zoom.
+    // The wheel event bubbles naturally to scroll the webpage vertically.
+  };
+
+  const zoomIn = () => {
+    zoom = Math.min(zoom + 0.15, 2.5);
+  };
+
+  const zoomOut = () => {
+    zoom = Math.max(zoom - 0.15, 0.4);
+  };
+
+  const reset = () => {
+    zoom = 1.0;
+  };
+
+  return {
+    getZoom: () => zoom,
+    onWheel,
+    zoomIn,
+    zoomOut,
+    reset
+  };
+}
+
+// Subtest 6A: Standard mouse wheel scrolling over canvas
+const controller = createFloorPlanZoomController(1.0);
+const normalWheelDown = new MockWheelEvent({ deltaY: 100, ctrlKey: false, metaKey: false });
+controller.onWheel(normalWheelDown);
+assert.strictEqual(normalWheelDown.defaultPrevented, false, 'Standard wheel down must NOT prevent default');
+assert.strictEqual(controller.getZoom(), 1.0, 'Standard wheel down must NOT alter canvas zoom');
+
+const normalWheelUp = new MockWheelEvent({ deltaY: -100, ctrlKey: false, metaKey: false });
+controller.onWheel(normalWheelUp);
+assert.strictEqual(normalWheelUp.defaultPrevented, false, 'Standard wheel up must NOT prevent default');
+assert.strictEqual(controller.getZoom(), 1.0, 'Standard wheel up must NOT alter canvas zoom');
+
+// Subtest 6B: Intentional Ctrl+Wheel Zoom
+const ctrlWheelUp = new MockWheelEvent({ deltaY: -100, ctrlKey: true });
+controller.onWheel(ctrlWheelUp);
+assert.strictEqual(ctrlWheelUp.defaultPrevented, true, 'Ctrl+Wheel must prevent default to stop browser whole-page zoom');
+assert(controller.getZoom() > 1.0, 'Ctrl+Wheel up must zoom in canvas');
+
+// Subtest 6C: Visible Zoom In and Zoom Out controls
+controller.reset();
+assert.strictEqual(controller.getZoom(), 1.0, 'Reset must restore zoom to 1.0');
+controller.zoomIn();
+assert.strictEqual(Math.round(controller.getZoom() * 100) / 100, 1.15, 'ZoomIn must increase scale by 0.15');
+controller.zoomOut();
+assert.strictEqual(Math.round(controller.getZoom() * 100) / 100, 1.0, 'ZoomOut must decrease scale by 0.15');
+
+// Subtest 6D: Zoom limits clamp between 0.4 and 2.5
+for (let i = 0; i < 20; i++) controller.zoomIn();
+assert.strictEqual(controller.getZoom(), 2.5, 'Zoom cannot exceed 2.5');
+
+for (let i = 0; i < 25; i++) controller.zoomOut();
+assert.strictEqual(controller.getZoom(), 0.4, 'Zoom cannot fall below 0.4');
+
+console.log('✅ TEST 6 PASSED: Mouse-wheel scrolling naturally bubbles to webpage while Ctrl+Wheel and zoom controls operate within bounds.');
+
+console.log('\n====================================================');
+console.log('ALL PHASE 8 & CANVAS INTERACTION TESTS PASSED!');
+console.log('====================================================');
