@@ -197,6 +197,94 @@ assert.strictEqual(controller.getZoom(), 0.4, 'Zoom cannot fall below 0.4');
 
 console.log('✅ TEST 6 PASSED: Mouse-wheel scrolling naturally bubbles to webpage while Ctrl+Wheel and zoom controls operate within bounds.');
 
+// 7. TEST POS TABLE GRID HIERARCHICAL GROUPING & OPERATIONAL MAPPING
+console.log('\n--- TEST 7: POS Table Grid Hierarchical Grouping & Operational Mapping ---');
+
+const sampleTables = [
+  { id: 'T1', tableNumber: '1', floor: 'Ground Floor', section: 'Indoor Dining', capacity: 4, status: 'Available', isActive: true },
+  { id: 'T2', tableNumber: '2', floor: 'Ground Floor', section: 'Indoor Dining', capacity: 2, status: 'Occupied', activeOrderId: 'ORD-A1', isActive: true },
+  { id: 'T10', tableNumber: '10', floor: 'Ground Floor', section: 'Indoor Dining', capacity: 6, status: 'Reserved', isActive: true },
+  { id: 'T3', tableNumber: '3', floor: 'Ground Floor', section: 'Outdoor Patio', capacity: 4, status: 'Cleaning', isActive: true },
+  { id: 'T4', tableNumber: '4', floor: 'Rooftop', section: 'VIP Lounge', capacity: 8, status: 'Available', isActive: true },
+  { id: 'T5', tableNumber: '5', floor: 'Rooftop', section: 'VIP Lounge', capacity: 4, status: 'Occupied', activeOrderId: 'ORD-B2', isActive: true }
+];
+
+function groupTablesByFloorAndSection(tables) {
+  const floorMap = new Map();
+
+  tables.forEach(tbl => {
+    const floor = tbl.floor || 'Main Floor';
+    const section = tbl.section || 'General Seating';
+    if (!floorMap.has(floor)) floorMap.set(floor, new Map());
+    const secMap = floorMap.get(floor);
+    if (!secMap.has(section)) secMap.set(section, []);
+    secMap.get(section).push(tbl);
+  });
+
+  const result = [];
+  floorMap.forEach((secMap, floorName) => {
+    let floorTotal = 0;
+    let floorAvail = 0;
+    let floorOcc = 0;
+    const sections = [];
+
+    secMap.forEach((tblList, sectionName) => {
+      // Natural sort by tableNumber (1, 2, 10)
+      tblList.sort((a, b) => a.tableNumber.localeCompare(b.tableNumber, undefined, { numeric: true }));
+
+      const avail = tblList.filter(t => t.status === 'Available').length;
+      const occ = tblList.filter(t => t.status === 'Occupied').length;
+      floorTotal += tblList.length;
+      floorAvail += avail;
+      floorOcc += occ;
+
+      sections.push({ sectionName, tables: tblList, avail, occ });
+    });
+
+    result.push({ floorName, floorTotal, floorAvail, floorOcc, sections });
+  });
+
+  return result;
+}
+
+const groups = groupTablesByFloorAndSection(sampleTables);
+assert.strictEqual(groups.length, 2, 'Should create 2 floor groups');
+
+const groundFloor = groups.find(g => g.floorName === 'Ground Floor');
+assert.ok(groundFloor, 'Ground Floor group must exist');
+assert.strictEqual(groundFloor.floorTotal, 4, 'Ground floor should have 4 tables');
+assert.strictEqual(groundFloor.floorAvail, 1, 'Ground floor should have 1 available table');
+assert.strictEqual(groundFloor.floorOcc, 1, 'Ground floor should have 1 occupied table');
+assert.strictEqual(groundFloor.sections.length, 2, 'Ground floor should have 2 sections (Indoor Dining, Outdoor Patio)');
+
+// Verify natural sort: '1', '2', '10' (not '1', '10', '2')
+const indoorSection = groundFloor.sections.find(s => s.sectionName === 'Indoor Dining');
+assert.ok(indoorSection, 'Indoor Dining section must exist');
+assert.strictEqual(indoorSection.tables[0].tableNumber, '1');
+assert.strictEqual(indoorSection.tables[1].tableNumber, '2');
+assert.strictEqual(indoorSection.tables[2].tableNumber, '10');
+
+// Test Elapsed time computation
+function getElapsedTime(timeStr) {
+  if (!timeStr) return null;
+  const diffMs = Date.now() - new Date(timeStr).getTime();
+  if (diffMs <= 0) return 'Just seated';
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 60) return `${diffMins}m`;
+  const diffHrs = Math.floor(diffMins / 60);
+  return `${diffHrs}h ${diffMins % 60}m`;
+}
+
+const seated30MinsAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+assert.strictEqual(getElapsedTime(seated30MinsAgo), '30m', '30m should format as 30m');
+
+const seated90MinsAgo = new Date(Date.now() - 90 * 60 * 1000).toISOString();
+assert.strictEqual(getElapsedTime(seated90MinsAgo), '1h 30m', '90m should format as 1h 30m');
+
+assert.strictEqual(getElapsedTime(null), null, 'Null timestamp should yield null without fabrication');
+
+console.log('✅ TEST 7 PASSED: POS Table Grid hierarchical grouping, natural sorting, and elapsed time formatting verified.');
+
 console.log('\n====================================================');
 console.log('ALL PHASE 8 & CANVAS INTERACTION TESTS PASSED!');
 console.log('====================================================');

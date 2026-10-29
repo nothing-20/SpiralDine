@@ -43,6 +43,7 @@ import LoadingSpinner from '../../../components/ui/LoadingSpinner/LoadingSpinner
 import FloorPlanCanvas from '../components/floorplan/FloorPlanCanvas';
 import FloorPlanEditorToolbar from '../components/floorplan/FloorPlanEditorToolbar';
 import TableDetailsDrawer from '../components/floorplan/TableDetailsDrawer';
+import PosTableGridView from '../components/floorplan/PosTableGridView';
 
 // Lucide Icons
 import { 
@@ -253,6 +254,8 @@ export const OwnerTablesManager: React.FC = () => {
   const [retryCount, setRetryCount] = useState(0);
 
   const [activeTab, setActiveTab] = useState<'visual' | 'list'>('visual');
+  const [gridFloorFilter, setGridFloorFilter] = useState<string>('all');
+  const [activeOrdersMap, setActiveOrdersMap] = useState<Record<string, any>>({});
   const [activeSectionFilter, setActiveSectionFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [capacityFilter, setCapacityFilter] = useState<string>('all');
@@ -436,6 +439,30 @@ export const OwnerTablesManager: React.FC = () => {
     return () => unsub();
   }, [targetTenant, activeFloorId, tables.length]);
 
+  // Real-time active orders subscription for rich POS operational data
+  useEffect(() => {
+    if (!targetTenant) return;
+    const ordersCol = collection(db, 'restaurants', targetTenant, 'orders');
+    const unsubOrders = onSnapshot(ordersCol, (snap) => {
+      const map: Record<string, any> = {};
+      snap.forEach((docSnap) => {
+        const orderData = docSnap.data();
+        const ord = { id: docSnap.id, orderId: docSnap.id, ...orderData };
+        map[docSnap.id] = ord;
+        if (orderData.status !== 'COMPLETED' && orderData.status !== 'CANCELLED' && orderData.status !== 'ARCHIVED') {
+          if (orderData.tableId) map[`table_${orderData.tableId}`] = ord;
+          if (orderData.tableNumber) map[`tablenum_${orderData.tableNumber}`] = ord;
+        }
+      });
+      setActiveOrdersMap(map);
+    }, (err) => {
+      console.warn('[OwnerTablesManager] Orders subscription note:', err);
+    });
+
+    return () => unsubOrders();
+  }, [targetTenant]);
+
+
   // ----------------------------------------------------
   // SUMMARY CALCULATIONS (Real Backend Data)
   // ----------------------------------------------------
@@ -458,9 +485,11 @@ export const OwnerTablesManager: React.FC = () => {
       // Branch filter
       if (selectedBranchId !== 'all' && tbl.branchId && tbl.branchId !== selectedBranchId) return false;
 
-      // In visual mode, only show tables for the active floor
+      // Floor filter
       if (activeTab === 'visual') {
         if (activeFloorId && tbl.floor !== activeFloorId) return false;
+      } else {
+        if (gridFloorFilter !== 'all' && tbl.floor !== gridFloorFilter) return false;
       }
 
       // Section filter
@@ -493,7 +522,7 @@ export const OwnerTablesManager: React.FC = () => {
 
       return true;
     });
-  }, [tables, activeTab, activeFloorId, selectedBranchId, activeSectionFilter, statusFilter, capacityFilter, searchQuery]);
+  }, [tables, activeTab, activeFloorId, gridFloorFilter, selectedBranchId, activeSectionFilter, statusFilter, capacityFilter, searchQuery]);
 
   // Unplaced Tables on Current Floor
   const unplacedTables = useMemo(() => {
@@ -1114,7 +1143,7 @@ export const OwnerTablesManager: React.FC = () => {
             }`}
           >
             <Grid className="w-3.5 h-3.5 text-[#D94F2B]" />
-            <span>List Catalog View</span>
+            <span>Table Grid View</span>
           </button>
         </div>
 
@@ -1160,6 +1189,18 @@ export const OwnerTablesManager: React.FC = () => {
             <option value="Disabled">Disabled</option>
           </select>
 
+          {/* Floor Filter */}
+          <select
+            value={gridFloorFilter}
+            onChange={(e) => setGridFloorFilter(e.target.value)}
+            className="px-2.5 py-1.5 text-xs font-bold rounded-xl border border-[#D8DDD6] bg-[#FAF8F4] text-[#202820] outline-none cursor-pointer"
+          >
+            <option value="all">All Floors</option>
+            {floors.map(f => (
+              <option key={f.id} value={f.name}>{f.name}</option>
+            ))}
+          </select>
+
           {/* Capacity Filter */}
           <select
             value={capacityFilter}
@@ -1178,202 +1219,159 @@ export const OwnerTablesManager: React.FC = () => {
       {/* ── MAIN WORKSPACE ── */}
       {isLoading ? (
         <div className="h-72 flex items-center justify-center">
-          <LoadingSpinner label="Loading interactive floor plan..." />
-        </div>
-      ) : activeTab === 'visual' ? (
-        <div className="space-y-4">
-          {/* Floor Navigator Tabs */}
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center space-x-1.5 overflow-x-auto pb-1">
-              {floors.map(f => {
-                const floorTableCount = tables.filter(t => t.floor === f.name).length;
-                return (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => {
-                      if (hasUnsavedChanges) {
-                        if (confirm('You have unsaved floor plan layout changes. Discard and switch floor?')) {
-                          setActiveFloorId(f.name);
-                          setHasUnsavedChanges(false);
-                          setIsDesignMode(false);
-                        }
-                      } else {
-                        setActiveFloorId(f.name);
-                      }
-                    }}
-                    className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer border ${
-                      activeFloorId === f.name
-                        ? 'bg-[#12352D] text-white border-[#12352D] shadow-xs'
-                        : 'bg-white text-[#5F675F] border-[#D8DDD6] hover:bg-[#FAF8F4]'
-                    }`}
-                  >
-                    <span>{f.name}</span>
-                    <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
-                      activeFloorId === f.name
-                        ? 'bg-[#D94F2B] text-white'
-                        : 'bg-[#F0F2F0] text-[#5F675F]'
-                    }`}>
-                      {floorTableCount}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Floor Plan Editor Toolbar (Designer Mode active / trigger) */}
-          <FloorPlanEditorToolbar
-            isDesignMode={isDesignMode}
-            hasUnsavedChanges={hasUnsavedChanges}
-            isSaving={isSavingLayout}
-            unplacedTables={unplacedTables}
-            gridSnap={gridSnap}
-            onToggleDesignMode={() => {
-              if (isDesignMode && hasUnsavedChanges) {
-                if (confirm('Save changes before leaving designer mode?')) {
-                  handleSaveLayout();
-                  return;
-                }
-              }
-              setIsDesignMode(!isDesignMode);
-            }}
-            onAddArchitecturalElement={handleAddArchitecturalElement}
-            onPlaceTable={handlePlaceTable}
-            onToggleGridSnap={() => setGridSnap(g => !g)}
-            onSaveLayout={handleSaveLayout}
-            onDiscardChanges={handleDiscardChanges}
-          />
-
-          {/* Interactive SVG Floor Plan Canvas Container (responsive margin to prevent drawer overlap) */}
-          <div className={`transition-all duration-300 ease-in-out ${isDetailDrawerOpen ? 'lg:mr-[430px]' : ''}`}>
-            <FloorPlanCanvas
-              canvasWidth={1000}
-              canvasHeight={700}
-              elements={elements}
-              tablePositions={tablePositions}
-              tables={filteredTables}
-              selectedTableId={selectedTable?.id || null}
-              selectedElementId={selectedElementId}
-              isDesignMode={isDesignMode}
-              isDrawerOpen={isDetailDrawerOpen}
-              gridSnap={gridSnap}
-              gridSize={20}
-              physicalWidth={floors.find(f => f.name === activeFloorId)?.physicalWidth}
-              physicalHeight={floors.find(f => f.name === activeFloorId)?.physicalHeight}
-              measurementUnit={floors.find(f => f.name === activeFloorId)?.measurementUnit || 'meters'}
-              onSelectTable={(tId) => {
-                if (tId) {
-                  const found = tables.find(t => t.id === tId);
-                  setSelectedTable(found || null);
-                  if (!isDesignMode) setIsDetailDrawerOpen(true);
-                } else {
-                  setSelectedTable(null);
-                }
-              }}
-              onSelectElement={(elId) => setSelectedElementId(elId)}
-              onUpdateElement={handleUpdateElement}
-              onUpdateTablePosition={handleUpdateTablePosition}
-              onRemoveElement={handleRemoveElement}
-              onUnplaceTable={handleUnplaceTable}
-            />
-          </div>
+          <LoadingSpinner label="Loading dining tables..." />
         </div>
       ) : (
-        /* ── LIST VIEW ── */
-        <div className="rounded-3xl bg-white border border-[#D8DDD6] shadow-2xs overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-[#FAF8F4] border-b border-[#D8DDD6] text-[#5F675F] uppercase text-[10px] font-extrabold tracking-wider">
-                <tr>
-                  <th className="py-3.5 px-4">Table Code & Name</th>
-                  <th className="py-3.5 px-4">Capacity</th>
-                  <th className="py-3.5 px-4">Location</th>
-                  <th className="py-3.5 px-4">Status</th>
-                  <th className="py-3.5 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#D8DDD6] text-[#202820]">
-                {filteredTables.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="py-12 text-center text-[#5F675F]">
-                      No dining tables match the selected filters.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredTables.map((tbl) => (
-                    <tr 
-                      key={tbl.id} 
-                      onClick={() => { setSelectedTable(tbl); setIsDetailDrawerOpen(true); }}
-                      className="hover:bg-[#FAF8F4] transition-colors cursor-pointer group"
-                    >
-                      <td className="py-3 px-4">
-                        <div className="flex items-center space-x-2">
-                          <span className="p-1 px-1.5 rounded-md bg-[#12352D] text-white font-mono font-bold text-[11px]">
-                            #{tbl.tableNumber}
-                          </span>
-                          <span className="font-extrabold text-[#202820]">{tbl.tableName}</span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 font-bold text-[#5F675F]">
-                        {tbl.capacity} Seats ({tbl.shape})
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className="font-bold text-[#202820]">{tbl.floor}</span>
-                        <span className="text-[#5F675F] block text-[10px]">{tbl.section}</span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <Badge variant={
-                          tbl.status === 'Available' ? 'success' :
-                          tbl.status === 'Occupied' ? 'danger' :
-                          tbl.status === 'Reserved' ? 'warning' :
-                          tbl.status === 'Cleaning' ? 'primary' : 'neutral'
-                        }>
-                          {tbl.status}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center justify-end space-x-1">
-                          <button
-                            type="button"
-                            onClick={() => { setQrTable(tbl); setIsQrModalOpen(true); }}
-                            className="p-1.5 rounded-lg text-[#5F675F] hover:text-[#D94F2B] hover:bg-[#FAF8F4]"
-                            title="Digital Ordering QR"
-                          >
-                            <QrCode className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(tbl)}
-                            className="p-1.5 rounded-lg text-[#5F675F] hover:text-[#167647] hover:bg-[#FAF8F4]"
-                            title="Edit Table Settings"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => duplicateTable(tbl)}
-                            className="p-1.5 rounded-lg text-[#5F675F] hover:text-[#175CD3] hover:bg-[#FAF8F4]"
-                            title="Duplicate Table"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => archiveTable(tbl)}
-                            className="p-1.5 rounded-lg text-[#5F675F] hover:text-red-600 hover:bg-red-50"
-                            title="Archive Table"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+        <div className={`transition-all duration-300 ease-in-out ${isDetailDrawerOpen ? 'lg:mr-[430px]' : ''}`}>
+          {activeTab === 'visual' ? (
+            <div className="space-y-4">
+              {/* Floor Navigator Tabs */}
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center space-x-1.5 overflow-x-auto pb-1">
+                  {floors.map(f => {
+                    const floorTableCount = tables.filter(t => t.floor === f.name).length;
+                    return (
+                      <button
+                        key={f.id}
+                        type="button"
+                        onClick={() => {
+                          if (hasUnsavedChanges) {
+                            if (confirm('You have unsaved floor plan layout changes. Discard and switch floor?')) {
+                              setActiveFloorId(f.name);
+                              setHasUnsavedChanges(false);
+                              setIsDesignMode(false);
+                            }
+                          } else {
+                            setActiveFloorId(f.name);
+                          }
+                        }}
+                        className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-extrabold transition-all cursor-pointer border ${
+                          activeFloorId === f.name
+                            ? 'bg-[#12352D] text-white border-[#12352D] shadow-xs'
+                            : 'bg-white text-[#5F675F] border-[#D8DDD6] hover:bg-[#FAF8F4]'
+                        }`}
+                      >
+                        <span>{f.name}</span>
+                        <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                          activeFloorId === f.name
+                            ? 'bg-[#D94F2B] text-white'
+                            : 'bg-[#F0F2F0] text-[#5F675F]'
+                        }`}>
+                          {floorTableCount}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Floor Plan Editor Toolbar (Designer Mode active / trigger) */}
+              <FloorPlanEditorToolbar
+                isDesignMode={isDesignMode}
+                hasUnsavedChanges={hasUnsavedChanges}
+                isSaving={isSavingLayout}
+                unplacedTables={unplacedTables}
+                gridSnap={gridSnap}
+                onToggleDesignMode={() => {
+                  if (isDesignMode && hasUnsavedChanges) {
+                    if (confirm('Save changes before leaving designer mode?')) {
+                      handleSaveLayout();
+                      return;
+                    }
+                  }
+                  setIsDesignMode(!isDesignMode);
+                }}
+                onAddArchitecturalElement={handleAddArchitecturalElement}
+                onPlaceTable={handlePlaceTable}
+                onToggleGridSnap={() => setGridSnap(g => !g)}
+                onSaveLayout={handleSaveLayout}
+                onDiscardChanges={handleDiscardChanges}
+              />
+
+              {/* Interactive SVG Floor Plan Canvas Container */}
+              <FloorPlanCanvas
+                canvasWidth={1000}
+                canvasHeight={700}
+                elements={elements}
+                tablePositions={tablePositions}
+                tables={filteredTables}
+                selectedTableId={selectedTable?.id || null}
+                selectedElementId={selectedElementId}
+                isDesignMode={isDesignMode}
+                isDrawerOpen={isDetailDrawerOpen}
+                gridSnap={gridSnap}
+                gridSize={20}
+                physicalWidth={floors.find(f => f.name === activeFloorId)?.physicalWidth}
+                physicalHeight={floors.find(f => f.name === activeFloorId)?.physicalHeight}
+                measurementUnit={floors.find(f => f.name === activeFloorId)?.measurementUnit || 'meters'}
+                onSelectTable={(tId) => {
+                  if (tId) {
+                    const found = tables.find(t => t.id === tId);
+                    setSelectedTable(found || null);
+                    if (!isDesignMode) setIsDetailDrawerOpen(true);
+                  } else {
+                    setSelectedTable(null);
+                  }
+                }}
+                onSelectElement={(elId) => setSelectedElementId(elId)}
+                onUpdateElement={handleUpdateElement}
+                onUpdateTablePosition={handleUpdateTablePosition}
+                onRemoveElement={handleRemoveElement}
+                onUnplaceTable={handleUnplaceTable}
+              />
+            </div>
+          ) : (
+            /* ── POS TABLE GRID VIEW ── */
+            <PosTableGridView
+              tables={filteredTables}
+              floors={floors}
+              sections={sections}
+              activeFloorFilter={gridFloorFilter}
+              onSelectFloorFilter={(fName) => setGridFloorFilter(fName)}
+              activeOrdersMap={activeOrdersMap}
+              selectedTableId={selectedTable?.id || null}
+              onSelectTable={(tbl) => {
+                setSelectedTable(tbl);
+                setIsDetailDrawerOpen(true);
+              }}
+              onOpenEditModal={openEditModal}
+              onShowQrModal={(tbl) => {
+                setQrTable(tbl);
+                setIsQrModalOpen(true);
+              }}
+              onDuplicateTable={duplicateTable}
+              onArchiveTable={archiveTable}
+              onAddNewTable={() => {
+                reset({
+                  tableNumber: String(tables.length + 1),
+                  tableName: `Table ${tables.length + 1}`,
+                  capacity: 4,
+                  floor: activeFloorId || floors[0]?.name || 'Main Floor',
+                  section: sections[0]?.name || 'Main Dining Area',
+                  shape: 'square',
+                  notes: '',
+                  status: 'Available',
+                  isActive: true
+                });
+                setEditingTable(null);
+                setIsFormOpen(true);
+              }}
+              onResetFilters={() => {
+                setSearchQuery('');
+                setActiveSectionFilter('all');
+                setStatusFilter('all');
+                setCapacityFilter('all');
+                setGridFloorFilter('all');
+              }}
+              hasActiveFilters={
+                searchQuery.trim() !== '' ||
+                activeSectionFilter !== 'all' ||
+                statusFilter !== 'all' ||
+                capacityFilter !== 'all' ||
+                gridFloorFilter !== 'all'
+              }
+            />
+          )}
         </div>
       )}
 
