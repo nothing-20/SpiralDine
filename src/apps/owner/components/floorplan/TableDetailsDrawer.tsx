@@ -203,34 +203,43 @@ export const TableDetailsDrawer: React.FC<TableDetailsDrawerProps> = ({
     : 0;
 
   return (
-    <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-white border-l border-[#D8DDD6] shadow-2xl flex flex-col justify-between animate-in slide-in-from-right duration-200 select-none text-left">
-      {/* ── Drawer Header ── */}
-      <div className="p-5 border-b border-[#D8DDD6] bg-[#FAF8F4] flex items-start justify-between">
-        <div>
-          <div className="flex items-center space-x-2">
-            <span className="p-1.5 rounded-lg bg-[#12352D] text-white text-xs font-bold font-mono">
-              #{table.tableNumber}
-            </span>
-            <h2 className="text-lg font-serif font-bold text-[#202820]">
-              {table.tableName || `Table ${table.tableNumber}`}
-            </h2>
-          </div>
-          <p className="text-xs text-[#5F675F] mt-1">
-            {table.floor} &middot; {table.section} &middot; {table.capacity} Person Seating
-          </p>
-        </div>
+    <>
+      {/* ── Mobile/Tablet Backdrop Overlay (allows tapping outside to dismiss) ── */}
+      <div 
+        className="fixed inset-0 top-16 bg-black/25 backdrop-blur-[2px] z-30 lg:hidden animate-in fade-in duration-200"
+        onClick={onClose}
+        aria-label="Close table details drawer"
+      />
 
-        <div className="flex items-center space-x-2">
-          {getStatusBadge(table.status)}
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-xl text-[#5F675F] hover:text-[#202820] hover:bg-white border border-transparent hover:border-[#D8DDD6] transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
+      <div className="fixed top-16 bottom-0 right-0 z-40 w-full sm:w-[420px] bg-white border-l border-[#D8DDD6] shadow-2xl flex flex-col justify-between animate-in slide-in-from-right duration-200 select-none text-left">
+        {/* ── Drawer Header ── */}
+        <div className="p-4 sm:p-5 border-b border-[#D8DDD6] bg-[#FAF8F4] flex items-start justify-between shrink-0">
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="p-1.5 rounded-lg bg-[#12352D] text-white text-xs font-bold font-mono">
+                #{table.tableNumber}
+              </span>
+              <h2 className="text-lg font-serif font-bold text-[#202820]">
+                {table.tableName || `Table ${table.tableNumber}`}
+              </h2>
+            </div>
+            <p className="text-xs text-[#5F675F] mt-1">
+              {table.floor} &middot; {table.section} &middot; {table.capacity} Person Seating
+            </p>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            {getStatusBadge(table.status)}
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 rounded-xl text-[#5F675F] hover:text-[#202820] hover:bg-white border border-transparent hover:border-[#D8DDD6] transition-colors cursor-pointer"
+              title="Close Panel"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
-      </div>
 
       {/* ── Drawer Content Body ── */}
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
@@ -471,7 +480,7 @@ export const TableDetailsDrawer: React.FC<TableDetailsDrawerProps> = ({
 
       {/* ── Walk-In Seating Modal ── */}
       {isSeatModalOpen && (
-        <div className="fixed inset-0 z-60 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-5 max-w-sm w-full border border-[#D8DDD6] shadow-2xl space-y-4 text-left">
             <div className="flex items-center justify-between pb-2 border-b border-[#D8DDD6]">
               <h3 className="text-base font-serif font-bold text-[#202820]">
@@ -532,6 +541,7 @@ export const TableDetailsDrawer: React.FC<TableDetailsDrawerProps> = ({
         </div>
       )}
     </div>
+    </>
   );
 };
 

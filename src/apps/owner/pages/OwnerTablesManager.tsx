@@ -1245,36 +1245,39 @@ export const OwnerTablesManager: React.FC = () => {
             onDiscardChanges={handleDiscardChanges}
           />
 
-          {/* Interactive SVG Floor Plan Canvas */}
-          <FloorPlanCanvas
-            canvasWidth={1000}
-            canvasHeight={700}
-            elements={elements}
-            tablePositions={tablePositions}
-            tables={filteredTables}
-            selectedTableId={selectedTable?.id || null}
-            selectedElementId={selectedElementId}
-            isDesignMode={isDesignMode}
-            gridSnap={gridSnap}
-            gridSize={20}
-            physicalWidth={floors.find(f => f.name === activeFloorId)?.physicalWidth}
-            physicalHeight={floors.find(f => f.name === activeFloorId)?.physicalHeight}
-            measurementUnit={floors.find(f => f.name === activeFloorId)?.measurementUnit || 'meters'}
-            onSelectTable={(tId) => {
-              if (tId) {
-                const found = tables.find(t => t.id === tId);
-                setSelectedTable(found || null);
-                if (!isDesignMode) setIsDetailDrawerOpen(true);
-              } else {
-                setSelectedTable(null);
-              }
-            }}
-            onSelectElement={(elId) => setSelectedElementId(elId)}
-            onUpdateElement={handleUpdateElement}
-            onUpdateTablePosition={handleUpdateTablePosition}
-            onRemoveElement={handleRemoveElement}
-            onUnplaceTable={handleUnplaceTable}
-          />
+          {/* Interactive SVG Floor Plan Canvas Container (responsive margin to prevent drawer overlap) */}
+          <div className={`transition-all duration-300 ease-in-out ${isDetailDrawerOpen ? 'lg:mr-[430px]' : ''}`}>
+            <FloorPlanCanvas
+              canvasWidth={1000}
+              canvasHeight={700}
+              elements={elements}
+              tablePositions={tablePositions}
+              tables={filteredTables}
+              selectedTableId={selectedTable?.id || null}
+              selectedElementId={selectedElementId}
+              isDesignMode={isDesignMode}
+              isDrawerOpen={isDetailDrawerOpen}
+              gridSnap={gridSnap}
+              gridSize={20}
+              physicalWidth={floors.find(f => f.name === activeFloorId)?.physicalWidth}
+              physicalHeight={floors.find(f => f.name === activeFloorId)?.physicalHeight}
+              measurementUnit={floors.find(f => f.name === activeFloorId)?.measurementUnit || 'meters'}
+              onSelectTable={(tId) => {
+                if (tId) {
+                  const found = tables.find(t => t.id === tId);
+                  setSelectedTable(found || null);
+                  if (!isDesignMode) setIsDetailDrawerOpen(true);
+                } else {
+                  setSelectedTable(null);
+                }
+              }}
+              onSelectElement={(elId) => setSelectedElementId(elId)}
+              onUpdateElement={handleUpdateElement}
+              onUpdateTablePosition={handleUpdateTablePosition}
+              onRemoveElement={handleRemoveElement}
+              onUnplaceTable={handleUnplaceTable}
+            />
+          </div>
         </div>
       ) : (
         /* ── LIST VIEW ── */

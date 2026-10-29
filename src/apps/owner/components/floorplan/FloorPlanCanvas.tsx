@@ -36,6 +36,7 @@ interface FloorPlanCanvasProps {
   selectedTableId: string | null;
   selectedElementId: string | null;
   isDesignMode: boolean;
+  isDrawerOpen?: boolean;
   gridSnap?: boolean;
   gridSize?: number;
   physicalWidth?: number;
@@ -58,6 +59,7 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
   selectedTableId,
   selectedElementId,
   isDesignMode,
+  isDrawerOpen = false,
   gridSnap = true,
   gridSize = 20,
   physicalWidth,
@@ -182,9 +184,25 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
     setPan({ x: 0, y: 0 });
   };
 
-  // Center on mount
+  // Center on mount and refit whenever canvas container or drawer state changes
   useEffect(() => {
     handleFitToScreen();
+  }, [canvasWidth, canvasHeight]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      handleFitToScreen();
+    }, 320);
+    return () => clearTimeout(timer);
+  }, [isDrawerOpen]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver(() => {
+      handleFitToScreen();
+    });
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
   }, [canvasWidth, canvasHeight]);
 
   // ── Mouse Interaction Handlers ──
@@ -914,8 +932,8 @@ export const FloorPlanCanvas: React.FC<FloorPlanCanvasProps> = ({
         </g>
       </svg>
 
-      {/* ── Floating Canvas Control Bar (Zoom, Fit, Reset) ── */}
-      <div className="absolute bottom-4 right-4 flex items-center space-x-1.5 bg-white/95 backdrop-blur-md border border-[#D8DDD6] shadow-md rounded-2xl p-1.5 z-30">
+      {/* ── Floating Canvas Control Bar (Zoom, Fit, Reset) — positioned bottom-left to prevent occlusion by drawer ── */}
+      <div className="absolute bottom-4 left-4 sm:left-6 flex items-center space-x-1.5 bg-white/95 backdrop-blur-md border border-[#D8DDD6] shadow-md rounded-2xl p-1.5 z-20">
         <button
           type="button"
           onClick={() => setZoom(z => Math.min(z + 0.15, 2.5))}
