@@ -85,7 +85,11 @@ export const Navbar: React.FC<NavbarProps> = ({ onMenuClick }) => {
       // 2. Tables
       const tablesSnap = await getDocs(collection(db, 'restaurants', tenantId, 'tables'));
       const tablesList: any[] = [];
-      tablesSnap.forEach(d => tablesList.push({ id: d.id, type: 'Table', label: `Table ${d.data().number} (${d.data().status})`, path: '/dashboard/owner/tables' }));
+      tablesSnap.forEach(d => {
+        const td = d.data();
+        if (td.isArchived === true || td.archived === true || td.isActive === false) return;
+        tablesList.push({ id: d.id, type: 'Table', label: `Table ${td.number || td.tableNumber || d.id} (${td.status || 'Available'})`, path: '/dashboard/owner/tables' });
+      });
       setTables(tablesList);
 
       // 3. Employees

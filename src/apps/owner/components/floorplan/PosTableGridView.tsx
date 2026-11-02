@@ -42,6 +42,7 @@ interface PosTableGridViewProps {
   onShowQrModal: (table: ITableItem) => void;
   onDuplicateTable: (table: ITableItem) => void;
   onArchiveTable: (table: ITableItem) => void;
+  onDeleteTable?: (table: ITableItem) => void;
   onAddNewTable: () => void;
   onResetFilters?: () => void;
   hasActiveFilters?: boolean;
@@ -80,6 +81,7 @@ export const PosTableGridView: React.FC<PosTableGridViewProps> = ({
   onShowQrModal,
   onDuplicateTable,
   onArchiveTable,
+  onDeleteTable,
   onAddNewTable,
   onResetFilters,
   hasActiveFilters = false
@@ -545,9 +547,9 @@ export const PosTableGridView: React.FC<PosTableGridViewProps> = ({
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => onArchiveTable(tbl)}
+                                  onClick={() => (onDeleteTable ? onDeleteTable(tbl) : onArchiveTable(tbl))}
                                   className="p-1 rounded-md hover:bg-red-50 hover:text-red-600 transition-colors"
-                                  title="Archive Table"
+                                  title="Delete Table"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>

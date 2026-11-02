@@ -423,6 +423,9 @@ export const TableBooking: React.FC = () => {
       const list: ITableOption[] = [];
       snap.forEach(d => {
         const data = d.data();
+        if (data.isArchived === true || data.archived === true || data.isActive === false || data.status === 'Disabled') {
+          return;
+        }
         const cap = Number(data.seatingCapacity || data.capacity || 4);
         const num = String(data.tableNumber || data.number || d.id).replace(/^TBL-/i, '');
         list.push({

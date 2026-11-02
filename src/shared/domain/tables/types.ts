@@ -50,15 +50,26 @@ export interface ITable {
   tableName?: string;
   name?: string;
   isActive?: boolean;
+  isArchived?: boolean;
+  archived?: boolean;
+  archivedAt?: string;
   branchId?: string;
 }
 
 /**
- * Checks whether a table is available for customer seating and ordering.
- * Strictly excludes occupied, cleaning, reserved, maintenance, and disabled tables.
+ * Checks whether a table record is archived or deactivated.
  */
-export const isTableAvailable = (status?: string, isActive?: boolean): boolean => {
-  if (isActive === false) return false;
+export const isTableArchived = (table: any): boolean => {
+  if (!table) return false;
+  return table.isArchived === true || table.archived === true || table.isActive === false;
+};
+
+/**
+ * Checks whether a table is available for customer seating and ordering.
+ * Strictly excludes occupied, cleaning, reserved, maintenance, disabled, and archived tables.
+ */
+export const isTableAvailable = (status?: string, isActive?: boolean, isArchived?: boolean): boolean => {
+  if (isActive === false || isArchived === true) return false;
   if (!status) return true;
   const s = status.toLowerCase().trim();
   if (s === 'available' || s === 'empty') return true;

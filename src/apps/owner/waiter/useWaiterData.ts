@@ -24,7 +24,9 @@ export function useWaiterData() {
       (snapshot) => {
         const list: ITable[] = [];
         snapshot.forEach((docSnap) => {
-          list.push({ id: docSnap.id, ...docSnap.data() } as ITable);
+          const data = docSnap.data();
+          if (data.isArchived === true || data.archived === true || data.isActive === false) return;
+          list.push({ id: docSnap.id, ...data } as ITable);
         });
         list.sort((a, b) => {
           const numA = String(a.number || (a as any).tableNumber || '');

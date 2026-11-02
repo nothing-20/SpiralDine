@@ -153,7 +153,11 @@ export const OwnerBilling: React.FC = () => {
     const tablesRef = collection(db, 'restaurants', user.tenantId, 'tables');
     const unsubTables = onSnapshot(tablesRef, (snap) => {
       const list: ITable[] = [];
-      snap.forEach((d) => list.push({ id: d.id, ...(d.data() as any) } as ITable));
+      snap.forEach((d) => {
+        const data = d.data();
+        if (data.isArchived === true || data.archived === true || data.isActive === false) return;
+        list.push({ id: d.id, ...(data as any) } as ITable);
+      });
       setTables(list);
     });
 

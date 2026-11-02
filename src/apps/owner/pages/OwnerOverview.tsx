@@ -340,7 +340,11 @@ export const OwnerOverview: React.FC = () => {
     const qTables = query(collection(db, 'restaurants', tenantId, 'tables'), limit(20));
     const unsubTables = onSnapshot(qTables, (snap) => {
       const list: any[] = [];
-      snap.forEach(d => list.push({ id: d.id, ...d.data() }));
+      snap.forEach(d => {
+        const data = d.data();
+        if (data.isArchived === true || data.archived === true || data.isActive === false) return;
+        list.push({ id: d.id, ...data });
+      });
       setTables(list);
     });
 

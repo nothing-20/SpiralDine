@@ -128,6 +128,7 @@ export const reservationService = {
 
       for (const d of tablesSnap.docs) {
         const t = { id: d.id, ...d.data() } as ITable;
+        if (t.isArchived || t.archived || t.isActive === false) continue;
         const tNum = cleanTableIdentifier(t.number || t.tableNumber || t.id);
         if (t.id === String(tableIdentifier) || (cleanNum && tNum === cleanNum)) {
           foundTable = t;
@@ -139,6 +140,7 @@ export const reservationService = {
       if (!foundTable && candidateReservations[0]?.assignedTableId) {
         for (const d of tablesSnap.docs) {
           const t = { id: d.id, ...d.data() } as ITable;
+          if (t.isArchived || t.archived || t.isActive === false) continue;
           if (t.id === candidateReservations[0].assignedTableId) {
             foundTable = t;
             break;

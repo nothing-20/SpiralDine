@@ -188,9 +188,12 @@ export const OwnerRestaurants: React.FC = () => {
             let tablesCount = 0;
 
             try {
-              // 1. Tables count
+              // 1. Tables count (active, non-archived tables only)
               const tablesSnap = await getDocs(collection(db, 'restaurants', rest.id, 'tables'));
-              tablesCount = tablesSnap.size;
+              tablesCount = tablesSnap.docs.filter(d => {
+                const dt = d.data();
+                return dt.isArchived !== true && dt.archived !== true && dt.isActive !== false;
+              }).length;
 
               // 2. Orders summary (today's settled orders)
               const ordersSnap = await getDocs(collection(db, 'restaurants', rest.id, 'orders'));

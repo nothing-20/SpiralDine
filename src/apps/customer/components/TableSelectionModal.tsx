@@ -39,6 +39,8 @@ export interface ITableData {
   activeOrderId?: string;
   currentOrderId?: string;
   isActive?: boolean;
+  isArchived?: boolean;
+  archived?: boolean;
   branchId?: string;
 }
 
@@ -87,6 +89,11 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
         const list: ITableData[] = [];
         snap.forEach(docSnap => {
           const data = docSnap.data();
+          // Strictly exclude archived or disabled tables
+          if (data.isArchived === true || data.archived === true || data.isActive === false) {
+            return;
+          }
+
           list.push({
             id: docSnap.id,
             tableId: data.tableId || docSnap.id,
@@ -108,13 +115,15 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
             activeOrderId: data.activeOrderId || data.currentOrderId,
             currentOrderId: data.currentOrderId,
             isActive: data.isActive !== false,
+            isArchived: Boolean(data.isArchived || data.archived),
+            archived: Boolean(data.isArchived || data.archived),
             branchId: data.branchId || 'main',
           });
         });
 
         // Filter: Keep all active tables for this branch (do NOT filter out occupied tables)
         const branchTables = list.filter(t => {
-          if (t.isActive === false) return false;
+          if (t.isActive === false || t.isArchived === true) return false;
           if (branchId && t.branchId && t.branchId !== branchId && branchId !== 'all') {
             return false;
           }
@@ -131,7 +140,7 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
           return (a.tableName || '').localeCompare(b.tableName || '');
         });
 
-        setTotalConfiguredTables(list.length);
+        setTotalConfiguredTables(branchTables.length);
         setTables(branchTables);
         setIsLoading(false);
 

@@ -125,6 +125,7 @@ export const MobileTablesQRCodes: React.FC = () => {
       const list: ITable[] = [];
       snap.forEach((d) => {
         const data = d.data();
+        if (data.isArchived === true || data.archived === true || data.isActive === false) return;
         list.push({
           id: d.id,
           tableNumber: String(data.tableNumber || data.number || d.id),

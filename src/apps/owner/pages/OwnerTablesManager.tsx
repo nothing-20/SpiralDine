@@ -372,7 +372,7 @@ export const OwnerTablesManager: React.FC = () => {
         let idx = 0;
         querySnap.forEach((docSnap) => {
           const raw = docSnap.data();
-          if (!raw.isArchived) {
+          if (!raw.isArchived && !raw.archived && raw.isActive !== false) {
             list.push(mapFirestoreDocToTable(docSnap.id, raw, idx++));
           }
         });
@@ -849,7 +849,14 @@ export const OwnerTablesManager: React.FC = () => {
     if (!targetTenant) return;
     try {
       const docRef = doc(db, 'restaurants', targetTenant, 'tables', tbl.id);
-      await updateDoc(docRef, { isArchived: true });
+      await updateDoc(docRef, { 
+        isArchived: true,
+        archived: true,
+        isActive: false,
+        status: 'Disabled',
+        tableStatus: 'Disabled',
+        archivedAt: new Date().toISOString()
+      });
       toast.success(`Archived table: ${tbl.tableName}`);
       if (selectedTable?.id === tbl.id) setSelectedTable(null);
     } catch (e) {
@@ -863,7 +870,8 @@ export const OwnerTablesManager: React.FC = () => {
     try {
       const docRef = doc(db, 'restaurants', targetTenant, 'tables', deletingTableId);
       await deleteDoc(docRef);
-      toast.success('Table layout deleted permanently.');
+      toast.success('Table deleted successfully.');
+      if (selectedTable?.id === deletingTableId) setSelectedTable(null);
     } catch (e) {
       console.error(e);
       toast.error('Failed to delete table.');
@@ -1341,6 +1349,10 @@ export const OwnerTablesManager: React.FC = () => {
               }}
               onDuplicateTable={duplicateTable}
               onArchiveTable={archiveTable}
+              onDeleteTable={(tbl) => {
+                setDeletingTableId(tbl.id);
+                setIsDeleteOpen(true);
+              }}
               onAddNewTable={() => {
                 reset({
                   tableNumber: String(tables.length + 1),

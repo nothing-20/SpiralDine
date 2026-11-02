@@ -33,12 +33,17 @@ export const tableService = {
     const rawStr = String(tableIdentifier).trim();
     const cleanNum = cleanTableIdentifier(rawStr);
 
+    const isTableDocArchived = (t: any) => !t || t.isArchived === true || t.archived === true || t.isActive === false;
+
     // 1. Check direct doc ref by exact identifier
     try {
       const directRef = doc(db, 'restaurants', tenantId, 'tables', rawStr);
       const directSnap = await getDoc(directRef);
       if (directSnap.exists()) {
-        return { id: directSnap.id, table: { id: directSnap.id, ...directSnap.data() } as ITable };
+        const data = directSnap.data();
+        if (!isTableDocArchived(data)) {
+          return { id: directSnap.id, table: { id: directSnap.id, ...data } as ITable };
+        }
       }
     } catch (_) {}
 
@@ -48,7 +53,10 @@ export const tableService = {
         const tblRef = doc(db, 'restaurants', tenantId, 'tables', `TBL-${cleanNum}`);
         const tblSnap = await getDoc(tblRef);
         if (tblSnap.exists()) {
-          return { id: tblSnap.id, table: { id: tblSnap.id, ...tblSnap.data() } as ITable };
+          const data = tblSnap.data();
+          if (!isTableDocArchived(data)) {
+            return { id: tblSnap.id, table: { id: tblSnap.id, ...data } as ITable };
+          }
         }
       } catch (_) {}
     }
@@ -61,16 +69,24 @@ export const tableService = {
       const qNum = query(colRef, where('number', '==', cleanNum));
       const snapNum = await getDocs(qNum);
       if (!snapNum.empty) {
-        const d = snapNum.docs[0];
-        return { id: d.id, table: { id: d.id, ...d.data() } as ITable };
+        for (const d of snapNum.docs) {
+          const data = d.data();
+          if (!isTableDocArchived(data)) {
+            return { id: d.id, table: { id: d.id, ...data } as ITable };
+          }
+        }
       }
 
       // Try query by tableNumber
       const qTblNum = query(colRef, where('tableNumber', '==', cleanNum));
       const snapTblNum = await getDocs(qTblNum);
       if (!snapTblNum.empty) {
-        const d = snapTblNum.docs[0];
-        return { id: d.id, table: { id: d.id, ...d.data() } as ITable };
+        for (const d of snapTblNum.docs) {
+          const data = d.data();
+          if (!isTableDocArchived(data)) {
+            return { id: d.id, table: { id: d.id, ...data } as ITable };
+          }
+        }
       }
 
       // Try numeric comparison if numeric
@@ -79,8 +95,12 @@ export const tableService = {
         const qNumStrict = query(colRef, where('number', '==', numericVal));
         const snapNumStrict = await getDocs(qNumStrict);
         if (!snapNumStrict.empty) {
-          const d = snapNumStrict.docs[0];
-          return { id: d.id, table: { id: d.id, ...d.data() } as ITable };
+          for (const d of snapNumStrict.docs) {
+            const data = d.data();
+            if (!isTableDocArchived(data)) {
+              return { id: d.id, table: { id: d.id, ...data } as ITable };
+            }
+          }
         }
       }
 
@@ -88,6 +108,7 @@ export const tableService = {
       const allSnap = await getDocs(colRef);
       for (const d of allSnap.docs) {
         const data = d.data() as ITable;
+        if (isTableDocArchived(data)) continue;
         const dNum = cleanTableIdentifier(data.number || data.tableNumber || data.tableName || data.name);
         if (dNum === cleanNum || d.id === rawStr || d.id === `TBL-${cleanNum}`) {
           return { id: d.id, table: { ...data, id: d.id } as ITable };

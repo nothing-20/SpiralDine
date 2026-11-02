@@ -255,9 +255,9 @@ export const CustomerPortal: React.FC = () => {
           };
         }
 
-        if (tableData.isActive === false || tableData.status === 'Disabled') {
+        if (tableData.isActive === false || tableData.status === 'Disabled' || tableData.isArchived === true || tableData.archived === true) {
           setIsInvalidSession(true);
-          setTableError('This table is currently disabled. Please contact restaurant staff.');
+          setTableError('This table is currently disabled or unavailable. Please contact restaurant staff.');
           return;
         }
 
