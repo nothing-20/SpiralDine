@@ -200,6 +200,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         emailId?: string | null;
         error?: string | null;
         reason?: string;
+        errorCategory?: string | null;
       } = {
         status: 'skipped',
         recipient: ownerEmail || null,
