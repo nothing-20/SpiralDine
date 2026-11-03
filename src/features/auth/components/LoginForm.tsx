@@ -30,7 +30,8 @@ import {
   RefreshCw,
   AlertCircle,
   CheckCircle2,
-  Phone
+  Phone,
+  X
 } from 'lucide-react';
 
 interface ICountryCode {
@@ -70,6 +71,7 @@ export const LoginForm: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoadingEmail, setIsLoadingEmail] = useState(false);
+  const [emailAuthError, setEmailAuthError] = useState<string | null>(null);
   const [emailErrors, setEmailErrors] = useState<{ email?: string; password?: string }>({});
 
   // Option B: Mobile Number & OTP state
@@ -207,6 +209,7 @@ export const LoginForm: React.FC = () => {
     e.preventDefault();
     const cleanEmail = email.trim().toLowerCase();
     console.log('[AUTH Owner Login] Email form submitted');
+    setEmailAuthError(null);
     if (!validateEmailForm()) return;
 
     setIsLoadingEmail(true);
@@ -224,9 +227,12 @@ export const LoginForm: React.FC = () => {
         errorMsg = 'Incorrect email or password. Please check your credentials.';
       } else if (err.code === 'auth/too-many-requests') {
         errorMsg = 'Too many failed login attempts. Please wait a few minutes or reset your password.';
+      } else if (err.code === 'auth/api-key-not-valid' || err.message?.includes('api-key-not-valid')) {
+        errorMsg = 'Firebase configuration error: API key missing or invalid. Please check your environment variables.';
       } else if (err.message) {
         errorMsg = err.message;
       }
+      setEmailAuthError(errorMsg);
       addToast(errorMsg, 'error');
     } finally {
       setIsLoadingEmail(false);
@@ -536,6 +542,30 @@ export const LoginForm: React.FC = () => {
           {/* =================================================================== */}
           {authMethod === 'email' && (
             <form onSubmit={handleEmailSubmit} className="space-y-4">
+              {/* Prominent High-Contrast Inline Error Banner */}
+              {emailAuthError && (
+                <div
+                  role="alert"
+                  className="mb-4 p-4 bg-red-50 border-2 border-red-400/80 rounded-2xl text-xs sm:text-sm text-red-950 font-medium flex items-start space-x-3 shadow-md shadow-red-900/10 animate-in fade-in slide-in-from-top-2 select-text"
+                >
+                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 leading-snug">
+                    <strong className="block font-bold text-red-950 text-xs uppercase tracking-wider mb-1">
+                      Unable to Sign In
+                    </strong>
+                    <p className="text-red-900 text-xs sm:text-sm font-semibold">{emailAuthError}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEmailAuthError(null)}
+                    className="text-red-400 hover:text-red-800 p-1 rounded-lg hover:bg-red-100 transition-colors flex-shrink-0 cursor-pointer"
+                    aria-label="Dismiss error"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
               {/* Email Field */}
               <div className="w-full flex flex-col space-y-1.5 text-left">
                 <label htmlFor="owner-email" className="text-xs font-bold text-[#17212B] select-none">
@@ -548,7 +578,10 @@ export const LoginForm: React.FC = () => {
                     type="email"
                     placeholder="you@restaurant.com"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (emailAuthError) setEmailAuthError(null);
+                    }}
                     disabled={isLoadingEmail}
                     className={cn(
                       "w-full pl-10 pr-4 py-3 bg-white border border-[#E8DED6] text-[#17212B] rounded-xl text-sm placeholder-[#8A94A3] transition-all focus:outline-none focus:border-[#D65336] focus:ring-2 focus:ring-[#D65336]/20 disabled:opacity-60 disabled:bg-[#F3ECE5]",
@@ -573,7 +606,10 @@ export const LoginForm: React.FC = () => {
                     type={showPassword ? 'text' : 'password'}
                     placeholder="••••••••"
                     value={password}
-                    onChange={(e) => setPassword(e.target.value)}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (emailAuthError) setEmailAuthError(null);
+                    }}
                     disabled={isLoadingEmail}
                     className={cn(
                       "w-full pl-10 pr-12 py-3 bg-white border border-[#E8DED6] text-[#17212B] rounded-xl text-sm placeholder-[#8A94A3] transition-all focus:outline-none focus:border-[#D65336] focus:ring-2 focus:ring-[#D65336]/20 disabled:opacity-60 disabled:bg-[#F3ECE5]",
