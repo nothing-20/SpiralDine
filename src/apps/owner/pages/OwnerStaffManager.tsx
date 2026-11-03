@@ -26,6 +26,9 @@ import LoadingSpinner from '../../../components/ui/LoadingSpinner/LoadingSpinner
 import toast from 'react-hot-toast';
 import Tabs from '../../../components/ui/Tabs/Tabs';
 import SearchBar from '../../../components/ui/SearchBar/SearchBar';
+import { shiftService } from '../../../shared/services/shiftService';
+import { IShiftClosingRequest } from '../../../shared/domain/staff/types';
+import StaffShiftApprovalsCard from '../components/StaffShiftApprovalsCard';
 import {
   Plus,
   Edit2,
@@ -110,6 +113,15 @@ export const OwnerStaffManager: React.FC = () => {
     return params.get('role') || 'all';
   });
   const [searchQuery, setSearchQuery] = useState('');
+  const [shiftRequests, setShiftRequests] = useState<IShiftClosingRequest[]>([]);
+
+  useEffect(() => {
+    if (!user?.tenantId) return;
+    const unsub = shiftService.subscribeToShiftClosingRequests(user.tenantId, (reqs) => {
+      setShiftRequests(reqs);
+    });
+    return () => unsub();
+  }, [user?.tenantId]);
 
   // Modals
   const [isInviteOpen, setIsInviteOpen] = useState(() => {
@@ -523,11 +535,19 @@ export const OwnerStaffManager: React.FC = () => {
           { id: 'waiter', label: `Waiters (${roleCounts['waiter'] || 0})`, icon: UserCheck },
           { id: 'kitchen', label: `Kitchen / Chefs (${roleCounts['kitchen'] || 0})`, icon: ChefHat },
           { id: 'manager', label: `Managers (${roleCounts['manager'] || 0})`, icon: Shield },
-          { id: 'admin', label: `Admin Access (${roleCounts['admin'] || 0})`, icon: ShieldCheck }
+          { id: 'admin', label: `Admin Access (${roleCounts['admin'] || 0})`, icon: ShieldCheck },
+          { id: 'shift-approvals', label: `Shift Approvals (${shiftRequests.filter(r => r.status === 'pending').length})`, icon: Clock }
         ]}
       />
 
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {filterRole === 'shift-approvals' ? (
+        <StaffShiftApprovalsCard 
+          requests={shiftRequests}
+          tenantId={user?.tenantId || ''}
+        />
+      ) : (
+        <>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center space-x-2 flex-wrap gap-y-2">
           {(['all', 'pending', 'active', 'suspended', 'archived'] as const).map((s) => {
             const count = s === 'all' ? (statusCounts['all'] || 0) : (statusCounts[s] || 0);
@@ -714,6 +734,8 @@ export const OwnerStaffManager: React.FC = () => {
             </table>
           </div>
         </Card>
+      )}
+      </>
       )}
 
       <Modal

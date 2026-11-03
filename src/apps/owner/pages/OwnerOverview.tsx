@@ -27,6 +27,9 @@ import { inventoryService } from '../../../shared/services/inventoryService';
 import { logEvent } from '../../../shared/services/eventEngine';
 import { reservationService } from '../../../shared/services/reservationService';
 import { featureFlags } from '../../../config/featureFlags';
+import { shiftService } from '../../../shared/services/shiftService';
+import { IShiftClosingRequest } from '../../../shared/domain/staff/types';
+import StaffShiftApprovalsCard from '../components/StaffShiftApprovalsCard';
 
 // UI Kit components
 import Card from '../../../components/ui/Card/Card';
@@ -189,6 +192,8 @@ export const OwnerOverview: React.FC = () => {
 
   const [isShiftsOpen, setIsShiftsOpen] = useState(false);
   const [shiftsType, setShiftsType] = useState<'waiter' | 'kitchen'>('waiter');
+  const [shiftRequests, setShiftRequests] = useState<IShiftClosingRequest[]>([]);
+  const [shiftModalTab, setShiftModalTab] = useState<'approvals' | 'active'>('approvals');
 
   // Annual Revenue Explorer States
   const [view, setView] = useState<'dashboard' | 'annual' | 'monthly' | 'reservations'>('dashboard');
@@ -449,6 +454,11 @@ export const OwnerOverview: React.FC = () => {
       console.warn('[OwnerOverview] Customers subscription warning:', err);
     });
 
+    // 14. Shift Closing Requests Subscription
+    const unsubShiftRequests = shiftService.subscribeToShiftClosingRequests(tenantId, (reqs) => {
+      setShiftRequests(reqs);
+    });
+
     return () => {
       unsubOrders();
       unsubTrans();
@@ -463,6 +473,7 @@ export const OwnerOverview: React.FC = () => {
       unsubEmployees();
       unsubMenuItems();
       unsubReservations();
+      unsubShiftRequests();
     };
   }, [tenantId]);
 
@@ -2169,6 +2180,15 @@ export const OwnerOverview: React.FC = () => {
               <span>Pending Invitations:</span>
               <span className="text-amber-500 font-extrabold">{waiterMetrics.pending} pending</span>
             </div>
+
+            <div className="flex justify-between items-center px-3 py-2 bg-slate-950/20 border border-slate-850 rounded-xl text-[10px] font-bold text-slate-500">
+              <span>Shift Closures:</span>
+              <span className={shiftRequests.filter(r => r.status === 'pending').length > 0 ? "text-amber-400 font-extrabold animate-pulse" : "text-emerald-450 font-extrabold"}>
+                {shiftRequests.filter(r => r.status === 'pending').length > 0 
+                  ? `${shiftRequests.filter(r => r.status === 'pending').length} sign-offs waiting` 
+                  : 'Balanced'}
+              </span>
+            </div>
           </div>
 
           {/* Action Buttons */}
@@ -2201,9 +2221,14 @@ export const OwnerOverview: React.FC = () => {
               size="xs" 
               variant="outline"
               onClick={() => { setShiftsType('waiter'); setIsShiftsOpen(true); }}
-              className="border-slate-800 text-slate-400 hover:text-textPearl font-bold rounded-xl py-2"
+              className="border-slate-800 text-slate-400 hover:text-textPearl font-bold rounded-xl py-2 relative"
             >
-              Shift Overview
+              <span>Shift Overview</span>
+              {shiftRequests.filter(r => r.status === 'pending').length > 0 && (
+                <span className="ml-1.5 px-1.5 py-0.2 rounded-full text-[9px] font-black bg-amber-500 text-slate-950 animate-pulse">
+                  {shiftRequests.filter(r => r.status === 'pending').length}
+                </span>
+              )}
             </Button>
           </div>
         </Card>
@@ -2281,6 +2306,12 @@ export const OwnerOverview: React.FC = () => {
           </div>
         </Card>
       </div>
+
+      {/* 4.5 Staff Shift Closing & Cash Handover Approvals */}
+      <StaffShiftApprovalsCard 
+        requests={shiftRequests}
+        tenantId={tenantId || ''}
+      />
 
       {/* 5. Quick Actions Toolbar (Floating action cards footer) */}
       <Card className="p-5 border-[#E5E0D9] bg-white space-y-3 shadow-sm rounded-2xl">
@@ -4200,25 +4231,121 @@ export const OwnerOverview: React.FC = () => {
       <Modal
         isOpen={isShiftsOpen}
         onClose={() => setIsShiftsOpen(false)}
-        title="Active Shift Overview"
+        title="Shift Management & Closing Approvals"
       >
         <div className="space-y-4 text-left text-xs">
-          <p className="text-slate-450">Active roster shifts currently logged in for table floor duties:</p>
-          
-          <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
-            {employees.filter(e => e.role === 'waiter' && e.status === 'active').map((emp, idx) => (
-              <div key={emp.id || idx} className="p-3 bg-slate-950/20 border border-slate-850 rounded-xl flex justify-between items-center">
-                <div className="space-y-0.5">
-                  <span className="font-bold text-textPearl block">{emp.fullName}</span>
-                  <span className="text-[10px] text-slate-500 block">{emp.email} · {emp.department}</span>
-                </div>
-                <Badge variant="success" className="text-[10px] font-bold">ON SHIFT</Badge>
-              </div>
-            ))}
-            {employees.filter(e => e.role === 'waiter' && e.status === 'active').length === 0 && (
-              <p className="text-slate-550 italic text-center py-4">No waiters currently marked active on shift.</p>
-            )}
+          {/* Tabs */}
+          <div className="flex border-b border-slate-800 pb-2 gap-3">
+            <button
+              onClick={() => setShiftModalTab('approvals')}
+              className={`pb-1 font-bold transition-all flex items-center gap-1.5 ${
+                shiftModalTab === 'approvals'
+                  ? 'text-indigo-400 border-b-2 border-indigo-500'
+                  : 'text-slate-400 hover:text-textPearl'
+              }`}
+            >
+              <span>Shift Closing Requests</span>
+              {shiftRequests.filter(r => r.status === 'pending').length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-amber-500 text-slate-950">
+                  {shiftRequests.filter(r => r.status === 'pending').length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setShiftModalTab('active')}
+              className={`pb-1 font-bold transition-all ${
+                shiftModalTab === 'active'
+                  ? 'text-indigo-400 border-b-2 border-indigo-500'
+                  : 'text-slate-400 hover:text-textPearl'
+              }`}
+            >
+              Active Roster ({employees.filter(e => e.role === 'waiter' && e.status === 'active').length})
+            </button>
           </div>
+
+          {shiftModalTab === 'approvals' ? (
+            <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+              {shiftRequests.length === 0 ? (
+                <p className="text-slate-500 italic text-center py-6">No shift closing requests found.</p>
+              ) : (
+                shiftRequests.map((req) => (
+                  <div key={req.id} className="p-3 bg-slate-950/40 border border-slate-850 rounded-xl space-y-2">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span className="font-bold text-textPearl text-sm">{req.staffName}</span>
+                        <span className="text-[10px] text-slate-500 block">{req.staffEmail} · {req.role}</span>
+                      </div>
+                      <Badge 
+                        variant={req.status === 'approved' ? 'success' : req.status === 'pending' ? 'warning' : 'muted'}
+                        className="text-[10px] font-bold"
+                      >
+                        {req.status.toUpperCase()}
+                      </Badge>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[11px] bg-slate-900/50 p-2 rounded-lg border border-slate-800">
+                      <div>
+                        <span className="text-slate-500 block text-[10px]">Cash to Collect</span>
+                        <span className="font-black text-emerald-400 font-mono">{formatPrice(req.report?.cashTotal || 0)}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 block text-[10px]">Total Sales</span>
+                        <span className="font-bold text-textPearl font-mono">{formatPrice(req.report?.revenue || 0)}</span>
+                      </div>
+                    </div>
+
+                    {req.status === 'pending' && (
+                      <div className="flex gap-2 pt-1">
+                        <Button
+                          size="xs"
+                          onClick={async () => {
+                            if (!tenantId) return;
+                            const revName = user?.displayName || user?.email?.split('@')[0] || 'Manager';
+                            await shiftService.approveShiftClosing(tenantId, req.id, revName, 'Shift verified in modal.');
+                            toast.success(`Approved shift for ${req.staffName}!`);
+                          }}
+                          className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs"
+                        >
+                          Approve Shift
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="outline"
+                          onClick={async () => {
+                            if (!tenantId) return;
+                            const reason = prompt('Enter revision instructions for staff member:');
+                            if (!reason) return;
+                            const revName = user?.displayName || user?.email?.split('@')[0] || 'Manager';
+                            await shiftService.rejectShiftClosing(tenantId, req.id, revName, reason);
+                            toast.success(`Revision request sent to ${req.staffName}`);
+                          }}
+                          className="border-rose-800 text-rose-400 hover:bg-rose-950 font-bold text-xs"
+                        >
+                          Request Revision
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
+              <p className="text-slate-450">Active roster shifts currently logged in for table floor duties:</p>
+              {employees.filter(e => e.role === 'waiter' && e.status === 'active').map((emp, idx) => (
+                <div key={emp.id || idx} className="p-3 bg-slate-950/20 border border-slate-850 rounded-xl flex justify-between items-center">
+                  <div className="space-y-0.5">
+                    <span className="font-bold text-textPearl block">{emp.fullName}</span>
+                    <span className="text-[10px] text-slate-500 block">{emp.email} · {emp.department}</span>
+                  </div>
+                  <Badge variant="success" className="text-[10px] font-bold">ON SHIFT</Badge>
+                </div>
+              ))}
+              {employees.filter(e => e.role === 'waiter' && e.status === 'active').length === 0 && (
+                <p className="text-slate-550 italic text-center py-4">No waiters currently marked active on shift.</p>
+              )}
+            </div>
+          )}
           
           <div className="flex justify-end pt-2">
             <Button onClick={() => setIsShiftsOpen(false)} className="bg-slate-800 text-textPearl hover:bg-slate-700 font-semibold">

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useWaiterData } from './useWaiterData';
 import { useAuth } from '../../../context/AuthContext';
 import Card from '../../../components/ui/Card/Card';
@@ -6,12 +6,44 @@ import Badge from '../../../components/ui/Badge/Badge';
 import LoadingSpinner from '../../../components/ui/LoadingSpinner/LoadingSpinner';
 import { formatPrice } from '../../../utils/format';
 import toast from 'react-hot-toast';
-import { Calendar, DollarSign, Users, Award, TrendingUp, ClipboardCheck, CheckSquare, Printer, Download } from 'lucide-react';
+import { 
+  Calendar, 
+  DollarSign, 
+  Users, 
+  Award, 
+  TrendingUp, 
+  ClipboardCheck, 
+  CheckSquare, 
+  Printer, 
+  Download,
+  Clock,
+  CheckCircle2,
+  AlertCircle,
+  RotateCcw,
+  Sparkles,
+  ShieldCheck
+} from 'lucide-react';
+import { shiftService } from '../../../shared/services/shiftService';
+import { IShiftClosingRequest } from '../../../shared/domain/staff/types';
 
 export const WaiterShiftReportPage: React.FC = () => {
   const { user } = useAuth();
   const { orders = [], waiterRequests = [], isLoading } = useWaiterData();
-  const [approvalRequested, setApprovalRequested] = useState(false);
+  const [activeRequest, setActiveRequest] = useState<IShiftClosingRequest | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
+
+  // Subscribe to real-time shift closing request for current staff member
+  useEffect(() => {
+    const tenant = (user as any)?.tenantId;
+    if (!tenant || !user?.uid) return;
+
+    const unsub = shiftService.subscribeToStaffShiftRequest(tenant, user.uid, (req) => {
+      setActiveRequest(req);
+    });
+
+    return () => unsub();
+  }, [user?.uid, (user as any)?.tenantId]);
 
   const report = useMemo(() => {
     const waiterOrders = (orders || []).filter(o => o.waiterId === user?.uid);
@@ -83,9 +115,55 @@ export const WaiterShiftReportPage: React.FC = () => {
     };
   }, [orders, waiterRequests, user]);
 
-  const handleRequestApproval = () => {
-    setApprovalRequested(true);
-    toast.success('Shift checkout approval sent to manager console.');
+  const handleRequestApproval = async () => {
+    const tenant = (user as any)?.tenantId;
+    if (!tenant || !user?.uid) {
+      toast.error('Unable to locate restaurant tenant or user profile.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    const toastId = toast.loading('Submitting shift report to manager dashboard...');
+    try {
+      await shiftService.requestShiftClosing(tenant, {
+        staffId: user.uid,
+        staffName: user.displayName || user.email?.split('@')[0] || 'Waiter',
+        staffEmail: user.email || '',
+        role: (user as any)?.role || 'waiter',
+        report
+      });
+      toast.success('Shift closing approval requested! Manager has been notified.', { id: toastId });
+    } catch (err: any) {
+      console.error('Error submitting shift closing request:', err);
+      toast.error('Failed to submit approval request: ' + (err?.message || 'Error'), { id: toastId });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCloseAndArchiveShift = async () => {
+    const tenant = (user as any)?.tenantId;
+    if (!tenant || !user?.uid || !activeRequest?.id) {
+      toast.error('No active approved shift request found.');
+      return;
+    }
+
+    if (activeRequest.status !== 'approved') {
+      toast.error('Manager approval is required before closing this shift.');
+      return;
+    }
+
+    setIsArchiving(true);
+    const toastId = toast.loading('Archiving and locking shift...');
+    try {
+      await shiftService.closeAndArchiveShift(tenant, activeRequest.id, user.uid);
+      toast.success('Shift successfully closed & archived. Thank you for your service!', { id: toastId });
+    } catch (err: any) {
+      console.error('Error closing shift:', err);
+      toast.error('Failed to close shift: ' + (err?.message || 'Error'), { id: toastId });
+    } finally {
+      setIsArchiving(false);
+    }
   };
 
   const handleExportCSV = () => {
@@ -250,38 +328,103 @@ export const WaiterShiftReportPage: React.FC = () => {
       </div>
 
       {/* Approval Status and Close Shift Actions */}
-      <Card className="p-6 border border-[#E3DED5] bg-white rounded-2xl shadow-xs flex flex-col md:flex-row justify-between items-center gap-4 text-center md:text-left">
-        <div>
-          <h3 className="font-extrabold text-sm text-[#18201D] flex items-center gap-2 justify-center md:justify-start">
-            <span>Shift Closing Checklist</span>
-            {approvalRequested ? (
-              <Badge variant="warning" className="font-bold">Manager Review Pending</Badge>
-            ) : (
-              <Badge variant="muted" className="font-bold">Awaiting Manager Sign-off</Badge>
+      <Card className="p-6 border border-[#E3DED5] bg-white rounded-2xl shadow-xs space-y-4">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 text-left">
+          <div className="space-y-1">
+            <h3 className="font-extrabold text-sm text-[#18201D] flex items-center gap-2">
+              <span>Shift Closing Checklist</span>
+              {!activeRequest || activeRequest.status === 'closed' ? (
+                <Badge variant="muted" className="font-bold">Awaiting Manager Sign-off</Badge>
+              ) : activeRequest.status === 'pending' ? (
+                <Badge variant="warning" className="font-bold flex items-center gap-1.5 animate-pulse">
+                  <Clock className="w-3.5 h-3.5" />
+                  Manager Review Pending
+                </Badge>
+              ) : activeRequest.status === 'approved' ? (
+                <Badge variant="success" className="font-bold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Approved by Manager
+                </Badge>
+              ) : (
+                <Badge variant="danger" className="font-bold flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  Revision Requested
+                </Badge>
+              )}
+            </h3>
+            
+            <p className="text-xs text-[#5F6875]">
+              {!activeRequest || activeRequest.status === 'closed'
+                ? 'Please ensure all pending table invoices are checked out and manager approval is requested.'
+                : activeRequest.status === 'pending'
+                ? `Approval requested at ${new Date(activeRequest.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. Cash handover: ${formatPrice(activeRequest.report.cashTotal)}. Awaiting manager sign-off on the Owner Dashboard.`
+                : activeRequest.status === 'approved'
+                ? `Approved by ${activeRequest.reviewedBy || 'Manager'} at ${activeRequest.reviewedAt ? new Date(activeRequest.reviewedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'recently'}. Note: "${activeRequest.reviewNotes || 'Sign-off granted'}". You may now close and archive.`
+                : `Manager requested revision: "${activeRequest.reviewNotes || 'Please re-verify cash balance or open orders'}". Adjust and re-submit.`}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2.5 items-center">
+            {(!activeRequest || activeRequest.status === 'closed') && (
+              <button
+                onClick={handleRequestApproval}
+                disabled={isSubmitting}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all shadow-xs flex items-center gap-1.5"
+              >
+                {isSubmitting ? <LoadingSpinner size="sm" /> : <Sparkles className="w-3.5 h-3.5" />}
+                <span>Request Approval</span>
+              </button>
             )}
-          </h3>
-          <p className="text-xs text-[#5F6875] mt-1">Please ensure all pending table invoices are checked out and manager approval is requested.</p>
-        </div>
-        <div className="flex gap-2">
-          {!approvalRequested && (
-            <button
-              onClick={handleRequestApproval}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all"
-            >
-              Request Approval
-            </button>
-          )}
-          <button
-            onClick={() => toast.success('Shift closed successfully.')}
-            disabled={!approvalRequested}
-            className={`px-5 py-2.5 font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all ${
-              approvalRequested 
-                ? 'bg-primary text-white hover:bg-primary/90' 
-                : 'bg-[#E3DED5] text-[#667085] cursor-not-allowed'
-            }`}
-          >
-            Close & Archive Shift
-          </button>
+
+            {activeRequest?.status === 'pending' && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded-xl flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 animate-spin" />
+                  <span>Awaiting Manager Sign-off</span>
+                </span>
+                <button
+                  onClick={handleRequestApproval}
+                  disabled={isSubmitting}
+                  className="px-3 py-2 bg-white border border-[#E3DED5] text-[#5F6875] hover:text-[#18201D] text-xs font-bold rounded-xl transition-all"
+                  title="Update & Re-send report metrics"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {activeRequest?.status === 'rejected' && (
+              <button
+                onClick={handleRequestApproval}
+                disabled={isSubmitting}
+                className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all shadow-xs flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Re-submit Approval</span>
+              </button>
+            )}
+
+            {activeRequest?.status === 'approved' && (
+              <button
+                onClick={handleCloseAndArchiveShift}
+                disabled={isArchiving}
+                className="px-6 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all shadow-xs flex items-center gap-2"
+              >
+                {isArchiving ? <LoadingSpinner size="sm" /> : <ShieldCheck className="w-4 h-4" />}
+                <span>Close & Archive Shift</span>
+              </button>
+            )}
+
+            {activeRequest?.status !== 'approved' && (
+              <button
+                disabled
+                title="Shift must be approved by the manager on the Owner Dashboard first."
+                className="px-5 py-2.5 bg-[#E3DED5] text-[#8C95A3] cursor-not-allowed font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all"
+              >
+                Close & Archive Shift
+              </button>
+            )}
+          </div>
         </div>
       </Card>
     </div>

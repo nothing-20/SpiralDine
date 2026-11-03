@@ -221,6 +221,7 @@ function groupTablesByFloorAndSection(tables) {
     secMap.get(section).push(tbl);
   });
 
+
   const result = [];
   floorMap.forEach((secMap, floorName) => {
     let floorTotal = 0;
