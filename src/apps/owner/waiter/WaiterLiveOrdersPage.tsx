@@ -45,7 +45,7 @@ import {
  * - READY, PICKED_UP (Awaiting waiter service)
  * - SERVED, DELIVERED, DINING, DINING_COMPLETED, BILL_REQUESTED (Served to table, payment still pending)
  */
-export const isCompletedOrderStatus = (status?: string, paymentStatus?: string): boolean => {
+export const isCompletedOrderStatus = (status?: string, paymentStatus?: string, createdAt?: string): boolean => {
   if (!status) return false;
   const s = status.toUpperCase().trim();
   const p = (paymentStatus || '').toLowerCase().trim();
@@ -75,11 +75,24 @@ export const isCompletedOrderStatus = (status?: string, paymentStatus?: string):
     return true;
   }
 
+  // Stale/Historical order guard: Any order placed over 24 hours ago that reached DELIVERED/SERVED/COMPLETED
+  // or is marked completed in a prior shift is terminal
+  if (createdAt) {
+    try {
+      const createdTime = new Date(createdAt).getTime();
+      if (!isNaN(createdTime) && (Date.now() - createdTime > 24 * 60 * 60 * 1000)) {
+        if (s === 'COMPLETED' || s === 'DELIVERED' || s === 'SERVED' || s === 'DINING_COMPLETED' || p === 'paid') {
+          return true;
+        }
+      }
+    } catch (_e) {}
+  }
+
   return false;
 };
 
-export const isActiveOrderStatus = (status?: string, paymentStatus?: string): boolean => {
-  return !isCompletedOrderStatus(status, paymentStatus);
+export const isActiveOrderStatus = (status?: string, paymentStatus?: string, createdAt?: string): boolean => {
+  return !isCompletedOrderStatus(status, paymentStatus, createdAt);
 };
 
 export const WaiterLiveOrdersPage: React.FC = () => {
@@ -172,7 +185,7 @@ export const WaiterLiveOrdersPage: React.FC = () => {
   // 1. Separate Active vs Completed Datasets
   const activeOrders = useMemo(() => {
     return orders
-      .filter(o => isActiveOrderStatus(o.status, o.paymentStatus))
+      .filter(o => isActiveOrderStatus(o.status, o.paymentStatus, o.createdAt))
       .sort((a, b) => {
         // Priority sort for active: READY first, then PREPARING, then newest
         const aReady = a.status === 'READY';
@@ -193,7 +206,7 @@ export const WaiterLiveOrdersPage: React.FC = () => {
 
   const completedOrders = useMemo(() => {
     return orders
-      .filter(o => isCompletedOrderStatus(o.status, o.paymentStatus))
+      .filter(o => isCompletedOrderStatus(o.status, o.paymentStatus, o.createdAt))
       .sort((a, b) => {
         const timeA = new Date((a as any).completedAt || a.updatedAt || a.createdAt || 0).getTime();
         const timeB = new Date((b as any).completedAt || b.updatedAt || b.createdAt || 0).getTime();

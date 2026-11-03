@@ -44,6 +44,7 @@ export const isOrderTerminal = (order?: {
   paymentStatus?: string; 
   billStatus?: string;
   isPaid?: boolean;
+  createdAt?: string;
 } | null): boolean => {
   if (!order) return false;
   const status = (order.status || order.orderStatus || '').toUpperCase().trim();
@@ -73,6 +74,19 @@ export const isOrderTerminal = (order?: {
   // Legacy fallback: if status is explicitly COMPLETED and paymentStatus is empty/undefined, consider terminal
   if (status === 'COMPLETED' && !paymentStatus) {
     return true;
+  }
+
+  // Stale/Historical order guard: Any order placed over 24 hours ago that reached DELIVERED/SERVED/COMPLETED
+  // or is marked completed in a prior shift is terminal (prevents stale test/demo orders from permanently locking tables)
+  if (order.createdAt) {
+    try {
+      const createdTime = new Date(order.createdAt).getTime();
+      if (!isNaN(createdTime) && (Date.now() - createdTime > 24 * 60 * 60 * 1000)) {
+        if (status === 'COMPLETED' || status === 'DELIVERED' || status === 'SERVED' || status === 'DINING_COMPLETED' || isPaid) {
+          return true;
+        }
+      }
+    } catch (_e) {}
   }
 
   return false;

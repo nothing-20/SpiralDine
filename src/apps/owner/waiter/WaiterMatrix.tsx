@@ -212,12 +212,26 @@ const getNormalizedTableNum = (val?: string | number): string => {
 };
 
 const findActiveOrderForTable = (table: ITable, orderList: IOrder[]): IOrder | undefined => {
+  // If the table is explicitly Available or empty in Firestore and has no activeOrderId bound to it,
+  // do NOT resurrect it as 'occupied' using a fallback tableNumber match against historical orders
+  const isTableExplicitlyAvailable = (table.status || '').toLowerCase() === 'available' || (table.status || '').toLowerCase() === 'empty';
+  if (isTableExplicitlyAvailable && !table.activeOrderId && !table.currentOrderId) {
+    return undefined;
+  }
+
   const tableCleanNum = getNormalizedTableNum(table.number || (table as any).tableNumber || table.tableName || table.name);
   return orderList.find(o => {
     if (!isOrderActive(o)) return false;
     if (table.activeOrderId && (o.orderId === table.activeOrderId || o.id === table.activeOrderId)) return true;
     if (table.currentOrderId && (o.orderId === table.currentOrderId || o.id === table.currentOrderId)) return true;
     if (o.tableId && (o.tableId === table.id || o.tableId === (table as any).tableId)) return true;
+
+    // Only match by tableNumber if order was placed recently (within active 18h operational window)
+    if (o.createdAt) {
+      const ageMs = Date.now() - new Date(o.createdAt).getTime();
+      if (ageMs > 18 * 60 * 60 * 1000) return false;
+    }
+
     const orderCleanNum = getNormalizedTableNum(o.tableNumber || (o as any).table);
     if (tableCleanNum && orderCleanNum && tableCleanNum === orderCleanNum) return true;
     return false;
@@ -1902,10 +1916,17 @@ export const WaiterMatrix: React.FC = () => {
     const efficiency = performanceStats.efficiencyScore;
 
     const today = new Date().toDateString();
-    const pendingBillsOrders = orders.filter(o => 
-      o.status === 'BILL_REQUESTED' || 
-      (o.paymentStatus === 'pending' && (o.status === 'SERVED' || o.status === 'DELIVERED' || o.status === 'DINING'))
-    );
+    const pendingBillsOrders = orders.filter(o => {
+      if (!isOrderActive(o)) return false;
+      if (o.createdAt) {
+        const ageMs = Date.now() - new Date(o.createdAt).getTime();
+        if (ageMs > 24 * 60 * 60 * 1000) return false;
+      }
+      return (
+        o.status === 'BILL_REQUESTED' || 
+        (o.paymentStatus === 'pending' && (o.status === 'SERVED' || o.status === 'DELIVERED' || o.status === 'DINING'))
+      );
+    });
     const pendingBillsCount = pendingBillsOrders.length;
     const pendingBillsTotal = pendingBillsOrders.reduce((sum, o) => sum + (o.total || 0), 0);
 
