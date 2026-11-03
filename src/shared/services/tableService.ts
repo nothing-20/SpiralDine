@@ -33,7 +33,16 @@ export const tableService = {
     const rawStr = String(tableIdentifier).trim();
     const cleanNum = cleanTableIdentifier(rawStr);
 
-    const isTableDocArchived = (t: any) => !t || t.isArchived === true || t.archived === true || t.isActive === false;
+    const isTableDocArchived = (t: any) => {
+      if (!t) return true;
+      if (t.isArchived === true || t.archived === true || t.isActive === false) return true;
+      const s = (t.status || t.tableStatus || '').toLowerCase();
+      if (s === 'disabled' || s === 'archived' || s === 'deleted') return true;
+      const num = t.number ?? t.tableNumber;
+      const name = t.tableName ?? t.name;
+      if (!num && !name) return true;
+      return false;
+    };
 
     // 1. Check direct doc ref by exact identifier
     try {
@@ -133,12 +142,16 @@ export const tableService = {
 
     try {
       const match = await this.findTableByNumberOrId(tenantId, tableIdentifier);
+      if (!match) {
+        console.warn(`[tableService] Table ${tableIdentifier} not found in restaurant ${tenantId}. Skipping state update.`);
+        return;
+      }
       const cleanNum = cleanTableIdentifier(tableIdentifier);
-      const targetTableId = match ? match.id : (String(tableIdentifier).startsWith('TBL-') ? String(tableIdentifier) : `TBL-${cleanNum}`);
+      const targetTableId = match.id;
       const tableRef = doc(db, 'restaurants', tenantId, 'tables', targetTableId);
 
       const nowIso = new Date().toISOString();
-      const currentTable = match?.table;
+      const currentTable = match.table;
 
       // 1. Release any previous tables this diner was browsing in this restaurant to prevent multi-table ghost occupancy
       if (customerInfo?.name || customerInfo?.phone || customerInfo?.customerId) {
@@ -317,8 +330,12 @@ export const tableService = {
 
     try {
       const match = await this.findTableByNumberOrId(tenantId, tableIdentifier);
+      if (!match) {
+        console.warn(`[tableService] Table ${tableIdentifier} not found in restaurant ${tenantId}. Skipping table order assignment.`);
+        return;
+      }
       const cleanNum = cleanTableIdentifier(tableIdentifier);
-      const targetTableId = match ? match.id : (String(tableIdentifier).startsWith('TBL-') ? String(tableIdentifier) : `TBL-${cleanNum}`);
+      const targetTableId = match.id;
       const tableRef = doc(db, 'restaurants', tenantId, 'tables', targetTableId);
 
       const nowIso = new Date().toISOString();
@@ -371,8 +388,12 @@ export const tableService = {
 
     try {
       const match = await this.findTableByNumberOrId(tenantId, tableIdentifier);
+      if (!match) {
+        console.warn(`[tableService] Table ${tableIdentifier} not found in restaurant ${tenantId}. Skipping table order assignment.`);
+        return;
+      }
       const cleanNum = cleanTableIdentifier(tableIdentifier);
-      const targetTableId = match ? match.id : (String(tableIdentifier).startsWith('TBL-') ? String(tableIdentifier) : `TBL-${cleanNum}`);
+      const targetTableId = match.id;
       const tableRef = doc(db, 'restaurants', tenantId, 'tables', targetTableId);
 
       const nowIso = new Date().toISOString();
@@ -419,8 +440,12 @@ export const tableService = {
 
     try {
       const match = await this.findTableByNumberOrId(tenantId, tableIdentifier);
+      if (!match) {
+        console.warn(`[tableService] Table ${tableIdentifier} not found in restaurant ${tenantId}. Skipping table order assignment.`);
+        return;
+      }
       const cleanNum = cleanTableIdentifier(tableIdentifier);
-      const targetTableId = match ? match.id : (String(tableIdentifier).startsWith('TBL-') ? String(tableIdentifier) : `TBL-${cleanNum}`);
+      const targetTableId = match.id;
       const tableRef = doc(db, 'restaurants', tenantId, 'tables', targetTableId);
 
       const nowIso = new Date().toISOString();
@@ -474,8 +499,12 @@ export const tableService = {
 
     try {
       const match = await this.findTableByNumberOrId(tenantId, tableIdentifier);
+      if (!match) {
+        console.warn(`[tableService] Table ${tableIdentifier} not found in restaurant ${tenantId}. Skipping table order assignment.`);
+        return;
+      }
       const cleanNum = cleanTableIdentifier(tableIdentifier);
-      const targetTableId = match ? match.id : (String(tableIdentifier).startsWith('TBL-') ? String(tableIdentifier) : `TBL-${cleanNum}`);
+      const targetTableId = match.id;
       const tableRef = doc(db, 'restaurants', tenantId, 'tables', targetTableId);
 
       const nowIso = new Date().toISOString();

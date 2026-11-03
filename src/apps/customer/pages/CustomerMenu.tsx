@@ -824,27 +824,7 @@ export const CustomerMenu: React.FC = () => {
             qSnap = await getDocs(q2);
           }
           if (qSnap.empty) {
-            // Non-blocking table registration to prevent blocking diner orders
-            try {
-              await setDoc(tableDocRef, {
-                id: resolvedTableId,
-                tableId: resolvedTableId,
-                tableNumber: cleanTableNum,
-                tableName: `Table ${cleanTableNum}`,
-                number: cleanTableNum,
-                floor: 'Ground Floor',
-                section: 'Main Dining',
-                capacity: 4,
-                status: 'Occupied',
-                shape: 'square',
-                branchId: resolvedBranchId,
-                isActive: true,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString()
-              }, { merge: true });
-            } catch (initErr) {
-              console.warn('[CustomerMenu] Auto-provision table context warning:', initErr);
-            }
+            console.warn(`[CustomerMenu] Table ${cleanTableNum} is not configured in restaurant ${tenantId}.`);
           }
         }
       } catch (tableCheckErr) {

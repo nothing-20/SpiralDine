@@ -427,7 +427,7 @@ export const WaiterAssignedTablesPage: React.FC = () => {
       return;
     }
 
-    const effectiveTenantId = user?.tenantId || (orderTable as any)?.tenantId || localStorage.getItem('lastTenantId') || localStorage.getItem('tenantId') || localStorage.getItem('spiral_tenant_id') || 'bawarchi';
+    const effectiveTenantId = user?.tenantId || (orderTable as any)?.tenantId || localStorage.getItem('lastTenantId') || localStorage.getItem('tenantId') || localStorage.getItem('spiral_tenant_id') || '';
 
     if (!effectiveTenantId) {
       toast.error('Restaurant ID missing. Please refresh or re-login.');

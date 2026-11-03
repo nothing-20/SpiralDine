@@ -93,6 +93,11 @@ export const TableSelectionModal: React.FC<TableSelectionModalProps> = ({
           if (data.isArchived === true || data.archived === true || data.isActive === false) {
             return;
           }
+          const rawNum = data.number ?? data.tableNumber;
+          const rawName = data.tableName ?? data.name;
+          if (!rawNum && !rawName) return;
+          const s = (data.status || data.tableStatus || '').toLowerCase();
+          if (s === 'disabled' || s === 'archived' || s === 'deleted') return;
 
           list.push({
             id: docSnap.id,

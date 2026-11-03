@@ -10,7 +10,8 @@ import {
   limit,
   arrayUnion,
   writeBatch,
-  setDoc
+  setDoc,
+  getDoc
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
@@ -285,6 +286,7 @@ export const WaiterMatrix: React.FC = () => {
   
   const [tables, setTables] = useState<ITable[]>([]);
   const [orders, setOrders] = useState<IOrder[]>([]);
+  const [restaurantName, setRestaurantName] = useState<string>(() => (user as any)?.restaurantName || '');
   const [legacyRequests, setLegacyRequests] = useState<IServiceRequest[]>([]);
   const [waiterRequests, setWaiterRequests] = useState<any[]>([]);
   const [menuItems, setMenuItems] = useState<IMenuItem[]>([]);
@@ -401,6 +403,31 @@ export const WaiterMatrix: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const tenantId = user?.tenantId;
+    if (!tenantId) return;
+
+    if ((user as any)?.restaurantName) {
+      setRestaurantName((user as any).restaurantName);
+    }
+
+    const fetchRest = async () => {
+      try {
+        const rDoc = await getDoc(doc(db, 'restaurants', tenantId));
+        if (rDoc.exists()) {
+          const data = rDoc.data();
+          const name = data.name || data.restaurantName;
+          if (name) {
+            setRestaurantName(name);
+          }
+        }
+      } catch (err) {
+        console.warn('Error fetching restaurant name in WaiterMatrix:', err);
+      }
+    };
+    fetchRest();
+  }, [user?.tenantId, (user as any)?.restaurantName]);
+
+  useEffect(() => {
     if (!user?.tenantId) return;
 
     setIsLoading(true);
@@ -411,6 +438,11 @@ export const WaiterMatrix: React.FC = () => {
       snap.forEach(docSnap => {
         const data = docSnap.data();
         if (data.isArchived === true || data.archived === true || data.isActive === false) return;
+        const num = data.number ?? data.tableNumber;
+        const name = data.tableName ?? data.name;
+        if (!num && !name) return;
+        const s = (data.status || data.tableStatus || '').toLowerCase();
+        if (s === 'disabled' || s === 'archived' || s === 'deleted') return;
         list.push({ id: docSnap.id, ...data } as ITable);
       });
       list.sort((a, b) => {
@@ -1612,7 +1644,7 @@ export const WaiterMatrix: React.FC = () => {
       return;
     }
 
-    const effectiveTenantId = user?.tenantId || (orderTable as any)?.tenantId || localStorage.getItem('lastTenantId') || localStorage.getItem('tenantId') || localStorage.getItem('spiral_tenant_id') || 'bawarchi';
+    const effectiveTenantId = user?.tenantId || (orderTable as any)?.tenantId || localStorage.getItem('lastTenantId') || localStorage.getItem('tenantId') || localStorage.getItem('spiral_tenant_id') || '';
 
     if (!effectiveTenantId) {
       toast.error('Restaurant ID missing. Please refresh or re-login.');
@@ -1832,7 +1864,7 @@ export const WaiterMatrix: React.FC = () => {
   const renderShiftControlCard = () => {
     const rawName = user?.displayName || user?.email?.split('@')[0] || 'Waiter';
     const waiterName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
-    const restaurantName = (user as any)?.restaurantName || 'Bawarchi Restaurant';
+    const activeRestName = restaurantName || (user as any)?.restaurantName || (user?.tenantId ? user.tenantId.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Paradise Biryani');
     const durationStr = shift.isActive ? formatDuration(getShiftWorkingTime(shift)) : '';
 
     return (
@@ -1864,7 +1896,7 @@ export const WaiterMatrix: React.FC = () => {
 
             <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#E3DED5] bg-[#F7F4EE] text-xs font-bold text-[#18201D]">
               <MapPin className="w-3.5 h-3.5 text-amber-600" />
-              <span>{restaurantName}</span>
+              <span>{activeRestName}</span>
             </div>
 
             {shift.isActive ? (

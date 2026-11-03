@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, doc, getDoc } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { IOrder, ITable } from '../../../types';
@@ -11,7 +11,32 @@ export function useWaiterData() {
   const [waiterRequests, setWaiterRequests] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
+  const [restaurantName, setRestaurantName] = useState<string>(() => (user as any)?.restaurantName || '');
   const [isLoading, setIsLoading] = useState(true);
+
+  // 0. Restaurant Info Listener/Fetcher
+  useEffect(() => {
+    if (!user?.tenantId) return;
+
+    if ((user as any)?.restaurantName) {
+      setRestaurantName((user as any).restaurantName);
+    }
+
+    const fetchRest = async () => {
+      try {
+        const rDoc = await getDoc(doc(db, 'restaurants', user.tenantId));
+        if (rDoc.exists()) {
+          const d = rDoc.data();
+          if (d.name || d.restaurantName) {
+            setRestaurantName(d.name || d.restaurantName);
+          }
+        }
+      } catch (e) {
+        console.warn('Error fetching restaurant info in useWaiterData:', e);
+      }
+    };
+    fetchRest();
+  }, [user?.tenantId, (user as any)?.restaurantName]);
 
   // 1. Real-time Tables Listener
   useEffect(() => {
@@ -26,6 +51,11 @@ export function useWaiterData() {
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
           if (data.isArchived === true || data.archived === true || data.isActive === false) return;
+          const num = data.number ?? data.tableNumber;
+          const name = data.tableName ?? data.name;
+          if (!num && !name) return;
+          const s = (data.status || data.tableStatus || '').toLowerCase();
+          if (s === 'disabled' || s === 'archived' || s === 'deleted') return;
           list.push({ id: docSnap.id, ...data } as ITable);
         });
         list.sort((a, b) => {
@@ -145,5 +175,5 @@ export function useWaiterData() {
     return () => unsubscribe();
   }, [user?.tenantId]);
 
-  return { tables, orders, waiterRequests, employees, menuItems, isLoading };
+  return { tables, orders, waiterRequests, employees, menuItems, restaurantName, isLoading };
 }

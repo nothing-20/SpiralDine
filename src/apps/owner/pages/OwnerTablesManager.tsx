@@ -373,6 +373,11 @@ export const OwnerTablesManager: React.FC = () => {
         querySnap.forEach((docSnap) => {
           const raw = docSnap.data();
           if (!raw.isArchived && !raw.archived && raw.isActive !== false) {
+            const rawNum = raw.number ?? raw.tableNumber;
+            const rawName = raw.tableName ?? raw.name;
+            if (!rawNum && !rawName) return;
+            const s = (raw.status || raw.tableStatus || '').toLowerCase();
+            if (s === 'disabled' || s === 'archived' || s === 'deleted') return;
             list.push(mapFirestoreDocToTable(docSnap.id, raw, idx++));
           }
         });

@@ -69,8 +69,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
   // Live active counts for badges
   const [activeCookingCount, setActiveCookingCount] = useState<number>(0);
   const [activeWaiterAlertsCount, setActiveWaiterAlertsCount] = useState<number>(0);
-  const [restaurantName, setRestaurantName] = useState<string>('Bawarchi Restaurant');
-  const [restaurantCity, setRestaurantCity] = useState<string>('Hyderabad');
+  const [restaurantName, setRestaurantName] = useState<string>(() => (user as any)?.restaurantName || '');
+  const [restaurantCity, setRestaurantCity] = useState<string>('');
   const [unreadAlertsCount, setUnreadAlertsCount] = useState<number>(0);
 
   useEffect(() => {
@@ -293,7 +293,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
             <div className="flex items-center justify-between text-left cursor-default">
               <div className="min-w-0 pr-2">
                 <p className="text-xs font-bold text-white truncate leading-tight font-serif tracking-wide">
-                  {restaurantName}
+                  {restaurantName || (user as any)?.restaurantName || 'SpiralDine'}
                 </p>
                 <p className="text-[11px] text-[#8D9B95] truncate mt-0.5 flex items-center space-x-1 font-sans">
                   <span>{restaurantCity}</span>
@@ -423,7 +423,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
             <div className="flex items-center justify-between text-left cursor-default">
               <div className="min-w-0 pr-2">
                 <p className="text-xs font-bold text-white truncate leading-tight font-serif tracking-wide">
-                  {restaurantName}
+                  {restaurantName || (user as any)?.restaurantName || 'SpiralDine'}
                 </p>
                 <p className="text-[11px] text-[#8FA59F] truncate mt-0.5 flex items-center space-x-1 font-sans">
                   <span>{restaurantCity}</span>
