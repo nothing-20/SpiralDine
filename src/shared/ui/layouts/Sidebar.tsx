@@ -97,6 +97,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
         const data = d.data();
         if (data.requestType === 'New Order Placed' || data.type === 'New Order Placed') return;
         const s = (data.status || '').toLowerCase();
+        // Shift boundary: Ignore requests older than 24h
+        if (data.createdAt && (Date.now() - new Date(data.createdAt).getTime() > 24 * 60 * 60 * 1000)) return;
         if (s !== 'completed' && s !== 'cancelled' && s !== 'rejected') {
           count++;
         }

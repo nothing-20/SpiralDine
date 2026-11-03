@@ -18,6 +18,7 @@ import { formatPrice } from '../../../utils/format';
 import toast from 'react-hot-toast';
 import { billingService } from '../../../shared/services/billingService';
 import CanonicalBillModal from '../../../shared/ui/billing/CanonicalBillModal';
+import { useWaiterData } from './useWaiterData';
 import { 
   Coffee, 
   DollarSign, 
@@ -44,6 +45,24 @@ type TAlertsTab = 'orders' | 'assistance' | 'history';
 
 export const WaiterAlerts: React.FC = () => {
   const { user } = useAuth();
+  const { tables } = useWaiterData();
+
+  const formatTableLabel = (rawNum?: string | number, tableId?: string, tableName?: string): string => {
+    if (tableName && !tableName.toLowerCase().startsWith('table ')) {
+      return tableName;
+    }
+    const str = String(rawNum || '').trim();
+    const matched = (tables || []).find(t => 
+      t.id === str || 
+      t.id === `TBL-${str}` || 
+      t.id === tableId || 
+      String(t.number) === str || 
+      String((t as any).tableNumber) === str
+    );
+    if (matched?.number) return `TABLE ${matched.number}`;
+    if (matched?.tableName) return matched.tableName.toUpperCase();
+    return `TABLE ${str.replace(/^TBL-/i, '')}`;
+  };
   
   const [activeTab, setActiveTab] = useState<TAlertsTab>('assistance');
   const [orders, setOrders] = useState<IOrder[]>([]);
@@ -128,8 +147,9 @@ export const WaiterAlerts: React.FC = () => {
 
           const item = { id: docSnap.id, ...data };
           const status = (data.status || 'Pending').toLowerCase();
+          const isStale = data.createdAt && (Date.now() - new Date(data.createdAt).getTime() > 24 * 60 * 60 * 1000);
 
-          if (status === 'completed' || status === 'cancelled' || status === 'rejected') {
+          if (status === 'completed' || status === 'cancelled' || status === 'rejected' || isStale) {
             histList.push(item);
           } else {
             activeList.push(item);
@@ -894,7 +914,7 @@ export const WaiterAlerts: React.FC = () => {
                           <div className="min-w-0">
                             <div className="flex items-center space-x-1.5 flex-wrap">
                               <span className="font-bold text-base md:text-lg text-[#18201D] tracking-tight">
-                                TABLE {item.tableNumber}
+                                {formatTableLabel(item.tableNumber, item.tableId, item.tableName)}
                               </span>
                               <span className="text-[10px] font-mono text-[#5F6762] bg-[#F7F4EE] px-1.5 py-0.5 rounded border border-[#E3DED5]">
                                 {item.id.substring(0, 10)}
@@ -1080,7 +1100,7 @@ export const WaiterAlerts: React.FC = () => {
                           </td>
                           <td className="p-3.5">
                             <span className="font-extrabold text-[#18201D] bg-[#F7F4EE] border border-[#E3DED5] px-2 py-0.5 rounded">
-                              Table {item.tableNumber}
+                              {formatTableLabel(item.tableNumber, item.tableId, item.tableName)}
                             </span>
                           </td>
                           <td className="p-3.5 text-[#5F6762]">

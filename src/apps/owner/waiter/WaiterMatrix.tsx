@@ -11,7 +11,8 @@ import {
   arrayUnion,
   writeBatch,
   setDoc,
-  getDoc
+  getDoc,
+  getDocs
 } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
@@ -1282,6 +1283,46 @@ export const WaiterMatrix: React.FC = () => {
           const orderRef = doc(db, 'restaurants', user.tenantId, 'orders', table.activeOrderId);
           await updateDoc(orderRef, { status: 'COMPLETED', isArchived: true });
         } catch (_) {}
+      }
+
+      // Automatically resolve and complete all pending Clean Table requests for this table in waiterRequests
+      try {
+        const waiterReqCol = collection(db, 'restaurants', user.tenantId, 'waiterRequests');
+        const qReqs = query(waiterReqCol, where('requestType', '==', 'Clean Table'));
+        const reqSnap = await getDocs(qReqs);
+        const batch = writeBatch(db);
+        let count = 0;
+        const staffName = user.displayName || user.email || 'Waiter';
+        const nowIso = new Date().toISOString();
+
+        reqSnap.forEach((d: any) => {
+          const data = d.data();
+          const s = (data.status || '').toLowerCase();
+          if (s !== 'completed' && s !== 'cancelled' && s !== 'rejected') {
+            const matchesTable = (
+              data.tableId === table.id ||
+              String(data.tableNumber) === String(table.number) ||
+              String(data.tableNumber) === String((table as any).tableNumber) ||
+              String(data.tableNumber) === table.id ||
+              String(data.tableNumber) === table.id.replace(/^TBL-/i, '')
+            );
+            if (matchesTable) {
+              batch.update(d.ref, {
+                status: 'Completed',
+                resolvedAt: nowIso,
+                resolvedBy: staffName,
+                acceptedBy: staffName,
+                completedAt: nowIso
+              });
+              count++;
+            }
+          }
+        });
+        if (count > 0) {
+          await batch.commit();
+        }
+      } catch (err) {
+        console.warn('Error resolving waiter requests for cleaned table:', err);
       }
 
       setShift(prev => ({

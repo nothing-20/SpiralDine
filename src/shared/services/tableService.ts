@@ -7,7 +7,8 @@ import {
   updateDoc, 
   query, 
   where,
-  addDoc
+  addDoc,
+  writeBatch
 } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { tablesService } from '../firebase/firestore';
@@ -412,17 +413,45 @@ export const tableService = {
         updatedAt: nowIso
       }, { merge: true });
 
-      // Post high-priority sanitization request for waiter
+      // Post high-priority sanitization request for waiter (deduplicated & canonical table number)
       try {
+        const canonicalNum = String(match.table.number || match.table.tableNumber || cleanNum || '').trim();
+        const canonicalName = String(match.table.tableName || match.table.name || `Table ${canonicalNum}`).trim();
+
         const waiterReqRef = collection(db, 'restaurants', tenantId, 'waiterRequests');
-        await addDoc(waiterReqRef, {
-          tableNumber: cleanNum,
-          requestType: 'Clean Table',
-          description: `Table ${cleanNum}: Dining completed & bill paid. Needs sanitizing & reset.`,
-          status: 'Pending',
-          priority: 'high',
-          createdAt: nowIso
+        const qExisting = query(waiterReqRef, where('requestType', '==', 'Clean Table'));
+        const existingSnap = await getDocs(qExisting);
+        let alreadyPending = false;
+        existingSnap.forEach(d => {
+          const data = d.data();
+          const s = (data.status || '').toLowerCase();
+          if (s !== 'completed' && s !== 'cancelled' && s !== 'rejected') {
+            const tMatches = (
+              data.tableId === targetTableId ||
+              String(data.tableNumber) === canonicalNum ||
+              String(data.tableNumber) === cleanNum ||
+              String(data.tableNumber) === targetTableId ||
+              String(data.tableNumber) === targetTableId.replace(/^TBL-/i, '')
+            );
+            if (tMatches) {
+              alreadyPending = true;
+            }
+          }
         });
+
+        if (!alreadyPending) {
+          await addDoc(waiterReqRef, {
+            tableId: targetTableId,
+            tableNumber: canonicalNum,
+            tableName: canonicalName,
+            requestType: 'Clean Table',
+            type: 'Clean Table',
+            description: `Table ${canonicalNum}: Dining completed & bill paid. Needs sanitizing & reset.`,
+            status: 'Pending',
+            priority: 'high',
+            createdAt: nowIso
+          });
+        }
       } catch (_) {}
     } catch (err) {
       console.warn('[tableService] setTableCleaning warning:', err);
@@ -470,6 +499,44 @@ export const tableService = {
         customerPhone: null,
         updatedAt: nowIso
       }, { merge: true });
+
+      // Automatically resolve and complete all pending Clean Table requests for this table
+      try {
+        const waiterReqCol = collection(db, 'restaurants', tenantId, 'waiterRequests');
+        const qReqs = query(waiterReqCol, where('requestType', '==', 'Clean Table'));
+        const reqSnap = await getDocs(qReqs);
+        const batch = writeBatch(db);
+        let count = 0;
+        reqSnap.forEach(d => {
+          const data = d.data();
+          const s = (data.status || '').toLowerCase();
+          if (s !== 'completed' && s !== 'cancelled' && s !== 'rejected') {
+            const matchesTable = (
+              data.tableId === targetTableId ||
+              data.tableId === match.id ||
+              String(data.tableNumber) === String(match.table.number) ||
+              String(data.tableNumber) === String(match.table.tableNumber) ||
+              String(data.tableNumber) === cleanNum ||
+              String(data.tableNumber) === targetTableId ||
+              String(data.tableNumber) === targetTableId.replace(/^TBL-/i, '')
+            );
+            if (matchesTable) {
+              batch.update(d.ref, {
+                status: 'Completed',
+                resolvedAt: nowIso,
+                resolvedBy: 'System / Table Cleaned',
+                completedAt: nowIso
+              });
+              count++;
+            }
+          }
+        });
+        if (count > 0) {
+          await batch.commit();
+        }
+      } catch (reqErr) {
+        console.warn('[tableService] Error resolving clean table requests in setTableAvailable:', reqErr);
+      }
 
       // Trigger canonical reservation lifecycle completion if eligible
       try {
