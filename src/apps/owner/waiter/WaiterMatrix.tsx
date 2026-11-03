@@ -2773,6 +2773,20 @@ export const WaiterMatrix: React.FC = () => {
                     const cleaningTimer = isCleaning ? getCleaningCountdown(table) : null;
                     const seatedElapsedMins = table.seatedAt || table.occupiedAt ? Math.max(0, Math.floor((Date.now() - new Date(table.seatedAt || table.occupiedAt!).getTime()) / 60000)) : null;
                     const orderElapsedMins = activeOrderForTable?.createdAt ? Math.max(0, Math.floor((Date.now() - new Date(activeOrderForTable.createdAt).getTime()) / 60000)) : null;
+                    const orderTimeDisplay = activeOrderForTable?.createdAt ? (() => {
+                      try {
+                        const d = new Date(activeOrderForTable.createdAt);
+                        if (isNaN(d.getTime())) return null;
+                        const diffMins = Math.max(0, Math.floor((Date.now() - d.getTime()) / 60000));
+                        const isToday = d.toDateString() === new Date().toDateString();
+                        const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+                        const datePrefix = isToday ? '' : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ';
+                        const relative = diffMins < 1 ? 'Just now' : diffMins < 60 ? `${diffMins}m ago` : diffMins < 1440 ? `${Math.floor(diffMins/60)}h ${diffMins%60}m ago` : `${Math.floor(diffMins/1440)}d ago`;
+                        return { fullTime: `${datePrefix}${timeStr}`, relative };
+                      } catch {
+                        return null;
+                      }
+                    })() : null;
                     const itemsSnippet = activeOrderForTable?.items?.slice(0, 2).map((it: any) => `${it.count || 1}x ${it.name}`).join(', ') + ((activeOrderForTable?.items?.length || 0) > 2 ? '...' : '');
 
                     return (
@@ -2906,9 +2920,10 @@ export const WaiterMatrix: React.FC = () => {
                                     {itemsCount} items: <span className="text-[#18201D]">{itemsSnippet}</span>
                                   </div>
                                 )}
-                                {orderElapsedMins !== null && (
-                                  <div className="text-[10px] text-[#A1A1AA]">
-                                    Ordered ~{orderElapsedMins}m ago
+                                {orderTimeDisplay && (
+                                  <div className="text-[10px] text-[#71717A] flex items-center justify-between pt-0.5">
+                                    <span className="font-semibold text-[#18201D]">Ordered: {orderTimeDisplay.fullTime}</span>
+                                    <span>({orderTimeDisplay.relative})</span>
                                   </div>
                                 )}
                               </div>

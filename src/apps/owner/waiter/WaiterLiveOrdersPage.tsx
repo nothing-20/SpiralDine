@@ -29,7 +29,8 @@ import {
   CheckCircle2, 
   Table as TableIcon,
   Archive,
-  History
+  History,
+  Calendar
 } from 'lucide-react';
 
 /**
@@ -231,23 +232,101 @@ export const WaiterLiveOrdersPage: React.FC = () => {
   const readyOrdersCount = useMemo(() => activeOrders.filter(o => o.status === 'READY').length, [activeOrders]);
   const preparingOrdersCount = useMemo(() => activeOrders.filter(o => o.status === 'PREPARING').length, [activeOrders]);
 
+  /**
+   * Formats exact order creation timestamp in human-friendly format:
+   * e.g. "06:58 AM" (if today), "Yesterday, 06:58 AM", or "Nov 3, 06:58 AM"
+   */
+  const formatOrderTimestamp = (dateStr?: string | number | any): string => {
+    if (!dateStr) return '—';
+    try {
+      let d: Date;
+      if (typeof dateStr === 'object' && typeof dateStr.toDate === 'function') {
+        d = dateStr.toDate();
+      } else if (typeof dateStr === 'number') {
+        d = new Date(dateStr);
+      } else {
+        d = new Date(dateStr);
+      }
+      if (isNaN(d.getTime())) return '—';
+
+      const now = new Date();
+      const isToday = d.toDateString() === now.toDateString();
+      const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+
+      if (isToday) {
+        return timeStr;
+      }
+
+      // Check if yesterday
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      if (d.toDateString() === yesterday.toDateString()) {
+        return `Yesterday, ${timeStr}`;
+      }
+
+      const datePart = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+      return `${datePart}, ${timeStr}`;
+    } catch {
+      return '—';
+    }
+  };
+
+  /**
+   * Full comprehensive timestamp for details modal and tooltips
+   */
+  const formatFullTimestamp = (dateStr?: string | number | any): string => {
+    if (!dateStr) return '—';
+    try {
+      let d: Date;
+      if (typeof dateStr === 'object' && typeof dateStr.toDate === 'function') {
+        d = dateStr.toDate();
+      } else if (typeof dateStr === 'number') {
+        d = new Date(dateStr);
+      } else {
+        d = new Date(dateStr);
+      }
+      if (isNaN(d.getTime())) return '—';
+
+      return d.toLocaleString([], {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch {
+      return '—';
+    }
+  };
+
+  /**
+   * Formats elapsed relative time gracefully:
+   * e.g. "Just now", "5m ago", "2h 15m ago", "3d ago"
+   */
   const formatElapsedOrCompleted = (order: IOrder, isCompletedTab: boolean) => {
     if (isCompletedTab) {
       const timestamp = (order as any).completedAt || order.updatedAt || order.createdAt;
       if (!timestamp) return 'Completed';
-      try {
-        const d = new Date(timestamp);
-        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
-      } catch {
-        return 'Completed';
-      }
+      return formatOrderTimestamp(timestamp);
     }
 
-    const isoStr = order.updatedAt || order.createdAt;
+    const isoStr = order.createdAt || order.updatedAt;
     if (!isoStr) return 'Just now';
-    const diff = (Date.now() - new Date(isoStr).getTime()) / 60000;
-    if (diff < 1) return 'Just now';
-    return `${Math.round(diff)}m ago`;
+    try {
+      const diffMs = Date.now() - new Date(isoStr).getTime();
+      if (diffMs <= 0) return 'Just now';
+      const diffMins = Math.floor(diffMs / 60000);
+      if (diffMins < 1) return 'Just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return `${diffHours}h ${diffMins % 60}m ago`;
+      const diffDays = Math.floor(diffHours / 24);
+      return `${diffDays}d ago`;
+    } catch {
+      return 'Just now';
+    }
   };
 
   return (
@@ -575,12 +654,19 @@ export const WaiterLiveOrdersPage: React.FC = () => {
                     {/* Header: Table Number + Order Status */}
                     <div className="flex justify-between items-start gap-2">
                       <div>
-                        <div className="flex items-center space-x-2 flex-wrap">
+                        <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                           <span className="font-bold text-base md:text-lg text-[#18201D] tracking-tight">
                             TABLE {order.tableNumber}
                           </span>
                           <span className="text-[10px] font-mono text-[#5F6762] bg-[#F7F4EE] px-1.5 py-0.5 rounded border border-[#E3DED5]">
                             #{order.orderId.substring(0, 8)}
+                          </span>
+                          <span 
+                            className="text-[10px] font-semibold text-[#18201D] bg-[#F7F4EE] px-2 py-0.5 rounded-md border border-[#E3DED5] flex items-center gap-1 shadow-2xs"
+                            title={`Order created at ${formatFullTimestamp(order.createdAt)}`}
+                          >
+                            <Clock className="w-2.5 h-2.5 text-[#C84A38]" />
+                            <span>{formatOrderTimestamp(order.createdAt)}</span>
                           </span>
                         </div>
                         <span className="text-[11px] text-[#5F6762] block mt-0.5">
@@ -654,7 +740,7 @@ export const WaiterLiveOrdersPage: React.FC = () => {
                     )}
 
                     {/* Financial Summary & Timestamp */}
-                    <div className="flex justify-between items-center text-xs border-t border-[#F7F4EE] pt-2">
+                    <div className="flex justify-between items-center text-xs border-t border-[#F7F4EE] pt-2.5">
                       <div className="space-y-0.5">
                         <span className="text-[10px] text-[#5F6762] uppercase font-bold block">Bill Total</span>
                         <span className="font-extrabold text-sm text-[#18201D] font-mono">
@@ -663,12 +749,17 @@ export const WaiterLiveOrdersPage: React.FC = () => {
                       </div>
                       <div className="text-right space-y-0.5">
                         <span className="text-[10px] text-[#5F6762] uppercase font-bold block">
-                          {isCompleted ? 'Completed At' : 'Elapsed'}
+                          {isCompleted ? 'Completed At' : 'Ordered At'}
                         </span>
-                        <span className="font-semibold text-xs text-[#5F6762] flex items-center justify-end gap-1">
-                          <Clock className="w-3 h-3" />
-                          {timeDisplay}
+                        <span className="font-bold text-xs text-[#18201D] flex items-center justify-end gap-1">
+                          <Clock className="w-3 h-3 text-[#C84A38]" />
+                          <span>{formatOrderTimestamp(isCompleted ? ((order as any).completedAt || order.updatedAt || order.createdAt) : order.createdAt)}</span>
                         </span>
+                        {!isCompleted && (
+                          <span className="text-[10px] text-[#71717A] block">
+                            {timeDisplay}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -764,9 +855,9 @@ export const WaiterLiveOrdersPage: React.FC = () => {
                   <span className="font-bold text-[#18201D]">{selectedOrder.status}</span>
                 </div>
                 <div>
-                  <span className="text-[10px] text-[#5F6762] block font-bold uppercase">Placed At</span>
-                  <span className="font-medium text-[#18201D]">
-                    {new Date(selectedOrder.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  <span className="text-[10px] text-[#5F6762] block font-bold uppercase">Ordered / Created At</span>
+                  <span className="font-bold text-[#18201D]">
+                    {formatFullTimestamp(selectedOrder.createdAt)}
                   </span>
                 </div>
                 <div>
