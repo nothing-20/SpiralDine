@@ -770,7 +770,10 @@ export const KitchenQueue: React.FC = () => {
                             <span className="w-4 h-4 rounded bg-white border border-[#E3DED5] text-[10px] font-bold text-center leading-4">
                               {item.count}
                             </span>
-                            <span className="font-semibold text-xs text-[#18201D] truncate">
+                            <span 
+                              title={item.name}
+                              className="font-semibold text-xs text-[#18201D] break-words"
+                            >
                               {item.name}
                             </span>
                           </div>
@@ -866,7 +869,10 @@ export const KitchenQueue: React.FC = () => {
                       return (
                         <div key={i} className="p-2.5 bg-[#FAF8F5] border border-[#E8E3DA] rounded-xl flex items-center justify-between gap-2">
                           <div className="min-w-0">
-                            <div className="font-semibold text-xs text-[#18201D] truncate">
+                            <div 
+                              title={item.name}
+                              className="font-semibold text-xs text-[#18201D] break-words"
+                            >
                               {item.count}× {item.name}
                             </div>
                             <div className="text-[10px] text-[#71717A]">

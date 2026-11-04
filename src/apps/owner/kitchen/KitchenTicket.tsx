@@ -406,98 +406,116 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
           return (
             <div
               key={item.originalIndex}
-              className={`flex items-center justify-between gap-2 p-1.5 rounded-xl transition-colors ${
-                isItemChecked ? 'bg-amber-50/50' : 'hover:bg-[#FAF8F5]'
+              className={`p-2 rounded-xl transition-colors border ${
+                isItemChecked 
+                  ? 'bg-amber-50/70 border-amber-200' 
+                  : 'bg-[#FAF8F5]/60 hover:bg-[#FAF8F5] border-[#F0ECE1]'
               }`}
             >
-              {/* Left: Checkbox + Qty + Name + Course/Notes */}
-              <div className="flex items-center space-x-2.5 min-w-0 flex-1">
+              {/* ── ROW 1: Selection Checkbox + Quantity + Full Dish Name ── */}
+              <div className="flex items-start space-x-2">
                 <input
                   type="checkbox"
                   checked={isItemChecked}
                   onChange={() => toggleItemCheckbox(item.originalIndex)}
                   disabled={isItemServed || isItemCancelled}
-                  className="w-4 h-4 rounded text-[#183B2B] focus:ring-[#183B2B] border-[#D1C9BC] cursor-pointer"
+                  className="mt-0.5 w-4 h-4 rounded text-[#183B2B] focus:ring-[#183B2B] border-[#D1C9BC] shrink-0 cursor-pointer"
+                  aria-label={`Select ${item.name}`}
                 />
 
-                <span className="w-5 h-5 rounded-md bg-[#FAF8F5] border border-[#E3DED5] flex items-center justify-center text-xs font-bold text-[#18201D] shrink-0">
+                <span 
+                  className="w-5 h-5 rounded-md bg-white border border-[#E3DED5] flex items-center justify-center text-xs font-bold text-[#18201D] shrink-0 mt-0.5 shadow-2xs"
+                  title={`Quantity: ${item.count}`}
+                >
                   {item.count}
                 </span>
 
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center space-x-1.5">
-                    <span className={`text-xs font-semibold truncate ${
+                  <span
+                    title={item.name}
+                    className={`font-semibold text-xs leading-snug break-words block ${
                       isItemServed ? 'line-through text-stone-400' : 'text-[#18201D]'
-                    }`}>
-                      {item.name}
-                    </span>
-
-                    {/* Show course badge if mixed or main */}
-                    {item.course && item.course !== 'Starters' && (
-                      <span className="text-[9px] font-medium text-stone-500 bg-stone-100 px-1 rounded">
-                        {item.course === 'Main Course' ? 'Main' : item.course}
-                      </span>
-                    )}
-                  </div>
-
+                    }`}
+                    style={{
+                      whiteSpace: 'normal',
+                      wordBreak: 'normal',
+                      overflowWrap: 'anywhere'
+                    }}
+                  >
+                    {item.name}
+                  </span>
                   {item.notes && (
-                    <p className="text-[10px] text-amber-700 italic truncate">
+                    <p className="text-[10px] text-amber-700 italic mt-0.5 break-words">
                       "{item.notes}"
                     </p>
                   )}
                 </div>
               </div>
 
-              {/* Right: Item Status Pill & Quick Action Popover */}
-              <div className="shrink-0">
-                {isItemPreparing ? (
-                  <button
-                    onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'READY')}
-                    title="Click to mark this item Ready"
-                    className="bg-[#EAF3FD] hover:bg-[#DCEBFC] text-[#2563EB] text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 transition-colors cursor-pointer"
-                  >
-                    <span>Preparing</span>
-                    <Clock className="w-3 h-3 text-[#2563EB]" />
-                    <span>{item.itemElapsedMins} min</span>
-                  </button>
-                ) : isItemReady ? (
-                  <button
-                    onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'PREPARING')}
-                    title="Click to recall item to Preparing"
-                    className="bg-[#EAF7EE] hover:bg-[#D5F2DD] text-[#16A34A] text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 transition-colors cursor-pointer"
-                  >
-                    <Check className="w-3 h-3 stroke-[2.5]" />
-                    <span>Ready</span>
-                  </button>
-                ) : isItemOnHold ? (
-                  <button
-                    onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'PREPARING')}
-                    title="Click to release and start preparing"
-                    className="bg-[#FEF5E7] hover:bg-[#FDECC8] text-[#D97706] text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 transition-colors cursor-pointer"
-                  >
-                    <Pause className="w-3 h-3" />
-                    <span>On Hold</span>
-                  </button>
-                ) : isItemServed ? (
-                  <span className="bg-stone-100 text-stone-500 text-[11px] font-medium px-2.5 py-1 rounded-full flex items-center gap-1">
-                    <Check className="w-3 h-3" />
-                    <span>Served</span>
-                  </span>
-                ) : isItemCancelled ? (
-                  <span className="bg-red-50 text-red-600 text-[11px] font-medium px-2.5 py-1 rounded-full">
-                    Cancelled
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'PREPARING')}
-                    title="Click to start preparing this item"
-                    className="bg-[#F4F4F5] hover:bg-[#E4E4E7] text-[#71717A] text-[11px] font-medium px-2.5 py-1 rounded-full flex items-center gap-1 transition-colors cursor-pointer"
-                  >
-                    <span>Not Started</span>
-                    <Clock className="w-3 h-3" />
-                    <span>{item.prepTarget} min</span>
-                  </button>
-                )}
+              {/* ── ROW 2: Course Badge + Preparation Status & Timer ── */}
+              <div className="flex items-center justify-between gap-1.5 mt-1.5 pl-6 sm:pl-7">
+                {/* Course Label */}
+                <span className="text-[10px] font-semibold text-stone-600 bg-white border border-[#E3DED5] px-2 py-0.5 rounded-md shrink-0">
+                  {item.course || 'Main'}
+                </span>
+
+                {/* Preparation Status & Timer Pill (Action Button) */}
+                <div className="shrink-0">
+                  {isItemPreparing ? (
+                    <button
+                      type="button"
+                      onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'READY')}
+                      title="Click to mark Ready"
+                      className="bg-[#EAF3FD] hover:bg-[#DCEBFC] text-[#2563EB] text-[10.5px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors cursor-pointer border border-blue-200/50"
+                    >
+                      <span>Preparing</span>
+                      <span className="text-blue-300">|</span>
+                      <Clock className="w-2.5 h-2.5" />
+                      <span>{item.itemElapsedMins} min</span>
+                    </button>
+                  ) : isItemReady ? (
+                    <button
+                      type="button"
+                      onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'PREPARING')}
+                      title="Click to recall to Preparing"
+                      className="bg-[#EAF7EE] hover:bg-[#D5F2DD] text-[#16A34A] text-[10.5px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors cursor-pointer border border-green-200/50"
+                    >
+                      <Check className="w-3 h-3 stroke-[2.5]" />
+                      <span>Ready</span>
+                    </button>
+                  ) : isItemOnHold ? (
+                    <button
+                      type="button"
+                      onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'PREPARING')}
+                      title="Click to release and start"
+                      className="bg-[#FEF5E7] hover:bg-[#FDECC8] text-[#D97706] text-[10.5px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors cursor-pointer border border-amber-200/50"
+                    >
+                      <Pause className="w-2.5 h-2.5" />
+                      <span>On Hold</span>
+                    </button>
+                  ) : isItemServed ? (
+                    <span className="bg-stone-100 text-stone-500 text-[10.5px] font-medium px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <Check className="w-2.5 h-2.5" />
+                      <span>Served</span>
+                    </span>
+                  ) : isItemCancelled ? (
+                    <span className="bg-red-50 text-red-600 text-[10.5px] font-medium px-2 py-0.5 rounded-full">
+                      Cancelled
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'PREPARING')}
+                      title="Click to start preparing"
+                      className="bg-[#F4F4F5] hover:bg-[#E4E4E7] text-[#71717A] text-[10.5px] font-medium px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors cursor-pointer border border-stone-200/60"
+                    >
+                      <span>Not Started</span>
+                      <span className="text-stone-300">|</span>
+                      <Clock className="w-2.5 h-2.5" />
+                      <span>{item.prepTarget} min</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           );
