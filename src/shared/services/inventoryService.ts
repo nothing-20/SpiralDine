@@ -325,7 +325,9 @@ export const inventoryService = {
       }
 
       for (const item of items) {
-        const itemRef = doc(db, 'restaurants', tenantId, 'menu', 'default', 'items', item.itemId);
+        const itemId = item.itemId || item.id;
+        if (!itemId) continue;
+        const itemRef = doc(db, 'restaurants', tenantId, 'menu', 'default', 'items', itemId);
         const itemSnap = await transaction.get(itemRef);
 
         if (itemSnap.exists()) {
@@ -399,7 +401,9 @@ export const inventoryService = {
       }
 
       for (const item of items) {
-        const itemRef = doc(db, 'restaurants', tenantId, 'menu', 'default', 'items', item.itemId);
+        const itemId = item.itemId || item.id;
+        if (!itemId) continue;
+        const itemRef = doc(db, 'restaurants', tenantId, 'menu', 'default', 'items', itemId);
         const itemSnap = await transaction.get(itemRef);
 
         if (itemSnap.exists()) {

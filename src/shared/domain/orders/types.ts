@@ -1,5 +1,7 @@
 export interface IOrderItem {
   itemId: string;
+  id?: string;
+  menuItemId?: string;
   name: string;
   count: number;
   notes: string;
@@ -140,6 +142,11 @@ export interface IOrder {
   holdReason?: string;
   heldAt?: string;
   resumedAt?: string;
+
+  // Inventory tracking
+  preparedInventoryDeducted?: boolean;
+  batchServingsDeducted?: boolean;
+  batchServingsRestocked?: boolean;
 
   // Invoice Reprint Log
   reprintCount?: number;

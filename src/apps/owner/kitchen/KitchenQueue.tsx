@@ -465,6 +465,153 @@ export const KitchenQueue: React.FC = () => {
     toast.success(`Prepared new batch of ${batchSize} portions for ${item.name}!`);
   };
 
+  // ── Automatic Prepared Inventory Deduction for Ready Orders ──────────────
+  const deductPreparedPortionsForOrder = useCallback(
+    async (order: IKdsOrder) => {
+      if (!user?.tenantId || !order) return;
+      if (order.preparedInventoryDeducted || order.batchServingsDeducted) return;
+
+      const itemsToProcess = order.items || [];
+      if (itemsToProcess.length === 0) return;
+
+      const deductions: Array<{
+        menuItem: any;
+        count: number;
+      }> = [];
+
+      itemsToProcess.forEach(item => {
+        const qty = Number(item.count || 1);
+        const target = menuItems.find(m => {
+          if (item.itemId && (m.id === item.itemId || m.itemId === item.itemId)) return true;
+          if (item.id && m.id === item.id) return true;
+          if (m.name && item.name && m.name.toLowerCase().trim() === item.name.toLowerCase().trim()) return true;
+          return false;
+        });
+
+        if (target) {
+          const isBatch = target.preparationMethod === 'batch' || target.productionMode === 'Batch Production';
+          if (isBatch) {
+            deductions.push({ menuItem: target, count: qty });
+          }
+        }
+      });
+
+      if (deductions.length === 0) return;
+
+      const timestamp = new Date().toISOString();
+      const chefName = user?.displayName || user?.email || 'Kitchen Chef';
+
+      for (const { menuItem, count } of deductions) {
+        try {
+          const currentServings = Number(menuItem.availableServings ?? 0);
+          const newServings = Math.max(0, currentServings - count);
+
+          const itemRef = doc(db, 'restaurants', user.tenantId, 'menu', 'default', 'items', menuItem.id);
+          await updateDoc(itemRef, {
+            availableServings: newServings,
+            isAvailable: newServings > 0,
+            available: newServings > 0,
+            updatedAt: timestamp
+          });
+
+          // Optimistically update local menuItems state
+          setMenuItems(prev => prev.map(m => m.id === menuItem.id ? { ...m, availableServings: newServings, isAvailable: newServings > 0, available: newServings > 0 } : m));
+
+          // Log transaction to preparedBatchesHistory
+          const histCol = collection(db, 'restaurants', user.tenantId, 'preparedBatchesHistory');
+          await addDoc(histCol, {
+            itemId: menuItem.id,
+            itemName: menuItem.name,
+            portionsAdded: 0,
+            portionsDiscarded: 0,
+            portionsServed: count,
+            portionsRemaining: newServings,
+            orderId: order.orderId || order.id,
+            tableNumber: order.tableNumber || '',
+            timestamp,
+            preparedBy: chefName,
+            type: 'served',
+            reason: `Order #${(order.orderId || order.id || '').substring(0, 8)} marked Ready to Serve`
+          });
+
+          toast.success(
+            `Prepared Stock: -${count} portion${count > 1 ? 's' : ''} of "${menuItem.name}". (${newServings} portions left)`,
+            { id: `deduct-${menuItem.id}` }
+          );
+
+          if (newServings === 0) {
+            toast.error(`⚠️ "${menuItem.name}" is now SOLD OUT (0 portions left)!`, {
+              id: `sold-out-${menuItem.id}`,
+              duration: 5000
+            });
+          }
+        } catch (err) {
+          console.error(`Failed to deduct prepared inventory for ${menuItem.name}:`, err);
+        }
+      }
+    },
+    [user?.tenantId, user?.displayName, user?.email, menuItems]
+  );
+
+  const restorePreparedPortionsForOrder = useCallback(
+    async (order: IKdsOrder) => {
+      if (!user?.tenantId || !order) return;
+      const itemsToProcess = order.items || [];
+      if (itemsToProcess.length === 0) return;
+
+      const timestamp = new Date().toISOString();
+      const chefName = user?.displayName || user?.email || 'Kitchen Chef';
+
+      for (const item of itemsToProcess) {
+        const qty = Number(item.count || 1);
+        const target = menuItems.find(m => {
+          if (item.itemId && (m.id === item.itemId || m.itemId === item.itemId)) return true;
+          if (item.id && m.id === item.id) return true;
+          if (m.name && item.name && m.name.toLowerCase().trim() === item.name.toLowerCase().trim()) return true;
+          return false;
+        });
+
+        if (target && (target.preparationMethod === 'batch' || target.productionMode === 'Batch Production')) {
+          try {
+            const currentServings = Number(target.availableServings ?? 0);
+            const newServings = currentServings + qty;
+
+            const itemRef = doc(db, 'restaurants', user.tenantId, 'menu', 'default', 'items', target.id);
+            await updateDoc(itemRef, {
+              availableServings: newServings,
+              isAvailable: true,
+              available: true,
+              updatedAt: timestamp
+            });
+
+            setMenuItems(prev => prev.map(m => m.id === target.id ? { ...m, availableServings: newServings, isAvailable: true, available: true } : m));
+
+            const histCol = collection(db, 'restaurants', user.tenantId, 'preparedBatchesHistory');
+            await addDoc(histCol, {
+              itemId: target.id,
+              itemName: target.name,
+              portionsAdded: qty,
+              portionsDiscarded: 0,
+              portionsServed: 0,
+              portionsRemaining: newServings,
+              orderId: order.orderId || order.id,
+              tableNumber: order.tableNumber || '',
+              timestamp,
+              preparedBy: chefName,
+              type: 'restored',
+              reason: `Order #${(order.orderId || order.id || '').substring(0, 8)} recalled to Preparing`
+            });
+
+            toast(`Restored +${qty} portions to "${target.name}". Total: ${newServings}`, { icon: '🔄' });
+          } catch (err) {
+            console.error(`Failed to restore portions for ${target.name}:`, err);
+          }
+        }
+      }
+    },
+    [user?.tenantId, user?.displayName, user?.email, menuItems]
+  );
+
   // ── Single Status Update (with timeline append) ───────────────────────────
   const handleStatusUpdate = useCallback(
     async (orderId: string, nextStatus: string) => {
@@ -487,7 +634,17 @@ export const KitchenQueue: React.FC = () => {
         if (nextStatus === 'ACCEPTED') updateFields.acceptedAt = timestamp;
         if (nextStatus === 'CHEF_ASSIGNED') updateFields.chefAssignedAt = timestamp;
         if (nextStatus === 'PREPARING') updateFields.cookingStartedAt = timestamp;
-        if (nextStatus === 'READY') updateFields.readyAt = timestamp;
+        if (nextStatus === 'READY') {
+          updateFields.readyAt = timestamp;
+          updateFields.preparedInventoryDeducted = true;
+          updateFields.batchServingsDeducted = true;
+
+          // Automatically deduct prepared inventory portions for this order
+          const targetOrder = allOrders.find(o => o.orderId === orderId || o.id === orderId);
+          if (targetOrder && !targetOrder.preparedInventoryDeducted && !targetOrder.batchServingsDeducted) {
+            await deductPreparedPortionsForOrder(targetOrder);
+          }
+        }
         if (nextStatus === 'PICKED_UP' || nextStatus === 'DELIVERED') updateFields.pickupAt = timestamp;
         if (nextStatus === 'SERVED') updateFields.servedAt = timestamp;
         if (nextStatus === 'COMPLETED') updateFields.completedAt = timestamp;
@@ -537,7 +694,7 @@ export const KitchenQueue: React.FC = () => {
         toast.error('Failed to update order status. Check network connection.');
       }
     },
-    [user?.tenantId, user?.displayName, user?.role]
+    [user?.tenantId, user?.displayName, user?.role, allOrders, deductPreparedPortionsForOrder]
   );
 
   // ── Bulk Status Update (writeBatch + arrayUnion) ──────────────────────────
@@ -572,7 +729,11 @@ export const KitchenQueue: React.FC = () => {
           if (nextStatus === 'ACCEPTED') updateFields.acceptedAt = timestamp;
           if (nextStatus === 'CHEF_ASSIGNED') updateFields.chefAssignedAt = timestamp;
           if (nextStatus === 'PREPARING') updateFields.cookingStartedAt = timestamp;
-          if (nextStatus === 'READY') updateFields.readyAt = timestamp;
+          if (nextStatus === 'READY') {
+            updateFields.readyAt = timestamp;
+            updateFields.preparedInventoryDeducted = true;
+            updateFields.batchServingsDeducted = true;
+          }
           if (nextStatus === 'PICKED_UP' || nextStatus === 'DELIVERED') updateFields.pickupAt = timestamp;
           if (nextStatus === 'SERVED') updateFields.servedAt = timestamp;
           if (nextStatus === 'COMPLETED') updateFields.completedAt = timestamp;
@@ -582,6 +743,15 @@ export const KitchenQueue: React.FC = () => {
         }
 
         await batch.commit();
+
+        if (nextStatus === 'READY') {
+          for (const orderId of Array.from(selectedIds)) {
+            const targetOrder = allOrders.find(o => o.orderId === orderId || o.id === orderId);
+            if (targetOrder && !targetOrder.preparedInventoryDeducted && !targetOrder.batchServingsDeducted) {
+              await deductPreparedPortionsForOrder(targetOrder);
+            }
+          }
+        }
 
         // Portion deduction automated on status PREPARING / COMPLETED
         toast.success(
@@ -615,7 +785,7 @@ export const KitchenQueue: React.FC = () => {
         toast.error('Batch update failed. Please retry.', { id: toastId });
       }
     },
-    [user?.tenantId, user?.displayName, user?.role, selectedIds]
+    [user?.tenantId, user?.displayName, user?.role, selectedIds, allOrders, deductPreparedPortionsForOrder]
   );
 
   // ── Chef Assignment Action handlers ──────────────────────────────────────
@@ -785,8 +955,17 @@ export const KitchenQueue: React.FC = () => {
           performedBy: user?.displayName || 'Kitchen Staff',
           timestamp,
         };
+
+        // If order had batch portions deducted, restore them
+        const targetOrder = allOrders.find(o => o.orderId === orderId || o.id === orderId);
+        if (targetOrder && (targetOrder.preparedInventoryDeducted || targetOrder.batchServingsDeducted)) {
+          await restorePreparedPortionsForOrder(targetOrder);
+        }
+
         await updateDoc(docRef, {
           status: 'PREPARING',
+          preparedInventoryDeducted: false,
+          batchServingsDeducted: false,
           recallReason: reason,
           recalledAt: timestamp,
           recalledBy: user?.displayName || 'Kitchen Staff',
@@ -808,7 +987,7 @@ export const KitchenQueue: React.FC = () => {
         toast.error('Failed to recall order.');
       }
     },
-    [user?.tenantId, user?.displayName, user?.role]
+    [user?.tenantId, user?.displayName, user?.role, allOrders, restorePreparedPortionsForOrder]
   );
 
   // ── Kitchen / Chef Notes Action handler ──────────────────────────────────
@@ -1510,11 +1689,11 @@ export const KitchenQueue: React.FC = () => {
             <div className="flex items-center space-x-1 p-1 bg-white border border-[#E3DED5] rounded-xl flex-wrap gap-y-1 shadow-[0_1px_3px_rgba(30,30,20,0.04)]">
               {([
                 { id: 'table',            label: 'Table View',         Icon: LayoutGrid },
+                { id: 'inventory',        label: 'Prepared Inventory', Icon: Package },
                 { id: 'category',         label: 'Category View',      Icon: UtensilsCrossed },
                 { id: 'station',          label: 'Station View',       Icon: Layers },
                 { id: 'item-queue',       label: 'Item Queue',         Icon: ListOrdered },
                 { id: 'queue',            label: 'Cooking Queue',      Icon: ListOrdered },
-                { id: 'inventory',        label: 'Prepared Inventory', Icon: Package },
                 { id: 'reservations',     label: 'Reservation Feed',   Icon: Calendar },
               ] as const).map(({ id, label, Icon }) => (
                 <button
@@ -1680,12 +1859,12 @@ export const KitchenQueue: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-4">
-              {activeTab === 'table'      && renderTableView()}
-              {activeTab === 'category'   && renderCategoryView()}
-              {activeTab === 'station'    && renderStationView()}
-              {activeTab === 'item-queue' && renderItemQueueView()}
-              {activeTab === 'queue'      && renderQueueView()}
-              {activeTab === 'inventory'  && renderPreparedInventoryView()}
+              {activeTab === 'table'        && renderTableView()}
+              {activeTab === 'inventory'    && renderPreparedInventoryView()}
+              {activeTab === 'category'     && renderCategoryView()}
+              {activeTab === 'station'      && renderStationView()}
+              {activeTab === 'item-queue'   && renderItemQueueView()}
+              {activeTab === 'queue'        && renderQueueView()}
               {activeTab === 'reservations' && renderReservationsView()}
             </div>
           )}

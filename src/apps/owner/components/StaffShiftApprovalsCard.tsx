@@ -545,3 +545,4 @@ export const StaffShiftApprovalsCard: React.FC<StaffShiftApprovalsCardProps> = (
 };
 
 export default StaffShiftApprovalsCard;
+

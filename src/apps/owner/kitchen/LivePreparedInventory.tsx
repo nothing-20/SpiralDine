@@ -70,7 +70,7 @@ export const LivePreparedInventory: React.FC<ILivePreparedInventoryProps> = ({
     const loadingKey = `${item.id}-${amount}`;
     setRefillLoadingMap(prev => ({ ...prev, [loadingKey]: true }));
     try {
-      const docRef = doc(db, 'restaurants', user.tenantId, 'menu', item.id);
+      const docRef = doc(db, 'restaurants', user.tenantId, 'menu', 'default', 'items', item.id);
       const currentServings = item.availableServings ?? 0;
       let newServings = currentServings + amount;
       if (newServings < 0) newServings = 0;
@@ -78,6 +78,8 @@ export const LivePreparedInventory: React.FC<ILivePreparedInventoryProps> = ({
       const timestamp = new Date().toISOString();
       const payload: any = {
         availableServings: newServings,
+        isAvailable: newServings > 0,
+        available: newServings > 0,
         updatedAt: timestamp
       };
 
