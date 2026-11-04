@@ -450,15 +450,49 @@ export const OwnerTablesManager: React.FC = () => {
     const ordersCol = collection(db, 'restaurants', targetTenant, 'orders');
     const unsubOrders = onSnapshot(ordersCol, (snap) => {
       const map: Record<string, any> = {};
+      const allActiveOrders: any[] = [];
       snap.forEach((docSnap) => {
         const orderData = docSnap.data();
         const ord = { id: docSnap.id, orderId: docSnap.id, ...orderData };
         map[docSnap.id] = ord;
-        if (orderData.status !== 'COMPLETED' && orderData.status !== 'CANCELLED' && orderData.status !== 'ARCHIVED') {
-          if (orderData.tableId) map[`table_${orderData.tableId}`] = ord;
-          if (orderData.tableNumber) map[`tablenum_${orderData.tableNumber}`] = ord;
+        if (orderData.status !== 'COMPLETED' && orderData.status !== 'CANCELLED' && orderData.status !== 'ARCHIVED' && (orderData.paymentStatus || '').toLowerCase() !== 'paid') {
+          allActiveOrders.push(ord);
         }
       });
+
+      // Group by table and consolidate running cumulative bill and items
+      allActiveOrders.forEach(ord => {
+        const keys: string[] = [];
+        if (ord.tableId) keys.push(`table_${ord.tableId}`);
+        if (ord.tableNumber) {
+          keys.push(`tablenum_${ord.tableNumber}`);
+          const cleanNum = String(ord.tableNumber).replace(/^(table|tbl)[-_\s]*/i, '').trim();
+          if (cleanNum && cleanNum !== ord.tableNumber) {
+            keys.push(`tablenum_${cleanNum}`);
+          }
+        }
+
+        keys.forEach(key => {
+          if (!map[key]) {
+            map[key] = { ...ord, roundsCount: 1, activeOrders: [ord] };
+          } else {
+            const existing = map[key];
+            const existingTotal = Number(existing.total || existing.totalAmount || 0);
+            const ordTotal = Number(ord.total || ord.totalAmount || 0);
+            const combinedItems = [...(existing.items || []), ...(ord.items || [])];
+            map[key] = {
+              ...existing,
+              total: existingTotal + ordTotal,
+              totalAmount: existingTotal + ordTotal,
+              items: combinedItems,
+              roundsCount: (existing.roundsCount || 1) + 1,
+              activeOrders: [...(existing.activeOrders || [existing]), ord],
+              status: ord.status === 'READY' || existing.status === 'READY' ? 'READY' : existing.status
+            };
+          }
+        });
+      });
+
       setActiveOrdersMap(map);
     }, (err) => {
       console.warn('[OwnerTablesManager] Orders subscription note:', err);

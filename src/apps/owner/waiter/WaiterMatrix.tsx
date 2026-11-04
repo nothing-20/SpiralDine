@@ -213,20 +213,25 @@ const getNormalizedTableNum = (val?: string | number): string => {
     .trim();
 };
 
-const findActiveOrderForTable = (table: ITable, orderList: IOrder[]): IOrder | undefined => {
+export const findAllActiveOrdersForTable = (table: ITable, orderList: IOrder[]): IOrder[] => {
   // If the table is explicitly Available or empty in Firestore and has no activeOrderId bound to it,
   // do NOT resurrect it as 'occupied' using a fallback tableNumber match against historical orders
   const isTableExplicitlyAvailable = (table.status || '').toLowerCase() === 'available' || (table.status || '').toLowerCase() === 'empty';
   if (isTableExplicitlyAvailable && !table.activeOrderId && !table.currentOrderId) {
-    return undefined;
+    return [];
   }
 
   const tableCleanNum = getNormalizedTableNum(table.number || (table as any).tableNumber || table.tableName || table.name);
-  return orderList.find(o => {
+  
+  // 1. Direct matched active orders for this table
+  const matched = orderList.filter(o => {
     if (!isOrderActive(o)) return false;
     if (table.activeOrderId && (o.orderId === table.activeOrderId || o.id === table.activeOrderId)) return true;
     if (table.currentOrderId && (o.orderId === table.currentOrderId || o.id === table.currentOrderId)) return true;
     if (o.tableId && (o.tableId === table.id || o.tableId === (table as any).tableId)) return true;
+
+    // Direct link to table's bound activeOrderId as primaryOrderId
+    if (table.activeOrderId && (o as any).primaryOrderId === table.activeOrderId) return true;
 
     // Only match by tableNumber if order was placed recently (within active 18h operational window)
     if (o.createdAt) {
@@ -238,6 +243,26 @@ const findActiveOrderForTable = (table: ITable, orderList: IOrder[]): IOrder | u
     if (tableCleanNum && orderCleanNum && tableCleanNum === orderCleanNum) return true;
     return false;
   });
+
+  // 2. Also link add-on orders that share the primaryOrderId of any matched order
+  const matchedIds = new Set(matched.map(m => m.orderId || m.id));
+  orderList.forEach(o => {
+    if (!isOrderActive(o)) return;
+    const pId = (o as any).primaryOrderId;
+    const targetId = o.orderId || o.id;
+    if (pId && matchedIds.has(pId) && !matchedIds.has(targetId)) {
+      matched.push(o);
+      matchedIds.add(targetId);
+    }
+  });
+
+  // Sort chronologically (oldest first: Round 1, Round 2, ...)
+  return matched.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+};
+
+const findActiveOrderForTable = (table: ITable, orderList: IOrder[]): IOrder | undefined => {
+  const all = findAllActiveOrdersForTable(table, orderList);
+  return all.length > 0 ? all[0] : undefined;
 };
 
 const getCleaningCountdown = (table: ITable): { elapsedMins: number; remainingMins: number; remainingSecs: number; isOverdue: boolean; displayTime: string } => {
@@ -298,6 +323,7 @@ export const WaiterMatrix: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<TWaiterTab>('floor_map');
   const [selectedOrder, setSelectedOrder] = useState<IOrder | null>(null);
+  const [viewingRoundsTable, setViewingRoundsTable] = useState<{ table: ITable; orders: IOrder[] } | null>(null);
   const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [isUpdatingBill, setIsUpdatingBill] = useState(false);
 
@@ -2851,23 +2877,68 @@ export const WaiterMatrix: React.FC = () => {
                   .map(table => {
                     const assignedToMe = table.assignedWaiterId === user?.uid;
                     const rawStatus = table.status || (table as any).tableStatus;
-                    const activeOrderForTable = findActiveOrderForTable(table, orders);
-                    const isOccupiedWithOrder = Boolean(activeOrderForTable);
+                    const activeOrdersForTable = findAllActiveOrdersForTable(table, orders);
+                    const activeOrderForTable = activeOrdersForTable[0];
+                    const latestOrderForTable = activeOrdersForTable[activeOrdersForTable.length - 1];
+                    const isOccupiedWithOrder = activeOrdersForTable.length > 0;
                     const isCleaning = isTableCleaning(rawStatus);
                     const isBrowsing = !isOccupiedWithOrder && !isCleaning && isTableBrowsing(table, 5);
                     const isAvailable = !isOccupiedWithOrder && !isCleaning && !isBrowsing;
 
-                    const orderStatus = activeOrderForTable ? (activeOrderForTable.status || '').toUpperCase() : '';
-                    const isOrderPaid = activeOrderForTable ? (activeOrderForTable.paymentStatus || '').toLowerCase() === 'paid' : false;
-                    const customerName = table.customerName || activeOrderForTable?.customerName || (activeOrderForTable as any)?.userName || (activeOrderForTable as any)?.name || (isOccupiedWithOrder || isBrowsing ? 'Guest Diner' : null);
-                    const itemsCount = activeOrderForTable?.items?.length || 0;
-                    const orderTotal = activeOrderForTable ? (activeOrderForTable.total || (activeOrderForTable as any)?.totalAmount || 0) : 0;
+                    const roundsCount = activeOrdersForTable.length;
+                    const isMultiRound = roundsCount > 1;
+
+                    // Cumulative table bill: sum of all active unfinalized orders
+                    const orderTotal = activeOrdersForTable.reduce(
+                      (sum, o) => sum + Number(o.total || (o as any)?.totalAmount || 0),
+                      0
+                    );
+
+                    // Combined items list across all rounds
+                    const allTableItems = activeOrdersForTable.flatMap(o => o.items || []);
+                    const itemsCount = allTableItems.length;
+                    const itemsSnippet = allTableItems.slice(0, 3).map((it: any) => `${it.count || 1}x ${it.name}`).join(', ') + (allTableItems.length > 3 ? '...' : '');
+
+                    const customerName = table.customerName || 
+                      activeOrdersForTable.find(o => o.customerName || (o as any)?.userName || (o as any)?.name)?.customerName || 
+                      (activeOrdersForTable[0] as any)?.userName || 
+                      (isOccupiedWithOrder || isBrowsing ? 'Guest Diner' : null);
+
+                    const readyOrder = activeOrdersForTable.find(o => o.status === 'READY');
+                    const hasReady = Boolean(readyOrder);
+                    const hasPreparing = activeOrdersForTable.some(o => o.status === 'PREPARING');
+                    const hasNew = activeOrdersForTable.some(o => o.status === 'NEW' || o.status === 'PLACED');
+                    const allServed = activeOrdersForTable.length > 0 && activeOrdersForTable.every(o => o.status === 'SERVED' || o.status === 'DELIVERED' || o.status === 'DINING_COMPLETED');
+                    const isOrderPaid = activeOrdersForTable.length > 0 && activeOrdersForTable.every(o => (o.paymentStatus || '').toLowerCase() === 'paid');
+
+                    let orderStatusDisplay = 'ACTIVE';
+                    let statusBadgeClass = 'bg-stone-100 text-stone-700';
+
+                    if (hasReady) {
+                      orderStatusDisplay = 'FOOD READY';
+                      statusBadgeClass = 'bg-[#EAF6ED] text-[#16A34A] animate-pulse';
+                    } else if (allServed) {
+                      orderStatusDisplay = 'SERVED';
+                      statusBadgeClass = 'bg-[#EAF6ED] text-[#16A34A]';
+                    } else if (isMultiRound && (hasNew || hasPreparing)) {
+                      orderStatusDisplay = hasNew ? `ROUND ${roundsCount}: NEW` : `ROUND ${roundsCount}: COOKING`;
+                      statusBadgeClass = 'bg-[#FEF7EC] text-[#D97706]';
+                    } else if (latestOrderForTable?.status === 'NEW' || latestOrderForTable?.status === 'PLACED') {
+                      orderStatusDisplay = 'NEW';
+                      statusBadgeClass = 'bg-[#FEF7EC] text-[#D97706]';
+                    } else if (latestOrderForTable?.status === 'PREPARING') {
+                      orderStatusDisplay = 'PREPARING';
+                      statusBadgeClass = 'bg-[#FEF7EC] text-[#D97706]';
+                    } else {
+                      orderStatusDisplay = (latestOrderForTable?.status || 'ACTIVE').toUpperCase();
+                    }
+
                     const activeAssistanceForTable = waiterRequests.find(r => cleanTableIdentifier(r.tableNumber) === cleanTableIdentifier(table.number) && r.status !== 'Completed' && r.status !== 'Cancelled');
                     
                     const cleaningTimer = isCleaning ? getCleaningCountdown(table) : null;
                     const seatedElapsedMins = table.seatedAt || table.occupiedAt ? Math.max(0, Math.floor((Date.now() - new Date(table.seatedAt || table.occupiedAt!).getTime()) / 60000)) : null;
-                    const orderElapsedMins = activeOrderForTable?.createdAt ? Math.max(0, Math.floor((Date.now() - new Date(activeOrderForTable.createdAt).getTime()) / 60000)) : null;
-                    const orderTimeDisplay = activeOrderForTable?.createdAt ? (() => {
+                    
+                    const primaryOrderTime = activeOrderForTable?.createdAt ? (() => {
                       try {
                         const d = new Date(activeOrderForTable.createdAt);
                         if (isNaN(d.getTime())) return null;
@@ -2881,7 +2952,18 @@ export const WaiterMatrix: React.FC = () => {
                         return null;
                       }
                     })() : null;
-                    const itemsSnippet = activeOrderForTable?.items?.slice(0, 2).map((it: any) => `${it.count || 1}x ${it.name}`).join(', ') + ((activeOrderForTable?.items?.length || 0) > 2 ? '...' : '');
+
+                    const latestOrderTime = latestOrderForTable && latestOrderForTable !== activeOrderForTable && latestOrderForTable.createdAt ? (() => {
+                      try {
+                        const d = new Date(latestOrderForTable.createdAt);
+                        if (isNaN(d.getTime())) return null;
+                        const diffMins = Math.max(0, Math.floor((Date.now() - d.getTime()) / 60000));
+                        const relative = diffMins < 1 ? 'Just now' : diffMins < 60 ? `${diffMins}m ago` : `${Math.floor(diffMins/60)}h ago`;
+                        return { relative };
+                      } catch {
+                        return null;
+                      }
+                    })() : null;
 
                     return (
                       <div
@@ -2993,31 +3075,47 @@ export const WaiterMatrix: React.FC = () => {
                                     <User className="w-3.5 h-3.5 text-[#5F6875]" />
                                     <span className="truncate">{customerName || 'Guest Diner'}</span>
                                   </span>
-                                  <span className="font-bold text-[#16A34A] shrink-0">
+                                  <span className="font-black text-[#16A34A] shrink-0 text-sm">
                                     {formatPrice(orderTotal)}
                                   </span>
                                 </div>
                                 <div className="flex items-center justify-between text-[11px] text-[#71717A]">
-                                  <span className="font-mono font-medium">#{activeOrderForTable.orderId.slice(-6)}</span>
-                                  <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
-                                    orderStatus === 'READY' 
-                                      ? 'bg-[#EAF6ED] text-[#16A34A] animate-pulse'
-                                      : orderStatus === 'NEW'
-                                      ? 'bg-[#FEF7EC] text-[#D97706]'
-                                      : 'bg-stone-100 text-stone-700'
-                                  }`}>
-                                    {orderStatus || 'ACTIVE'}
+                                  <div className="flex items-center gap-1.5 truncate">
+                                    {isMultiRound ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setViewingRoundsTable({ table, orders: activeOrdersForTable })}
+                                        className="inline-flex items-center gap-1 font-bold text-[10px] bg-amber-100/80 hover:bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.5 rounded-md cursor-pointer transition-colors"
+                                        title="Click to view all rounds"
+                                      >
+                                        <span>{roundsCount} Rounds</span>
+                                        <span className="font-mono text-[9px] opacity-75">#{activeOrderForTable.orderId.slice(-4)}+#{latestOrderForTable.orderId.slice(-4)}</span>
+                                      </button>
+                                    ) : (
+                                      <span className="font-mono font-medium">#{activeOrderForTable.orderId.slice(-6)}</span>
+                                    )}
+                                  </div>
+                                  <span className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${statusBadgeClass}`}>
+                                    {orderStatusDisplay}
                                   </span>
                                 </div>
-                                {itemsSnippet && (
-                                  <div className="text-[11px] text-[#71717A] truncate" title={itemsSnippet}>
-                                    {itemsCount} items: <span className="text-[#18201D]">{itemsSnippet}</span>
+                                {isMultiRound && (
+                                  <div className="text-[10px] text-[#71717A] flex items-center justify-between bg-white/70 px-2 py-1 rounded-lg border border-[#F0ECE6]">
+                                    <span>Round 1: <strong className="text-[#18201D]">{formatPrice(activeOrderForTable.total || (activeOrderForTable as any)?.totalAmount || 0)}</strong></span>
+                                    <span className="text-amber-800 font-semibold">+ R{roundsCount} Add-on: <strong className="text-amber-900">{formatPrice(latestOrderForTable.total || (latestOrderForTable as any)?.totalAmount || 0)}</strong></span>
                                   </div>
                                 )}
-                                {orderTimeDisplay && (
+                                {itemsSnippet && (
+                                  <div className="text-[11px] text-[#71717A] truncate" title={itemsSnippet}>
+                                    {itemsCount} item{itemsCount > 1 ? 's' : ''}: <span className="text-[#18201D] font-medium">{itemsSnippet}</span>
+                                  </div>
+                                )}
+                                {primaryOrderTime && (
                                   <div className="text-[10px] text-[#71717A] flex items-center justify-between pt-0.5">
-                                    <span className="font-semibold text-[#18201D]">Ordered: {orderTimeDisplay.fullTime}</span>
-                                    <span>({orderTimeDisplay.relative})</span>
+                                    <span className="font-semibold text-[#18201D]">Ordered: {primaryOrderTime.fullTime}</span>
+                                    <span>
+                                      {latestOrderTime ? `(Add-on ${latestOrderTime.relative})` : `(${primaryOrderTime.relative})`}
+                                    </span>
                                   </div>
                                 )}
                               </div>
@@ -3051,7 +3149,7 @@ export const WaiterMatrix: React.FC = () => {
                             </div>
 
                             {/* Attention Alerts */}
-                            {orderStatus === 'READY' && (
+                            {hasReady && (
                               <div className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-bold text-[#16A34A] bg-[#EAF6ED] border border-[#CDE9D5] px-2.5 py-1 rounded-lg w-full animate-pulse">
                                 <ChefHat className="w-3.5 h-3.5" />
                                 <span>Food Ready for Pick-up!</span>
@@ -3104,9 +3202,9 @@ export const WaiterMatrix: React.FC = () => {
                             </>
                           ) : isOccupiedWithOrder && activeOrderForTable ? (
                             <>
-                              {orderStatus === 'READY' ? (
+                              {hasReady && readyOrder ? (
                                 <button
-                                  onClick={() => handleServeFood(activeOrderForTable)}
+                                  onClick={() => handleServeFood(readyOrder)}
                                   className="w-full py-2.5 px-3 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors animate-pulse cursor-pointer"
                                 >
                                   <ChefHat className="w-3.5 h-3.5" />
@@ -3120,7 +3218,27 @@ export const WaiterMatrix: React.FC = () => {
                                   <Sparkles className="w-3.5 h-3.5" />
                                   <span>Start Cleaning (10m)</span>
                                 </button>
-                              ) : (orderStatus === 'SERVED' || orderStatus === 'DELIVERED' || orderStatus === 'DINING_COMPLETED' || table.status === 'bill_requested') ? (
+                              ) : isMultiRound ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setViewingRoundsTable({ table, orders: activeOrdersForTable })}
+                                    className="flex-1 py-2 px-2.5 rounded-xl bg-white hover:bg-stone-50 border border-[#E3DED5] text-[#18201D] font-bold text-xs flex items-center justify-center gap-1 shadow-xs transition-colors cursor-pointer"
+                                    title="View individual order rounds for this table"
+                                  >
+                                    <Utensils className="w-3.5 h-3.5 text-[#C85A3F]" />
+                                    <span>{roundsCount} Rounds</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleGenerateBill(activeOrderForTable)}
+                                    className="flex-1 py-2 px-2.5 rounded-xl bg-[#183B2B] hover:bg-[#122c20] text-white font-bold text-xs flex items-center justify-center gap-1 shadow-xs transition-colors cursor-pointer"
+                                  >
+                                    <DollarSign className="w-3.5 h-3.5 text-white" />
+                                    <span>Settle Bill</span>
+                                  </button>
+                                </>
+                              ) : (allServed || table.status === 'bill_requested') ? (
                                 <button
                                   onClick={() => handleGenerateBill(activeOrderForTable)}
                                   className="w-full py-2.5 px-3 rounded-xl bg-[#183B2B] hover:bg-[#122c20] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
@@ -3131,16 +3249,17 @@ export const WaiterMatrix: React.FC = () => {
                               ) : (
                                 <>
                                   <button
-                                    onClick={() => setSelectedOrder(activeOrderForTable)}
+                                    onClick={() => setViewingRoundsTable({ table, orders: activeOrdersForTable })}
                                     className="flex-1 py-2 px-3 rounded-xl bg-[#C85A3F] hover:bg-[#B34E35] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                                   >
                                     <span>View Order</span>
                                   </button>
                                   <button
                                     onClick={() => handleGenerateBill(activeOrderForTable)}
-                                    className="flex-1 py-2 px-3 rounded-xl bg-white hover:bg-stone-50 border border-[#E3DED5] text-[#18201D] font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                                    className="flex-1 py-2 px-3 rounded-xl bg-[#183B2B] hover:bg-[#122c20] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                                   >
-                                    <span>Invoice</span>
+                                    <DollarSign className="w-3.5 h-3.5 text-white" />
+                                    <span>Settle Bill</span>
                                   </button>
                                 </>
                               )}
@@ -3989,6 +4108,154 @@ export const WaiterMatrix: React.FC = () => {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ─── Table Orders / Multi-Round Details Modal ─── */}
+      <Modal
+        isOpen={viewingRoundsTable !== null}
+        onClose={() => setViewingRoundsTable(null)}
+        title={`Table ${viewingRoundsTable?.table.number || ''} — Active Orders & Rounds`}
+        size="md"
+      >
+        {viewingRoundsTable && (
+          <div className="space-y-4">
+            {/* Session Header Banner */}
+            <div className="bg-[#FAF8F4] border border-[#E3DED5] rounded-xl p-3 flex items-center justify-between">
+              <div>
+                <div className="text-[11px] text-[#71717A] font-medium">Customer / Guest</div>
+                <div className="text-sm font-bold text-[#18201D]">
+                  {viewingRoundsTable.table.customerName ||
+                   viewingRoundsTable.orders.find(o => o.customerName)?.customerName ||
+                   'Guest Diner'}
+                </div>
+                <div className="text-[11px] text-[#71717A] mt-0.5">
+                  Table {viewingRoundsTable.table.number} · {viewingRoundsTable.table.section || 'Floor'}
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-[11px] text-[#71717A] font-medium">Total Bill ({viewingRoundsTable.orders.length} Rounds)</div>
+                <div className="text-lg font-black text-[#16A34A]">
+                  {formatPrice(viewingRoundsTable.orders.reduce((sum, o) => sum + Number(o.total || (o as any).totalAmount || 0), 0))}
+                </div>
+              </div>
+            </div>
+
+            {/* Rounds List */}
+            <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
+              {viewingRoundsTable.orders.map((ord, idx) => {
+                const ordStatus = (ord.status || 'ACTIVE').toUpperCase();
+                const isReady = ordStatus === 'READY';
+                const isServed = ordStatus === 'SERVED' || ordStatus === 'DELIVERED';
+                const isNew = ordStatus === 'NEW' || ordStatus === 'PLACED';
+
+                const timeStr = ord.createdAt ? (() => {
+                  try {
+                    const d = new Date(ord.createdAt);
+                    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+                  } catch {
+                    return '';
+                  }
+                })() : '';
+
+                return (
+                  <div
+                    key={ord.orderId || ord.id || idx}
+                    className="border border-[#E3DED5] rounded-xl p-3.5 bg-white shadow-xs space-y-2 text-left"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-[#183B2B] text-white text-[11px] font-bold flex items-center justify-center">
+                          {idx + 1}
+                        </span>
+                        <span className="font-bold text-xs text-[#18201D]">
+                          {idx === 0 ? 'Round 1 (Initial Order)' : `Round ${idx + 1} (Add-on)`}
+                        </span>
+                        <span className="font-mono text-[10px] text-[#71717A]">
+                          #{ord.orderId.slice(-6)}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {timeStr && <span className="text-[10px] text-[#71717A]">{timeStr}</span>}
+                        <span
+                          className={`px-2 py-0.5 rounded-md font-bold text-[10px] ${
+                            isReady
+                              ? 'bg-[#EAF6ED] text-[#16A34A] animate-pulse'
+                              : isServed
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : isNew
+                              ? 'bg-amber-50 text-amber-800'
+                              : 'bg-stone-100 text-stone-700'
+                          }`}
+                        >
+                          {ordStatus}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Items List */}
+                    <div className="divide-y divide-[#F0ECE6] border-t border-[#F0ECE6] pt-1.5">
+                      {(ord.items || []).map((it, itIdx) => (
+                        <div key={itIdx} className="py-1 flex items-center justify-between text-xs">
+                          <span className="text-[#18201D] font-medium">
+                            {it.count || 1}x {it.name}
+                          </span>
+                          <span className="text-[#71717A] font-mono">
+                            {formatPrice((it.pricePerUnit || 0) * (it.count || 1))}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Round Subtotal */}
+                    <div className="flex items-center justify-between pt-1 border-t border-[#F0ECE6] text-xs">
+                      <span className="text-[#71717A]">Round Total:</span>
+                      <span className="font-bold text-[#18201D]">
+                        {formatPrice(ord.total || (ord as any).totalAmount || 0)}
+                      </span>
+                    </div>
+
+                    {isReady && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleServeFood(ord);
+                          setViewingRoundsTable(null);
+                        }}
+                        className="w-full mt-1.5 py-1.5 px-3 rounded-lg bg-[#16A34A] hover:bg-[#15803D] text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <ChefHat className="w-3.5 h-3.5" />
+                        <span>Mark This Round as Served</span>
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center gap-2 pt-2 border-t border-[#E3DED5]">
+              <button
+                type="button"
+                onClick={() => setViewingRoundsTable(null)}
+                className="flex-1 py-2.5 px-3 rounded-xl border border-[#E3DED5] hover:bg-stone-50 text-[#18201D] font-bold text-xs cursor-pointer"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const prim = viewingRoundsTable.orders[0];
+                  setViewingRoundsTable(null);
+                  if (prim) handleGenerateBill(prim);
+                }}
+                className="flex-1 py-2.5 px-3 rounded-xl bg-[#183B2B] hover:bg-[#122c20] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+              >
+                <DollarSign className="w-3.5 h-3.5 text-white" />
+                <span>Settle Full Bill ({formatPrice(viewingRoundsTable.orders.reduce((sum, o) => sum + Number(o.total || (o as any).totalAmount || 0), 0))})</span>
+              </button>
             </div>
           </div>
         )}

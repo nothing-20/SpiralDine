@@ -621,6 +621,12 @@ export const billingService = {
       // Settle all sibling orders in the same dining session
       const orderData = currentOrderSnap.exists() ? currentOrderSnap.data() : null;
       const sessionId = (bill as any).sessionId || orderData?.sessionId;
+      const targetPrimaryId = (orderData as any)?.primaryOrderId || bill.orderId;
+      const cleanTableNum = String(bill.tableNumber || orderData?.tableNumber || '').trim();
+
+      const siblingOrderDocsToUpdate = new Map<string, any>();
+
+      // 1. Session query
       if (sessionId && sessionId !== 'GUEST-SESSION') {
         try {
           const qSess = query(
@@ -628,18 +634,63 @@ export const billingService = {
             where('sessionId', '==', sessionId)
           );
           const sessSnap = await getDocs(qSess);
-          for (const sDoc of sessSnap.docs) {
-            if (sDoc.id !== bill.orderId) {
-              await updateDoc(sDoc.ref, {
-                paymentStatus: 'paid',
-                paidAt: nowIso,
-                status: targetStatus,
-                paymentMethods: paymentBreakdown,
-                transactionRef: generatedTxRef,
-                updatedAt: nowIso
-              });
+          sessSnap.forEach(d => {
+            if (d.id !== bill.orderId) siblingOrderDocsToUpdate.set(d.id, d.ref);
+          });
+        } catch (_) {}
+      }
+
+      // 2. Primary order linkage query (orders that have primaryOrderId == targetPrimaryId)
+      if (targetPrimaryId) {
+        try {
+          const qPrim = query(
+            collection(db, 'restaurants', tenantId, 'orders'),
+            where('primaryOrderId', '==', targetPrimaryId)
+          );
+          const primSnap = await getDocs(qPrim);
+          primSnap.forEach(d => {
+            if (d.id !== bill.orderId) siblingOrderDocsToUpdate.set(d.id, d.ref);
+          });
+        } catch (_) {}
+
+        // Also check if targetPrimaryId itself is an order that needs settlement
+        if (targetPrimaryId !== bill.orderId) {
+          try {
+            const pDocRef = doc(db, 'restaurants', tenantId, 'orders', targetPrimaryId);
+            siblingOrderDocsToUpdate.set(targetPrimaryId, pDocRef);
+          } catch (_) {}
+        }
+      }
+
+      // 3. Table matching query for active orders placed recently
+      if (cleanTableNum) {
+        try {
+          const qTable = query(
+            collection(db, 'restaurants', tenantId, 'orders'),
+            where('tableNumber', '==', cleanTableNum)
+          );
+          const tableSnap = await getDocs(qTable);
+          tableSnap.forEach(d => {
+            if (d.id !== bill.orderId) {
+              const dData = d.data();
+              if (dData.paymentStatus !== 'paid' && dData.status !== 'CANCELLED' && dData.status !== 'ARCHIVED') {
+                siblingOrderDocsToUpdate.set(d.id, d.ref);
+              }
             }
-          }
+          });
+        } catch (_) {}
+      }
+
+      for (const [, ref] of siblingOrderDocsToUpdate) {
+        try {
+          await updateDoc(ref, {
+            paymentStatus: 'paid',
+            paidAt: nowIso,
+            status: targetStatus,
+            paymentMethods: paymentBreakdown,
+            transactionRef: generatedTxRef,
+            updatedAt: nowIso
+          });
         } catch (_) {}
       }
     } catch (orderErr) {
