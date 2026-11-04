@@ -1,32 +1,27 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { IKdsOrder, TPriority } from '../../../features/kitchen-dashboard/types';
-import {
-  getElapsedSeconds,
-  formatElapsedSeconds,
-} from '../../../features/kitchen-dashboard/utils/kitchenMetrics';
-import { isKitchenStaffRole, filterKitchenStaff } from '../../../shared/services/kitchenService';
+import { TItemPreparationStatus, IOrderItem } from '../../../shared/domain/orders/types';
+import { getElapsedSeconds, formatElapsedSeconds } from '../../../features/kitchen-dashboard/utils/kitchenMetrics';
+import { inferCourseForItem, inferStationForItem } from '../../../shared/services/kitchenService';
+import { kotPrintService } from '../../../shared/services/kotPrintService';
+import { useAuth } from '../../../context/AuthContext';
 import OrderTimeline from './OrderTimeline';
+import toast from 'react-hot-toast';
 import { 
+  Utensils, 
+  Clock, 
   Check, 
+  Play, 
+  Pause, 
+  MoreHorizontal, 
+  Printer, 
   ChevronDown, 
   ChevronUp, 
   User, 
-  Clock, 
-  MapPin, 
-  Truck, 
-  UtensilsCrossed, 
-  AlertTriangle,
-  Flame,
-  Pause,
-  RotateCcw,
-  Printer
+  AlertCircle,
+  XCircle,
+  Sparkles
 } from 'lucide-react';
-import { useAuth } from '../../../context/AuthContext';
-import toast from 'react-hot-toast';
-import { kotPrintService } from '../../../shared/services/kotPrintService';
-import { IKitchenTicket } from '../../../shared/domain/orders/types';
-
-// ─── Status Configuration (Restrained Semantic System) ─────────────────────────
 
 export const STATUS_CONFIG: Record<string, { label: string; dot: string; text: string; bg: string; topBorder: string }> = {
   NEW:           { label: 'NORMAL',    dot: 'bg-[#287A55]', text: 'text-[#287A55]', bg: 'bg-[#E8F3ED]', topBorder: 'border-t-[3px] border-t-[#287A55]' },
@@ -44,16 +39,13 @@ export const STATUS_CONFIG: Record<string, { label: string; dot: string; text: s
   CANCELLED:     { label: 'CANCELLED', dot: 'bg-[#C7463A]', text: 'text-[#C7463A]', bg: 'bg-[#F9E8E4]', topBorder: 'border-t-[3px] border-t-[#C7463A]' },
 };
 
-/**
- * Smart Order Lifecycle — Primary operational actions
- */
 export const NEXT_STATUS: Record<string, { label: string; next: string; bg: string; hover: string; text: string } | null> = {
   NEW:           { label: 'Accept Order',   next: 'ACCEPTED',  bg: 'bg-[#13241F]', hover: 'hover:bg-[#1A312B]', text: 'text-white' },
   PLACED:        { label: 'Accept Order',   next: 'ACCEPTED',  bg: 'bg-[#13241F]', hover: 'hover:bg-[#1A312B]', text: 'text-white' },
   ACCEPTED:      { label: '▶ Start Cooking',  next: 'PREPARING', bg: 'bg-[#C84A38]', hover: 'hover:bg-[#B23F2F]', text: 'text-white' },
   CHEF_ASSIGNED: { label: '▶ Start Cooking',  next: 'PREPARING', bg: 'bg-[#C84A38]', hover: 'hover:bg-[#B23F2F]', text: 'text-white' },
   PREPARING:     { label: '✓ Mark Ready',   next: 'READY',     bg: 'bg-[#D79A24]', hover: 'hover:bg-[#BF881F]', text: 'text-white' },
-  READY:         null, // Kitchen preparation ends at READY. Food serving is handled by Waiter.
+  READY:         null,
   PICKED_UP:     null,
   SERVED:        null,
   DELIVERED:     null,
@@ -63,54 +55,13 @@ export const NEXT_STATUS: Record<string, { label: string; next: string; bg: stri
   CANCELLED:     null,
 };
 
-const CUSTOMER_TYPE_CONFIG: Record<string, { label: string; icon: React.ReactNode }> = {
-  'dine-in':  { label: 'Dine-In',  icon: <UtensilsCrossed className="w-2.5 h-2.5" /> },
-  'takeaway': { label: 'Takeaway', icon: <MapPin className="w-2.5 h-2.5" /> },
-  'delivery': { label: 'Delivery', icon: <Truck className="w-2.5 h-2.5" /> },
-};
-
-// ─── Calm Operational Timer ───────────────────────────────────────────────────
-
-const OperationalTimer: React.FC<{ createdAt: string; estimatedMinutes: number }> = ({ createdAt, estimatedMinutes }) => {
-  const [seconds, setSeconds] = useState(getElapsedSeconds(createdAt));
-
-  useEffect(() => {
-    const interval = setInterval(() => setSeconds(getElapsedSeconds(createdAt)), 1000);
-    return () => clearInterval(interval);
-  }, [createdAt]);
-
-  const elapsedMinutes = seconds / 60;
-  const remainingSeconds = Math.max(0, (estimatedMinutes * 60) - seconds);
-  const remainingMinutes = Math.ceil(remainingSeconds / 60);
-  const isOverdue = elapsedMinutes > estimatedMinutes;
-
-  return (
-    <div className="flex flex-col items-end text-right">
-      <span className="font-mono font-bold text-sm text-[#18201D] tracking-tight tabular-nums">
-        {formatElapsedSeconds(seconds)}
-      </span>
-      {remainingSeconds > 0 ? (
-        <span className="text-[11px] text-[#6F746F] font-medium">
-          {remainingMinutes} min left
-        </span>
-      ) : (
-        <span className="text-[11px] text-[#C7463A] font-bold flex items-center space-x-1">
-          <AlertTriangle className="w-3 h-3" />
-          <span>Delayed</span>
-        </span>
-      )}
-    </div>
-  );
-};
-
-// ─── Props ────────────────────────────────────────────────────────────────────
-
 interface IKitchenTicketProps {
   order: IKdsOrder;
-  isSelected: boolean;
-  onToggleSelect: (orderId: string) => void;
+  isSelected?: boolean;
+  onToggleSelect?: (orderId: string) => void;
+  onItemStatusUpdate: (orderId: string, itemIndex: number, nextStatus: TItemPreparationStatus) => void;
+  onBulkItemStatusUpdate: (orderId: string, itemIndices: number[], nextStatus: TItemPreparationStatus) => void;
   onStatusUpdate: (orderId: string, nextStatus: string) => void;
-  showBulkSelect: boolean;
   employees: any[];
   onAssignChef: (orderId: string, chefId: string, chefName: string) => void;
   onUnassignChef: (orderId: string) => void;
@@ -122,14 +73,13 @@ interface IKitchenTicketProps {
   menuItems?: any[];
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
-
 export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
   order,
-  isSelected,
+  isSelected = false,
   onToggleSelect,
+  onItemStatusUpdate,
+  onBulkItemStatusUpdate,
   onStatusUpdate,
-  showBulkSelect,
   employees,
   onAssignChef,
   onUnassignChef,
@@ -140,61 +90,206 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
   onUpdatePriority,
   menuItems = [],
 }) => {
-  const [timelineOpen, setTimelineOpen] = useState(false);
   const { user } = useAuth();
+  const [selectedItemIndices, setSelectedItemIndices] = useState<Set<number>>(new Set());
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const [showTimeline, setShowTimeline] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
 
+  // Live seconds elapsed from creation
+  const [elapsedSecs, setElapsedSecs] = useState(() => getElapsedSeconds(order.createdAt));
+  useEffect(() => {
+    const timer = setInterval(() => setElapsedSecs(getElapsedSeconds(order.createdAt)), 1000);
+    return () => clearInterval(timer);
+  }, [order.createdAt]);
+
+  const elapsedMins = Math.floor(elapsedSecs / 60);
+
+  // Derive status for each item (ensuring backward compatibility with legacy orders)
+  const itemsWithMeta = useMemo(() => {
+    return (order.items || []).map((item, idx) => {
+      let rawStatus: TItemPreparationStatus = (item as any).status || (item as any).prepStatus;
+      if (!rawStatus) {
+        if (order.status === 'READY') rawStatus = 'READY';
+        else if (order.status === 'PREPARING') rawStatus = 'PREPARING';
+        else if (['DELIVERED', 'SERVED', 'COMPLETED'].includes(order.status)) rawStatus = 'SERVED';
+        else rawStatus = 'NOT_STARTED';
+      }
+
+      const course = (item as any).course || inferCourseForItem(item.name, (item as any).category);
+      const station = (item as any).station || inferStationForItem(item.name, (item as any).category);
+      const prepTarget = (item as any).prepTimeMinutes || 12;
+
+      // Calculate elapsed minutes for this specific item if preparing
+      let itemElapsedMins = elapsedMins;
+      if ((item as any).preparationStartedAt) {
+        const itemSecs = getElapsedSeconds((item as any).preparationStartedAt);
+        itemElapsedMins = Math.floor(itemSecs / 60);
+      }
+
+      return {
+        ...item,
+        resolvedStatus: rawStatus,
+        course,
+        station,
+        prepTarget,
+        itemElapsedMins,
+        originalIndex: idx,
+      };
+    });
+  }, [order.items, order.status, elapsedMins]);
+
+  // Group items by course for the header pills
+  const courseCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    itemsWithMeta.forEach(i => {
+      map[i.course] = (map[i.course] || 0) + Number(i.count || 1);
+    });
+    return map;
+  }, [itemsWithMeta]);
+
+  // Check if order is critical / delayed
+  const isDelayed = elapsedMins > (order.estimatedPrepTime || 15);
+  const isPriority = order.priority === 'critical' || order.priority === 'high' || isDelayed;
+
+  // Toggle selection for an individual item
+  const toggleItemCheckbox = (index: number) => {
+    setSelectedItemIndices(prev => {
+      const copy = new Set(prev);
+      if (copy.has(index)) copy.delete(index);
+      else copy.add(index);
+      return copy;
+    });
+  };
+
+  // Determine context-sensitive footer action
+  const selectedList = useMemo(() => {
+    return itemsWithMeta.filter(i => selectedItemIndices.has(i.originalIndex));
+  }, [itemsWithMeta, selectedItemIndices]);
+
+  const activeNonServedItems = useMemo(() => {
+    return itemsWithMeta.filter(i => i.resolvedStatus !== 'SERVED' && i.resolvedStatus !== 'CANCELLED');
+  }, [itemsWithMeta]);
+
+  const allActiveReady = activeNonServedItems.length > 0 && activeNonServedItems.every(i => i.resolvedStatus === 'READY');
+  const preparingItems = itemsWithMeta.filter(i => i.resolvedStatus === 'PREPARING');
+  const notStartedItems = itemsWithMeta.filter(i => i.resolvedStatus === 'NOT_STARTED');
+
+  // Primary action button calculation
+  const primaryButtonConfig = useMemo(() => {
+    if (selectedList.length > 0) {
+      const anyPreparing = selectedList.some(i => i.resolvedStatus === 'PREPARING');
+      if (anyPreparing) {
+        return {
+          label: '✓ Mark Selected Ready',
+          action: () => {
+            const indicesToReady = selectedList
+              .filter(i => i.resolvedStatus === 'PREPARING')
+              .map(i => i.originalIndex);
+            onBulkItemStatusUpdate(order.orderId, indicesToReady, 'READY');
+            setSelectedItemIndices(new Set());
+          },
+        };
+      }
+      return {
+        label: '▶ Start Selected Items',
+        action: () => {
+          const indicesToStart = selectedList
+            .filter(i => i.resolvedStatus === 'NOT_STARTED' || i.resolvedStatus === 'ON_HOLD')
+            .map(i => i.originalIndex);
+          onBulkItemStatusUpdate(order.orderId, indicesToStart, 'PREPARING');
+          setSelectedItemIndices(new Set());
+        },
+      };
+    }
+
+    if (allActiveReady) {
+      return {
+        label: '✓ Mark Order Served',
+        action: () => {
+          onStatusUpdate(order.orderId, 'SERVED');
+        },
+      };
+    }
+
+    if (preparingItems.length > 0) {
+      return {
+        label: '✓ Mark Selected Ready',
+        action: () => {
+          const indices = preparingItems.map(i => i.originalIndex);
+          onBulkItemStatusUpdate(order.orderId, indices, 'READY');
+        },
+      };
+    }
+
+    if (notStartedItems.length > 0) {
+      return {
+        label: '▶ Start Next Item',
+        action: () => {
+          const firstPending = notStartedItems[0];
+          onItemStatusUpdate(order.orderId, firstPending.originalIndex, 'PREPARING');
+        },
+      };
+    }
+
+    return {
+      label: '✓ Mark Order Served',
+      action: () => onStatusUpdate(order.orderId, 'SERVED'),
+    };
+  }, [selectedList, allActiveReady, preparingItems, notStartedItems, onBulkItemStatusUpdate, onItemStatusUpdate, onStatusUpdate, order.orderId]);
+
+  // Thermal Print Handler
   const handlePrintKot = async (e: React.MouseEvent) => {
     e.stopPropagation();
     const effectiveTenant = order.tenantId || user?.tenantId;
     if (!effectiveTenant) {
-      toast.error('Unable to resolve restaurant context for printing.');
+      toast.error('Unable to resolve restaurant context.');
       return;
     }
 
     setIsPrinting(true);
     try {
-      const ticketToPrint: IKitchenTicket = {
-        id: (order as any).kotId || `KOT-${order.orderId}-R${(order as any).orderSequence || 1}`,
-        ticketNumber: (order as any).ticketNumber || (order as any).latestKotNumber || `KOT #${order.orderId.substring(0, 6)}`,
+      const ticketToPrint = {
+        id: (order as any).kotId || `KOT-${order.orderId}`,
+        ticketNumber: (order as any).ticketNumber || `KOT #${order.orderId.slice(-6)}`,
         tenantId: effectiveTenant,
         branchId: order.branchId || 'main',
         orderId: order.orderId,
         tableId: order.tableId,
         tableNumber: order.tableNumber || 'Walk-in',
         tableName: order.tableName,
-        round: (order as any).kotRound || (order as any).orderSequence || 1,
-        isSupplementary: Boolean((order as any).kotIsSupplementary || (order as any).isAdditionalOrder),
-        items: order.items.map((i) => ({
+        round: (order as any).kotRound || 1,
+        isSupplementary: Boolean((order as any).isAdditionalOrder),
+        items: order.items.map(i => ({
           itemId: i.itemId,
           name: i.name,
           count: i.count,
           notes: i.notes,
-          station: (i as any).station || (order as any).station || 'Main Kitchen',
-          isVeg: i.isVeg ?? (i as any).veg
+          station: (i as any).station || 'Main Kitchen',
+          isVeg: i.isVeg,
         })),
-        specialInstructions: (order as any).specialInstructions || order.notes || '',
-        station: (order as any).station || 'Main Kitchen',
+        specialInstructions: order.notes || '',
+        station: 'Main Kitchen',
         status: order.status as any,
         source: (order.orderSource as any) || 'customer_app',
         customerName: order.customerName,
         waiterName: order.waiterName,
         createdAt: order.createdAt,
         printStatus: (order as any).kotPrintStatus || 'unprinted',
-        printCount: (order as any).kotPrintCount || 0
+        printCount: (order as any).kotPrintCount || 0,
       };
 
       const isReprint = Boolean((order as any).kotPrintCount && (order as any).kotPrintCount > 0);
       const res = await kotPrintService.printTicket(
         effectiveTenant,
-        ticketToPrint,
+        ticketToPrint as any,
         (order as any).restaurantName || 'SpiralDine Kitchen',
         { uid: user?.uid, displayName: user?.displayName || 'Chef' },
         isReprint
       );
 
       if (res.success) {
-        toast.success(isReprint ? 'KOT Reprint sent to printer!' : 'KOT sent to printer!');
+        toast.success(isReprint ? 'KOT Reprint triggered!' : 'KOT printed successfully!');
       } else if (res.error) {
         toast.error(res.error);
       }
@@ -203,386 +298,333 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
       toast.error('Failed to trigger KOT print.');
     } finally {
       setIsPrinting(false);
+      setShowMoreMenu(false);
     }
   };
 
-  const statusConf = STATUS_CONFIG[order.status] || STATUS_CONFIG['NEW'];
-  const nextConf = NEXT_STATUS[order.status];
-  const priority = order.priority || 'normal';
-  const estimatedPrep = order.estimatedPrepTime || order.items.length * 5;
-  const hasTimeline = (order.timeline?.length ?? 0) > 0;
-  const rawType = (order as any).customerType || (order as any).orderType || 'dine-in';
-  const customerType = rawType === 'dine_in' ? 'dine-in' : rawType;
-  const customerTypeConf = CUSTOMER_TYPE_CONFIG[customerType] || CUSTOMER_TYPE_CONFIG['dine-in'];
-
-  // Needs chef assignment before cooking
-  const needsChefAssignment = (order.status === 'ACCEPTED' || order.status === 'CHEF_ASSIGNED') && !order.assignedChefName;
-
-  // Kitchen-eligible staff members (role filtered)
-  const kitchenStaff = React.useMemo(
-    () => filterKitchenStaff(employees),
-    [employees]
-  );
-
-  // Safe validation check for existing historical assignments
-  const assignedStaffMember = React.useMemo(() => {
-    if (!order.assignedChefId) return null;
-    return employees.find(e => e.id === order.assignedChefId);
-  }, [order.assignedChefId, employees]);
-
-  const isAssignedValidKitchenStaff = React.useMemo(() => {
-    if (!order.assignedChefId || !assignedStaffMember) return true;
-    return isKitchenStaffRole(assignedStaffMember.role);
-  }, [order.assignedChefId, assignedStaffMember]);
+  // Header icon & background styling based on priority / table
+  const headerIconTheme = useMemo(() => {
+    if (isPriority) {
+      return {
+        bg: 'bg-[#FEECEC]',
+        border: 'border-[#FCA5A5]',
+        text: 'text-[#DC2626]',
+      };
+    }
+    if (allActiveReady) {
+      return {
+        bg: 'bg-[#EAF7EE]',
+        border: 'border-[#BBF7D0]',
+        text: 'text-[#16A34A]',
+      };
+    }
+    return {
+      bg: 'bg-[#FEF5E7]',
+      border: 'border-[#FDE68A]',
+      text: 'text-[#D97706]',
+    };
+  }, [isPriority, allActiveReady]);
 
   return (
-    <div
-      className={`bg-white border border-[#E3DED5] rounded-xl shadow-[0_2px_10px_rgba(30,30,20,0.06)] overflow-hidden flex flex-col justify-between transition-all text-left font-sans hover:border-[#D1C9BC] ${
-        statusConf.topBorder
-      } ${isSelected ? 'ring-2 ring-[#C84A38]' : ''}`}
-    >
-      {/* ── Header ────────────────────────────────────────────────────── */}
-      <div className="p-4 pb-3 border-b border-[#E3DED5] bg-white">
+    <div className={`bg-white border rounded-2xl shadow-xs transition-all flex flex-col justify-between text-left relative overflow-hidden group hover:border-[#D1C9BC] ${
+      isPriority ? 'border-red-200 ring-1 ring-red-100' : 'border-[#E3DED5]'
+    }`}>
+      {/* ── Card Header ────────────────────────────────────────── */}
+      <div className="p-4 pb-3 border-b border-[#F0ECE1]">
         <div className="flex items-start justify-between gap-2">
-          
+          {/* Table Number & Order ID */}
           <div className="flex items-start space-x-2.5 min-w-0">
-            {showBulkSelect && (
-              <button
-                onClick={(e) => { e.stopPropagation(); onToggleSelect(order.orderId); }}
-                className={`mt-0.5 w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-all ${
-                  isSelected
-                    ? 'bg-[#13241F] border-[#13241F] text-white'
-                    : 'bg-white border-[#D1C9BC] hover:border-[#13241F]'
-                }`}
-                title="Select Ticket"
-              >
-                {isSelected && <Check className="w-2.5 h-2.5" strokeWidth={3} />}
-              </button>
-            )}
+            <div className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 ${headerIconTheme.bg} ${headerIconTheme.border} ${headerIconTheme.text}`}>
+              <Utensils className="w-4 h-4" />
+            </div>
 
             <div className="min-w-0">
-              {/* Table Number & Order Type */}
-              <div className="flex flex-wrap items-center gap-1.5 leading-none">
-                <span className="font-serif font-bold text-base text-[#18201D] tracking-tight">
+              <div className="flex items-center space-x-2">
+                <h3 className="font-bold text-sm text-[#18201D] truncate leading-tight">
                   Table {order.tableNumber || (order.tableId ? order.tableId.replace(/^TBL-/i, '') : 'Walk-in')}
-                </span>
-                
-                <span className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-[#F7F4EE] border border-[#E3DED5] text-[10px] font-semibold text-[#6F746F]">
-                  {customerTypeConf.icon}
-                  <span>{customerTypeConf.label}</span>
-                </span>
-
+                </h3>
                 {((order as any).isAdditionalOrder || ((order as any).orderSequence && (order as any).orderSequence > 1)) && (
-                  <span className="inline-flex items-center space-x-0.5 px-1.5 py-0.5 rounded bg-[#FEF7EC] border border-[#D79A24]/30 text-[#D79A24] text-[9px] font-bold uppercase tracking-wider">
-                    <span>⚡ Add-on #{((order as any).orderSequence) || 2}</span>
+                  <span className="text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded-md">
+                    Add-on
                   </span>
                 )}
               </div>
-
-              {/* Order ID & KOT Number */}
-              <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                {(order as any).ticketNumber ? (
-                  <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-[#13241F] text-white text-[10px] font-black tracking-wide">
-                    {(order as any).ticketNumber}
-                  </span>
-                ) : null}
-                <span className="text-[11px] font-mono text-[#6F746F] truncate">
-                  # {order.orderId}
-                </span>
-                {(order as any).station && (
-                  <span className="text-[10px] font-semibold text-[#8C7A6B] bg-[#F7F4EE] px-1.5 py-0.5 rounded border border-[#E3DED5]">
-                    {(order as any).station}
-                  </span>
-                )}
-              </div>
+              <p className="text-[11px] font-mono text-[#71717A] truncate mt-0.5">
+                # {order.orderId}
+              </p>
             </div>
           </div>
 
-          {/* Time & Duration */}
-          <OperationalTimer createdAt={order.createdAt} estimatedMinutes={estimatedPrep} />
-        </div>
+          {/* Timer & Priority */}
+          <div className="flex flex-col items-end shrink-0 space-y-1">
+            <div className={`flex items-center space-x-1 text-xs font-semibold ${
+              isDelayed ? 'text-red-600' : elapsedMins >= 10 ? 'text-amber-600' : 'text-emerald-700'
+            }`}>
+              <Clock className="w-3.5 h-3.5" />
+              <span>{elapsedMins} min</span>
+            </div>
 
-        {/* Status Line + Priority + Waiter */}
-        <div className="flex items-center justify-between flex-wrap gap-2 mt-3 pt-2.5 border-t border-[#F7F4EE]">
-          <div className="flex items-center space-x-1.5">
-            <span className={`w-2 h-2 rounded-full ${statusConf.dot}`} />
-            <span className={`text-[11px] font-bold tracking-wider uppercase ${statusConf.text}`}>
-              {statusConf.label}
-            </span>
-          </div>
-
-          <div className="flex items-center space-x-2 text-[11px]">
-            {order.waiterName && (
-              <span className="text-[#6F746F] font-medium truncate max-w-[90px]" title={`Waiter: ${order.waiterName}`}>
-                🤵 {order.waiterName}
+            {isPriority && (
+              <span className="bg-[#DE3B3B] text-white text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md tracking-wider">
+                Priority
               </span>
             )}
-
-            {/* Priority Selector */}
-            <select
-              value={priority}
-              onChange={(e) => {
-                e.stopPropagation();
-                onUpdatePriority(order.orderId, e.target.value as TPriority);
-              }}
-              className="text-[10px] font-semibold text-[#18201D] bg-[#F7F4EE] border border-[#E3DED5] rounded px-1.5 py-0.5 outline-none cursor-pointer hover:border-[#D1C9BC]"
-            >
-              <option value="critical">💥 Critical</option>
-              <option value="high">🔴 High</option>
-              <option value="normal">Normal</option>
-              <option value="low">Low</option>
-            </select>
           </div>
         </div>
 
-        {/* Assigned Chef Indicator / Selector */}
-        <div className="mt-2 text-[11px]">
-          {order.assignedChefName ? (
-            <div className={`flex items-center justify-between px-2 py-1 rounded-md border ${
-              isAssignedValidKitchenStaff
-                ? 'bg-[#F7F4EE] border-[#E3DED5]'
-                : 'bg-[#FEF5E7] border-[#D79A24]/50'
-            }`}>
-              <div className="flex items-center space-x-1 text-[#18201D] font-medium truncate">
-                <User className={`w-3 h-3 ${isAssignedValidKitchenStaff ? 'text-[#6F746F]' : 'text-[#D79A24]'}`} />
-                <span>Chef {order.assignedChefName}</span>
-                {!isAssignedValidKitchenStaff && (
-                  <span className="ml-1 text-[9px] font-bold text-[#D79A24] bg-[#FEF7EC] px-1 py-0.5 rounded border border-[#D79A24]/30" title="Assigned staff member is not configured as kitchen staff">
-                    Reassign (Non-Kitchen)
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={(e) => { e.stopPropagation(); onUnassignChef(order.orderId); }}
-                className="text-[10px] text-[#C7463A] hover:underline font-bold uppercase"
+        {/* Course Group Pills */}
+        <div className="flex flex-wrap items-center gap-1.5 mt-3">
+          {Object.entries(courseCounts).map(([courseName, count]) => {
+            let pillClass = 'bg-[#F4F4F5] text-[#52525B]';
+            if (courseName.toLowerCase().includes('starter')) pillClass = 'bg-[#FEECEC] text-[#DC2626] border border-red-200';
+            else if (courseName.toLowerCase().includes('main')) pillClass = 'bg-[#FEF5E7] text-[#D97706] border border-amber-200';
+            else if (courseName.toLowerCase().includes('beverage') || courseName.toLowerCase().includes('drink')) pillClass = 'bg-[#EFF6FF] text-[#2563EB] border border-blue-200';
+            else if (courseName.toLowerCase().includes('dessert')) pillClass = 'bg-[#FAF5FF] text-[#9333EA] border border-purple-200';
+
+            return (
+              <span
+                key={courseName}
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${pillClass}`}
               >
-                Change
-              </button>
-            </div>
-          ) : (
-            <select
-              value=""
-              onChange={(e) => {
-                const chef = kitchenStaff.find(emp => emp.id === e.target.value);
-                if (chef) onAssignChef(order.orderId, chef.id, chef.fullName);
-              }}
-              className="w-full text-[11px] bg-[#F7F4EE] border border-[#E3DED5] rounded px-2 py-1 text-[#6F746F] outline-none cursor-pointer"
-            >
-              <option value="" disabled>Assign Chef...</option>
-              {kitchenStaff.map(emp => (
-                <option key={emp.id} value={emp.id}>{emp.fullName}</option>
-              ))}
-            </select>
-          )}
+                {courseName} ({count})
+              </span>
+            );
+          })}
         </div>
       </div>
 
-      {/* ── Items List ────────────────────────────────────────────────── */}
-      <div className="p-4 flex-1 space-y-2">
-        {order.items.map((item, idx) => {
-          const menuItem = menuItems?.find(mi => mi.id === item.itemId);
-          const isBatch = menuItem?.preparationMethod === 'batch' || menuItem?.productionMode === 'Batch Production';
-          const available = menuItem?.availableServings ?? 0;
+      {/* ── Items List ─────────────────────────────────────────── */}
+      <div className="p-4 space-y-2 flex-1 overflow-y-auto max-h-[360px]">
+        {itemsWithMeta.map((item) => {
+          const isItemChecked = selectedItemIndices.has(item.originalIndex);
+          const isItemReady = item.resolvedStatus === 'READY';
+          const isItemPreparing = item.resolvedStatus === 'PREPARING';
+          const isItemOnHold = item.resolvedStatus === 'ON_HOLD';
+          const isItemServed = item.resolvedStatus === 'SERVED';
+          const isItemCancelled = item.resolvedStatus === 'CANCELLED';
 
           return (
-            <div key={idx} className="flex flex-col space-y-0.5">
-              <div className="flex items-start text-xs text-[#18201D]">
-                {/* Quantity: Small light warm box */}
-                <span className="inline-flex items-center justify-center w-5 h-5 rounded bg-[#FBF9F5] border border-[#E3DED5] font-bold text-xs text-[#18201D] shrink-0 mr-2.5 mt-0.5 shadow-none">
+            <div
+              key={item.originalIndex}
+              className={`flex items-center justify-between gap-2 p-1.5 rounded-xl transition-colors ${
+                isItemChecked ? 'bg-amber-50/50' : 'hover:bg-[#FAF8F5]'
+              }`}
+            >
+              {/* Left: Checkbox + Qty + Name + Course/Notes */}
+              <div className="flex items-center space-x-2.5 min-w-0 flex-1">
+                <input
+                  type="checkbox"
+                  checked={isItemChecked}
+                  onChange={() => toggleItemCheckbox(item.originalIndex)}
+                  disabled={isItemServed || isItemCancelled}
+                  className="w-4 h-4 rounded text-[#183B2B] focus:ring-[#183B2B] border-[#D1C9BC] cursor-pointer"
+                />
+
+                <span className="w-5 h-5 rounded-md bg-[#FAF8F5] border border-[#E3DED5] flex items-center justify-center text-xs font-bold text-[#18201D] shrink-0">
                   {item.count}
                 </span>
 
-                {/* Name & details */}
-                <div className="flex-1 min-w-0">
-                  <span className="font-semibold text-[#18201D] text-[13px] leading-tight">
-                    {item.name}
-                  </span>
-                  
-                  {isBatch && (
-                    <span className="ml-2 text-[9px] px-1.5 py-0.5 rounded bg-[#F8EED8] text-[#D79A24] border border-[#D79A24]/30 font-bold uppercase tracking-wider">
-                      Batch ({available} left)
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center space-x-1.5">
+                    <span className={`text-xs font-semibold truncate ${
+                      isItemServed ? 'line-through text-stone-400' : 'text-[#18201D]'
+                    }`}>
+                      {item.name}
                     </span>
-                  )}
+
+                    {/* Show course badge if mixed or main */}
+                    {item.course && item.course !== 'Starters' && (
+                      <span className="text-[9px] font-medium text-stone-500 bg-stone-100 px-1 rounded">
+                        {item.course === 'Main Course' ? 'Main' : item.course}
+                      </span>
+                    )}
+                  </div>
 
                   {item.notes && (
-                    <p className="text-xs text-[#D79A24] italic mt-0.5">
+                    <p className="text-[10px] text-amber-700 italic truncate">
                       "{item.notes}"
                     </p>
                   )}
                 </div>
               </div>
+
+              {/* Right: Item Status Pill & Quick Action Popover */}
+              <div className="shrink-0">
+                {isItemPreparing ? (
+                  <button
+                    onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'READY')}
+                    title="Click to mark this item Ready"
+                    className="bg-[#EAF3FD] hover:bg-[#DCEBFC] text-[#2563EB] text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <span>Preparing</span>
+                    <Clock className="w-3 h-3 text-[#2563EB]" />
+                    <span>{item.itemElapsedMins} min</span>
+                  </button>
+                ) : isItemReady ? (
+                  <button
+                    onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'PREPARING')}
+                    title="Click to recall item to Preparing"
+                    className="bg-[#EAF7EE] hover:bg-[#D5F2DD] text-[#16A34A] text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <Check className="w-3 h-3 stroke-[2.5]" />
+                    <span>Ready</span>
+                  </button>
+                ) : isItemOnHold ? (
+                  <button
+                    onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'PREPARING')}
+                    title="Click to release and start preparing"
+                    className="bg-[#FEF5E7] hover:bg-[#FDECC8] text-[#D97706] text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <Pause className="w-3 h-3" />
+                    <span>On Hold</span>
+                  </button>
+                ) : isItemServed ? (
+                  <span className="bg-stone-100 text-stone-500 text-[11px] font-medium px-2.5 py-1 rounded-full flex items-center gap-1">
+                    <Check className="w-3 h-3" />
+                    <span>Served</span>
+                  </span>
+                ) : isItemCancelled ? (
+                  <span className="bg-red-50 text-red-600 text-[11px] font-medium px-2.5 py-1 rounded-full">
+                    Cancelled
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'PREPARING')}
+                    title="Click to start preparing this item"
+                    className="bg-[#F4F4F5] hover:bg-[#E4E4E7] text-[#71717A] text-[11px] font-medium px-2.5 py-1 rounded-full flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <span>Not Started</span>
+                    <Clock className="w-3 h-3" />
+                    <span>{item.prepTarget} min</span>
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}
 
-        {/* ── Subtle Information Section (Notes & Timeline) ────────────── */}
-        <div className="mt-3 pt-2.5 border-t border-[#E3DED5] text-[11px] space-y-1">
-          {order.notes && (
-            <div className="text-[#D79A24] italic">
-              <span className="text-[#5F6762] font-medium">Customer Note:</span> {order.notes}
-            </div>
-          )}
-
-          {/* Kitchen Note */}
-          <div className="flex items-baseline justify-between group/note">
-            <span className="truncate pr-2">
-              <span className="text-[#5F6762] font-semibold">Kitchen Note — </span>
-              <span className="text-[#39423D]">{order.kitchenNotes || '—'}</span>
-            </span>
-            <button
-              onClick={() => {
-                const note = prompt('Enter Internal Kitchen Note:', order.kitchenNotes || '');
-                if (note !== null) onUpdateNotes(order.orderId, 'kitchen', note);
-              }}
-              className="text-[10px] text-[#C84A38] opacity-0 group-hover/note:opacity-100 font-bold hover:underline shrink-0"
-            >
-              Edit
-            </button>
-          </div>
-
-          {/* Chef Note */}
-          <div className="flex items-baseline justify-between group/chefnote">
-            <span className="truncate pr-2">
-              <span className="text-[#5F6762] font-semibold">Chef Note — </span>
-              <span className="text-[#39423D]">{order.chefNotes || '—'}</span>
-            </span>
-            <button
-              onClick={() => {
-                const note = prompt('Enter Internal Chef Note:', order.chefNotes || '');
-                if (note !== null) onUpdateNotes(order.orderId, 'chef', note);
-              }}
-              className="text-[10px] text-[#C84A38] opacity-0 group-hover/chefnote:opacity-100 font-bold hover:underline shrink-0"
-            >
-              Edit
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Timeline Toggle ───────────────────────────────────────────── */}
-      <div className="px-4">
-        <button
-          onClick={() => setTimelineOpen(o => !o)}
-          className="w-full flex items-center justify-between py-2 text-[11px] font-medium text-[#5F6762] hover:text-[#18201D] transition-colors border-t border-[#E3DED5]"
-        >
-          <span>
-            {hasTimeline
-              ? `${order.timeline!.length} events in timeline`
-              : 'Timeline (no events yet)'}
-          </span>
-          {timelineOpen ? <ChevronUp className="w-3 h-3 text-[#5F6762]" /> : <ChevronDown className="w-3 h-3 text-[#5F6762]" />}
-        </button>
-
-        {timelineOpen && (
-          <div className="pb-3 pt-1 border-t border-[#F7F4EE]">
-            <OrderTimeline timeline={order.timeline || []} compact />
-          </div>
-        )}
-      </div>
-
-      {/* ── Operational Action Buttons ─────────────────────────────────── */}
-      <div className="p-4 pt-2 bg-[#F7F4EE]/50 border-t border-[#E3DED5]">
-        {order.status === 'PAUSED' ? (
-          <div className="flex flex-col gap-2">
-            <div className="bg-[#FEF7EC] border border-[#D79A24]/30 text-[#D79A24] rounded-lg p-2 text-xs italic">
-              ⏸️ PAUSED: {order.pauseReason || 'No reason specified'}
-            </div>
-            <button
-              onClick={() => onResumeOrder(order.orderId)}
-              className="w-full h-10 rounded-lg text-xs font-bold uppercase tracking-wider bg-[#287A55] hover:bg-[#206345] text-white transition-all flex items-center justify-center space-x-1.5 shadow-sm"
-            >
-              <span>▶ Resume Cooking</span>
-            </button>
-          </div>
-
-        ) : needsChefAssignment ? (
-          <div className="flex flex-col gap-2">
-            <select
-              value=""
-              onChange={(e) => {
-                const chef = kitchenStaff.find(emp => emp.id === e.target.value);
-                if (chef) onAssignChef(order.orderId, chef.id, chef.fullName);
-              }}
-              className="w-full h-10 rounded-lg text-xs font-bold bg-[#FEF7EC] border border-[#D79A24]/40 text-[#D79A24] px-3 outline-none cursor-pointer"
-            >
-              <option value="" disabled>Select Chef to Assign...</option>
-              {kitchenStaff.map(emp => (
-                <option key={emp.id} value={emp.id}>{emp.fullName}</option>
-              ))}
-            </select>
-            <button
-              onClick={() => onStatusUpdate(order.orderId, 'PREPARING')}
-              className="w-full py-1.5 rounded-lg text-[11px] font-semibold text-[#6F746F] hover:text-[#18201D] bg-white border border-[#E3DED5] transition-all"
-            >
-              Skip Assignment → Start Cooking
-            </button>
-          </div>
-
-        ) : nextConf ? (
-          <div className="flex flex-col gap-2">
-            {/* Primary Action Button */}
-            <button
-              onClick={() => onStatusUpdate(order.orderId, nextConf.next)}
-              className={`w-full h-10 rounded-lg text-xs font-bold uppercase tracking-wider ${nextConf.bg} ${nextConf.hover} ${nextConf.text} transition-all flex items-center justify-center space-x-1.5 shadow-sm active:scale-[0.99]`}
-            >
-              <Check className="w-4 h-4" strokeWidth={2.5} />
-              <span>{nextConf.label}</span>
-            </button>
-
-            {/* Secondary Actions */}
-            {order.status === 'PREPARING' && (
-              <button
-                onClick={() => {
-                  const reason = prompt('Enter reason to Pause cooking this order:', 'Waiting for ingredients');
-                  if (reason !== null) onPauseOrder(order.orderId, reason || 'General Pause');
-                }}
-                className="w-full py-2 rounded-lg text-[11px] font-semibold text-[#18201D] bg-white hover:bg-[#F7F4EE] border border-[#E3DED5] transition-all cursor-pointer"
-              >
-                Ⅱ Pause Cooking
-              </button>
+        {/* Customer & Kitchen Notes */}
+        {(order.notes || order.kitchenNotes) && (
+          <div className="pt-2 border-t border-[#F0ECE1] text-[11px] space-y-1">
+            {order.notes && (
+              <p className="text-amber-800 bg-amber-50/60 p-1.5 rounded-lg border border-amber-200/50">
+                <span className="font-bold">Guest Note:</span> {order.notes}
+              </p>
+            )}
+            {order.kitchenNotes && (
+              <p className="text-[#5F6762] italic">
+                <span className="font-semibold">Kitchen Note:</span> {order.kitchenNotes}
+              </p>
             )}
           </div>
-        ) : order.status === 'READY' ? (
-          <div className="flex flex-col gap-2">
-            <div className="w-full py-2.5 bg-[#E8F3ED] border border-[#287A55]/30 rounded-lg text-center text-xs font-bold text-[#287A55] flex items-center justify-center space-x-1.5 select-none">
-              <Check className="w-3.5 h-3.5" strokeWidth={3} />
-              <span>Ready · Awaiting Waiter Service</span>
-            </div>
+        )}
+      </div>
+
+      {/* ── Timeline Drawer (Collapsible) ──────────────────────── */}
+      {showTimeline && (
+        <div className="p-3 bg-[#FAF8F5] border-t border-[#E3DED5] max-h-48 overflow-y-auto">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-bold text-stone-600 uppercase tracking-wider">
+              Order Timeline
+            </span>
             <button
-              onClick={() => {
-                const reason = prompt('Enter return reason to recall order:', 'Needs Garnish');
-                if (reason !== null) onRecallOrder(order.orderId, reason || 'Needs Attention');
-              }}
-              className="w-full py-2 rounded-lg text-[11px] font-bold text-[#C7463A] bg-[#F9E8E4] hover:bg-[#F2D7D2] border border-[#E3DED5] transition-all tracking-wider flex items-center justify-center space-x-1 cursor-pointer"
+              onClick={() => setShowTimeline(false)}
+              className="text-[10px] text-stone-500 hover:text-stone-800"
             >
-              <span>⚠ Recall to Preparing</span>
+              Close
             </button>
           </div>
+          <OrderTimeline timeline={order.timeline || []} compact />
+        </div>
+      )}
 
-        ) : (
-          <button
-            disabled
-            className="w-full h-10 rounded-lg text-xs font-bold uppercase tracking-wider bg-[#F7F4EE] text-[#6F746F] border border-[#E3DED5] cursor-not-allowed flex items-center justify-center space-x-1.5"
-          >
-            <span>Completed</span>
-          </button>
-        )}
-
-        {/* Dedicated KOT Physical Print / Reprint Action */}
+      {/* ── Card Footer ────────────────────────────────────────── */}
+      <div className="p-3 bg-[#FAF8F5] border-t border-[#E3DED5] flex items-center space-x-2">
+        {/* Context-Sensitive Primary Button */}
         <button
-          type="button"
-          onClick={handlePrintKot}
-          disabled={isPrinting}
-          className="w-full mt-2 py-2 rounded-lg text-[11px] font-bold text-[#18201D] bg-white hover:bg-[#F7F4EE] border border-[#E3DED5] shadow-2xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer disabled:opacity-50 active:scale-[0.99]"
-          title="Print physical thermal Kitchen Order Ticket (KOT)"
+          onClick={primaryButtonConfig.action}
+          className="flex-1 bg-[#183B2B] hover:bg-[#132E22] active:scale-[0.99] text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all shadow-xs flex items-center justify-center space-x-1.5 cursor-pointer"
         >
-          <Printer className="w-3.5 h-3.5 text-[#C84A38]" />
-          <span>
-            {(order as any).kotPrintCount && (order as any).kotPrintCount > 0
-              ? `Reprint KOT (#${(order as any).kotPrintCount} printed)`
-              : 'Print KOT'}
-          </span>
+          <span>{primaryButtonConfig.label}</span>
         </button>
+
+        {/* More Actions Menu Button */}
+        <div className="relative">
+          <button
+            onClick={() => setShowMoreMenu(m => !m)}
+            className="w-10 h-10 rounded-xl border border-[#E3DED5] bg-white hover:bg-stone-50 text-[#71717A] hover:text-[#18201D] flex items-center justify-center transition-colors cursor-pointer"
+            title="More Options"
+          >
+            <MoreHorizontal className="w-4 h-4" />
+          </button>
+
+          {/* More Actions Dropdown */}
+          {showMoreMenu && (
+            <div className="absolute right-0 bottom-full mb-1 w-48 bg-white border border-[#E3DED5] rounded-xl shadow-lg p-1.5 z-30 space-y-0.5 text-xs">
+              <button
+                type="button"
+                onClick={handlePrintKot}
+                disabled={isPrinting}
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#FAF8F5] flex items-center space-x-2 text-[#18201D] font-medium"
+              >
+                <Printer className="w-3.5 h-3.5 text-stone-600" />
+                <span>{isPrinting ? 'Printing...' : 'Print KOT Ticket'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTimeline(t => !t);
+                  setShowMoreMenu(false);
+                }}
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#FAF8F5] flex items-center space-x-2 text-[#18201D] font-medium"
+              >
+                <Clock className="w-3.5 h-3.5 text-stone-600" />
+                <span>View Timeline ({order.timeline?.length || 0})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const note = prompt('Add kitchen internal note:', order.kitchenNotes || '');
+                  if (note !== null) onUpdateNotes(order.orderId, 'kitchen', note);
+                  setShowMoreMenu(false);
+                }}
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#FAF8F5] flex items-center space-x-2 text-[#18201D] font-medium"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-stone-600" />
+                <span>Add Kitchen Note</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const nextPrio = order.priority === 'critical' ? 'normal' : 'critical';
+                  onUpdatePriority(order.orderId, nextPrio);
+                  setShowMoreMenu(false);
+                }}
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#FAF8F5] flex items-center space-x-2 text-[#18201D] font-medium"
+              >
+                <AlertCircle className="w-3.5 h-3.5 text-red-500" />
+                <span>Toggle Priority</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm('Cancel this entire order?')) {
+                    onStatusUpdate(order.orderId, 'CANCELLED');
+                  }
+                  setShowMoreMenu(false);
+                }}
+                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-red-50 flex items-center space-x-2 text-red-600 font-medium"
+              >
+                <XCircle className="w-3.5 h-3.5 text-red-500" />
+                <span>Cancel Order</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

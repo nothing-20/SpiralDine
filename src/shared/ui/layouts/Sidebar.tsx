@@ -40,7 +40,8 @@ import {
   ShieldCheck,
   UtensilsCrossed,
   Star,
-  Gift
+  Gift,
+  Layers
 } from 'lucide-react';
 
 interface ISidebarLink {
@@ -151,14 +152,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
           icon: ChefHat, 
           badge: activeCookingCount > 0 ? activeCookingCount : undefined 
         },
-        { to: '/dashboard/kitchen/inventory', label: 'Inventory', icon: Package },
-        { to: '/dashboard/kitchen/menu-control', label: 'Menu Operations', icon: PackageX },
-        { to: 'divider-1', label: '', icon: () => null },
-        { to: '/dashboard/kitchen/order-history', label: 'Order History', icon: History },
-        { to: '/dashboard/kitchen/item-history', label: 'Item History', icon: ListOrdered },
-        { to: '/dashboard/kitchen/chef-performance', label: 'Chef Performance', icon: Sparkles },
+        { to: '/dashboard/kitchen?tab=station', label: 'Stations', icon: Layers },
+        { to: '/dashboard/kitchen?tab=queue', label: 'Order Queue', icon: ListOrdered },
         { to: '/dashboard/kitchen/timeline', label: 'Kitchen Timeline', icon: Clock },
-        { to: 'divider-2', label: '', icon: () => null },
+        { to: '/dashboard/kitchen/chef-performance', label: 'Performance', icon: Sparkles },
+        { to: '/dashboard/kitchen/inventory', label: 'Inventory', icon: Package },
         { to: '/dashboard/kitchen/settings', label: 'Kitchen Settings', icon: Settings },
       ];
     }

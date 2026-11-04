@@ -1,3 +1,5 @@
+export type TItemPreparationStatus = 'NOT_STARTED' | 'PREPARING' | 'READY' | 'SERVED' | 'ON_HOLD' | 'CANCELLED';
+
 export interface IOrderItem {
   itemId: string;
   id?: string;
@@ -6,6 +8,20 @@ export interface IOrderItem {
   count: number;
   notes: string;
   pricePerUnit: number; // in cents snapshotted at purchase
+  
+  // Item-level KDS preparation fields
+  status?: TItemPreparationStatus;
+  prepStatus?: TItemPreparationStatus;
+  preparationStartedAt?: string; // ISO string
+  readyAt?: string; // ISO string
+  servedAt?: string; // ISO string
+  pausedAt?: string;
+  course?: 'Starters' | 'Main Course' | 'Desserts' | 'Beverages' | string;
+  station?: string;
+  assignedChefId?: string;
+  assignedChefName?: string;
+  prepTimeMinutes?: number; // expected minutes
+  itemNotes?: string;
   
   // Complimentary items fields
   isComplimentary?: boolean;
@@ -160,10 +176,10 @@ export interface IOrder {
 
 // ── KDS / Kitchen Specific Types ─────────────────────────────────────────────
 
-export type TKdsTab = 'table' | 'category' | 'station' | 'item-queue' | 'queue' | 'inventory' | 'reservations';
+export type TKdsTab = 'table' | 'station' | 'course' | 'queue' | 'completed' | 'category' | 'item-queue' | 'inventory' | 'reservations';
 
 export type TOrderStatus =
-  | 'NEW' | 'PLACED' | 'ACCEPTED' | 'CHEF_ASSIGNED' | 'PREPARING' | 'PAUSED'
+  | 'NEW' | 'PLACED' | 'ACCEPTED' | 'CHEF_ASSIGNED' | 'PREPARING' | 'PAUSED' | 'PARTIALLY_READY'
   | 'READY' | 'PICKED_UP' | 'DELIVERED' | 'SERVED' | 'DINING_COMPLETED' | 'COMPLETED' | 'PAID' | 'CLOSED' | 'ARCHIVED' | 'CANCELLED'
   | 'CREATED' | 'VERIFIED' | 'SENT_TO_KITCHEN' | 'DELIVERING' | 'DINING' | 'BILL_REQUESTED' | 'PAYMENT_COMPLETED' | 'TABLE_CLEANING' | 'TABLE_AVAILABLE';
 

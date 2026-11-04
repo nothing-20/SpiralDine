@@ -275,23 +275,75 @@ function subscribeToActiveShifts(
 
 // ── Station Management ───────────────────────────────────────────────────────
 
-const DEFAULT_STATIONS: IStationConfig[] = [
-  { name: 'Rice Station', assignedCategories: ['Rice', 'Biryani'], assignedChefIds: [], isActive: true, color: '#f59e0b' },
-  { name: 'Grill Station', assignedCategories: ['Starters', 'Kebabs', 'Burgers', 'Grill'], assignedChefIds: [], isActive: true, color: '#ef4444' },
-  { name: 'Fry Station', assignedCategories: ['Fried', 'Chinese', 'Noodles'], assignedChefIds: [], isActive: true, color: '#f97316' },
-  { name: 'Main Kitchen', assignedCategories: ['Main Course', 'Curries', 'Dal'], assignedChefIds: [], isActive: true, color: '#eab308' },
-  { name: 'Dessert Station', assignedCategories: ['Desserts', 'Sweets', 'Ice Cream'], assignedChefIds: [], isActive: true, color: '#ec4899' },
-  { name: 'Drinks Station', assignedCategories: ['Beverages', 'Drinks', 'Juice', 'Shakes'], assignedChefIds: [], isActive: true, color: '#3b82f6' },
+export const DEFAULT_STATIONS: IStationConfig[] = [
+  { name: 'Starters', assignedCategories: ['Starters', 'Appetizers', 'Snacks', 'Salads', 'Soup', 'Fries'], assignedChefIds: [], isActive: true, color: '#16a34a' },
+  { name: 'Tandoor', assignedCategories: ['Tandoor', 'Tikka', 'Kebabs', 'Breads', 'Naan', 'Roti', 'Grill'], assignedChefIds: [], isActive: true, color: '#f97316' },
+  { name: 'Chinese', assignedCategories: ['Chinese', 'Noodles', 'Manchurian', 'Fried Rice', 'Momos'], assignedChefIds: [], isActive: true, color: '#ef4444' },
+  { name: 'Main Course', assignedCategories: ['Main Course', 'Curries', 'Biryani', 'Rice', 'Dal', 'Pizza', 'Burgers'], assignedChefIds: [], isActive: true, color: '#eab308' },
+  { name: 'Beverages', assignedCategories: ['Beverages', 'Drinks', 'Juice', 'Tea', 'Coffee', 'Chai', 'Soda', 'Shakes'], assignedChefIds: [], isActive: true, color: '#3b82f6' },
+  { name: 'Desserts', assignedCategories: ['Desserts', 'Sweets', 'Ice Cream', 'Cakes', 'Jamun', 'Brownie'], assignedChefIds: [], isActive: true, color: '#ec4899' },
 ];
 
-function inferStationForItem(category: string, stations: IStationConfig[]): string {
-  const cat = (category || '').toLowerCase();
+export function inferCourseForItem(itemName: string, category?: string): string {
+  const text = `${itemName} ${category || ''}`.toLowerCase();
+  if (/dessert|sweet|ice cream|cake|jamun|brownie|halwa|kheer|pastry|pudding/i.test(text)) return 'Desserts';
+  if (/beverage|drink|juice|shake|tea|coffee|chai|soda|mojito|lassi|water|smoothie/i.test(text)) return 'Beverages';
+  if (/starter|appetizer|snack|soup|salad|tikka|kebab|roll|crispy|fry|fries|wings|bread|garlic bread|chaat|manchurian/i.test(text)) return 'Starters';
+  return 'Main Course';
+}
+
+export function inferStationForItem(
+  itemName: string,
+  categoryOrStations?: string | IStationConfig[],
+  maybeStations?: IStationConfig[]
+): string {
+  let category: string | undefined;
+  let stations: IStationConfig[] = DEFAULT_STATIONS;
+
+  if (Array.isArray(categoryOrStations)) {
+    stations = categoryOrStations;
+  } else {
+    category = categoryOrStations;
+    if (maybeStations) stations = maybeStations;
+  }
+
+  const text = `${itemName || ''} ${category || ''}`.toLowerCase();
+  
+  if (/tandoor|tikka|kebab|naan|roti|kulcha|paratha/i.test(text)) return 'Tandoor';
+  if (/chinese|noodle|fried rice|manchurian|chilli|schezwan|momos|dim sum/i.test(text)) return 'Chinese';
+  if (/beverage|drink|juice|shake|tea|coffee|chai|soda|mojito|lassi|smoothie/i.test(text)) return 'Beverages';
+  if (/dessert|sweet|ice cream|cake|jamun|brownie|halwa|pastry/i.test(text)) return 'Desserts';
+  if (/starter|appetizer|snack|soup|salad|roll|crispy|fry|fries|wings|bread|garlic bread|finger/i.test(text)) return 'Starters';
+  
   for (const station of stations) {
-    if (station.assignedCategories.some(c => cat.includes(c.toLowerCase()))) {
+    if (station.assignedCategories.some(c => text.includes(c.toLowerCase()))) {
       return station.name;
     }
   }
-  return 'Main Kitchen';
+  return 'Main Course';
+}
+
+export function calculateDerivedOrderStatus(items: any[], currentStatus: TOrderStatus): TOrderStatus {
+  if (!items || items.length === 0) return currentStatus;
+  
+  const activeItems = items.filter(it => (it.status || '').toUpperCase() !== 'CANCELLED');
+  if (activeItems.length === 0) return 'CANCELLED';
+  
+  const statuses = activeItems.map(it => (it.status || 'NOT_STARTED').toUpperCase());
+  
+  const allServed = statuses.every(s => s === 'SERVED');
+  if (allServed) return 'SERVED';
+  
+  const allReady = statuses.every(s => s === 'READY' || s === 'SERVED');
+  if (allReady) return 'READY';
+  
+  const anyReady = statuses.some(s => s === 'READY');
+  const anyCooking = statuses.some(s => s === 'PREPARING');
+  
+  if (anyReady) return 'PARTIALLY_READY';
+  if (anyCooking) return 'PREPARING';
+  
+  return currentStatus === 'NEW' || currentStatus === 'PLACED' ? currentStatus : 'ACCEPTED';
 }
 
 // ── Kitchen Load ─────────────────────────────────────────────────────────────
@@ -472,6 +524,8 @@ export const kitchenService = {
   // Stations
   DEFAULT_STATIONS,
   inferStationForItem,
+  inferCourseForItem,
+  calculateDerivedOrderStatus,
 
   // Kitchen Load
   calculateKitchenLoad,
