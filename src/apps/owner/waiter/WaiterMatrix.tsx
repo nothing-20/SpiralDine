@@ -216,11 +216,20 @@ const getNormalizedTableNum = (val?: string | number): string => {
 
 export const findAllActiveOrdersForTable = (table: ITable, orderList: IOrder[]): IOrder[] => {
   const tableCleanNum = getNormalizedTableNum(table.number || (table as any).tableNumber || table.tableName || table.name);
-  const isTableExplicitlyAvailable = (table.status || '').toLowerCase() === 'available' || (table.status || '').toLowerCase() === 'empty';
+  const rawStatus = (table.status || (table as any).tableStatus || '').toLowerCase();
+  const isTableExplicitlyAvailable = rawStatus === 'available' || rawStatus === 'empty';
+  const isTableInCleaning = rawStatus === 'cleaning';
 
   // 1. Direct matched active orders for this table
   const matched = orderList.filter(o => {
     if (!isOrderActive(o)) return false;
+
+    // Hard Guard: An order whose payment is settled or whose status is completed is NEVER active
+    const pStatus = (o.paymentStatus || (o as any).billStatus || '').toLowerCase();
+    const oStatus = (o.status || '').toUpperCase();
+    if (pStatus === 'paid' || oStatus === 'COMPLETED' || oStatus === 'CANCELLED' || oStatus === 'ARCHIVED') {
+      return false;
+    }
 
     // Direct explicit links to table
     const isDirectDocMatch = 
@@ -237,18 +246,31 @@ export const findAllActiveOrdersForTable = (table: ITable, orderList: IOrder[]):
       return false;
     }
 
+    // Guard: If table is currently in Cleaning, do not match served or completed orders
+    if (isTableInCleaning && (oStatus === 'SERVED' || oStatus === 'DELIVERED' || oStatus === 'DINING_COMPLETED')) {
+      return false;
+    }
+
+    // Guard: If table was seated afresh without a linked order, do NOT attach past orders placed before this seating session
+    if ((table.seatedAt || table.occupiedAt) && !table.activeOrderId && !table.currentOrderId) {
+      const seatedTime = new Date(table.seatedAt || table.occupiedAt!).getTime();
+      const orderTime = o.createdAt ? new Date(o.createdAt).getTime() : 0;
+      if (!isNaN(seatedTime) && !isNaN(orderTime) && orderTime < (seatedTime - 60000)) {
+        return false;
+      }
+    }
+
     // Guard: If table was explicitly marked Available or Empty, only match active orders that were placed
     // recently and are actively in-flight (kitchen prep, food ready, active dining).
     // Do NOT resurrect an available table if the order is already served/completed or placed before table cleaning.
     if (isTableExplicitlyAvailable && !table.activeOrderId && !table.currentOrderId) {
-      const oStatus = (o.status || '').toUpperCase();
       // If order is already completely served/dining-completed, do not resurrect an available table
       if (oStatus === 'SERVED' || oStatus === 'DELIVERED' || oStatus === 'DINING_COMPLETED') {
         return false;
       }
 
-      // If table has a recorded cleaning timestamp, reject orders created before cleaning completed
-      const cleanTime = table.cleaningCompletedAt || (table as any).availableSince;
+      // If table has a recorded cleaning timestamp or reset timestamp, reject orders created before cleaning completed
+      const cleanTime = table.cleaningCompletedAt || table.billPaidAt || (table as any).availableSince;
       if (cleanTime && o.createdAt) {
         const orderTime = new Date(o.createdAt).getTime();
         const cleanedTime = new Date(cleanTime).getTime();
@@ -578,7 +600,13 @@ export const WaiterMatrix: React.FC = () => {
     const unsubOrders = onSnapshot(qOrders, (snap) => {
       const list: IOrder[] = [];
       snap.forEach(docSnap => {
-        list.push({ id: docSnap.id, orderId: docSnap.id, ...docSnap.data() } as IOrder);
+        const d = docSnap.data();
+        list.push({
+          ...d,
+          id: docSnap.id,
+          orderDocId: docSnap.id,
+          orderId: d.orderId || docSnap.id,
+        } as unknown as IOrder);
       });
       list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setOrders(list);
@@ -1475,6 +1503,37 @@ export const WaiterMatrix: React.FC = () => {
           await updateDoc(orderRef, { status: 'COMPLETED', isArchived: true });
         } catch (_) {}
       }
+
+      // Also complete/archive any lingering served orders for this table in Firestore and local state
+      const lingeringOrders = findAllActiveOrdersForTable(table, orders);
+      for (const ord of lingeringOrders) {
+        const targetOrdId = ord.id || ord.orderId;
+        if (targetOrdId) {
+          try {
+            const ordRef = doc(db, 'restaurants', user.tenantId, 'orders', targetOrdId);
+            await updateDoc(ordRef, { status: 'COMPLETED', isArchived: true, paymentStatus: ord.paymentStatus || 'paid' });
+          } catch (_) {}
+        }
+      }
+      if (lingeringOrders.length > 0) {
+        const lingeringIds = new Set(lingeringOrders.map(o => o.id || o.orderId).filter(Boolean) as string[]);
+        setOrders(prev => prev.map(o => (lingeringIds.has(o.id || '') || lingeringIds.has(o.orderId || '')) ? { ...o, status: 'COMPLETED', paymentStatus: 'paid' } : o));
+      }
+
+      // Optimistically update table state
+      setTables(prev => prev.map(t => t.id === table.id ? ({
+        ...t,
+        status: 'Available',
+        tableStatus: 'Available',
+        activeOrderId: undefined,
+        currentOrderId: undefined,
+        customerPresent: false,
+        guestsCount: 0,
+        seatedAt: undefined,
+        occupiedAt: undefined,
+        cleaningStartedAt: undefined,
+        cleaningCompletedAt: new Date().toISOString()
+      } as ITable) : t));
 
       // Automatically resolve and complete all pending Clean Table requests for this table in waiterRequests
       try {
@@ -4606,7 +4665,51 @@ export const WaiterMatrix: React.FC = () => {
           orderId={selectedOrder.orderId}
           mode="waiter"
           restaurantName={(selectedOrder as any).restaurantName || 'Restaurant'}
-          onPaymentSettled={() => {
+          onPaymentSettled={async () => {
+            const settledOrderId = selectedOrder.orderId;
+            const settledOrderDocId = selectedOrder.id;
+            const settledTableNum = selectedOrder.tableNumber;
+            const settledTableId = selectedOrder.tableId;
+
+            // 1. Optimistically mark order as paid & completed in local state
+            setOrders(prev => prev.map(o => {
+              const isMatch = o.orderId === settledOrderId || o.id === settledOrderId || o.id === settledOrderDocId || (settledTableNum && o.tableNumber === settledTableNum && (o.status === 'SERVED' || o.status === 'DELIVERED'));
+              if (isMatch) {
+                return { ...o, paymentStatus: 'paid', status: 'COMPLETED' };
+              }
+              return o;
+            }));
+
+            // 2. Optimistically update table to cleaning in local state
+            if (settledTableNum || settledTableId) {
+              setTables(prev => prev.map(t => {
+                const matchNum = cleanTableIdentifier(t.number || (t as any).tableNumber) === cleanTableIdentifier(settledTableNum);
+                const matchId = t.id === settledTableId;
+                if (matchNum || matchId) {
+                  return {
+                    ...t,
+                    status: 'cleaning',
+                    tableStatus: 'cleaning',
+                    activeOrderId: undefined,
+                    currentOrderId: undefined,
+                    customerPresent: false,
+                    billPaidAt: new Date().toISOString()
+                  };
+                }
+                return t;
+              }));
+
+              // 3. Persist table cleaning state to Firestore as guaranteed safety net
+              if (user?.tenantId) {
+                try {
+                  const { tableService } = await import('../../../shared/services/tableService');
+                  await tableService.setTableCleaning(user.tenantId, settledTableId || settledTableNum, 10);
+                } catch (cleanErr) {
+                  console.warn('[WaiterMatrix] Non-blocking setTableCleaning warning:', cleanErr);
+                }
+              }
+            }
+
             setSelectedOrder(null);
             setDiscountPercent(0);
           }}

@@ -4,7 +4,7 @@ import { IOrder, ITable } from '../../../types';
 import { IOrderItem, TItemPreparationStatus } from '../../../shared/domain/orders/types';
 import { formatPrice } from '../../../utils/format';
 import { db } from '../../../config/firebase';
-import { doc, updateDoc, getDoc, arrayUnion } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, arrayUnion, collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { useAuth } from '../../../context/AuthContext';
 import { calculateDerivedOrderStatus } from '../../../shared/services/kitchenService';
 import { logEvent } from '../../../services/eventEngine';
@@ -260,6 +260,7 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
 
       // Resolve the authoritative Firestore document ID
       const candidateIds = Array.from(new Set([
+        (currentOrder as any).orderDocId,
         currentOrder.id,
         currentOrder.orderId,
         (currentOrder as any)._id
@@ -278,6 +279,29 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
             break;
           }
         } catch (_) {}
+      }
+
+      // Resilient fallback query: search by orderId or id if direct doc lookup missed
+      if (!docRef) {
+        for (const cId of candidateIds) {
+          try {
+            const cleanId = cId.replace(/^ORD-/i, '').trim();
+            const queriesToTry = [
+              query(collection(db, 'restaurants', user.tenantId, 'orders'), where('orderId', '==', cId), limit(1)),
+              query(collection(db, 'restaurants', user.tenantId, 'orders'), where('id', '==', cId), limit(1)),
+              query(collection(db, 'restaurants', user.tenantId, 'orders'), where('orderId', '==', `ORD-${cleanId}`), limit(1)),
+            ];
+            for (const qTry of queriesToTry) {
+              const qSnap = await getDocs(qTry);
+              if (!qSnap.empty) {
+                docRef = qSnap.docs[0].ref;
+                targetDocId = qSnap.docs[0].id;
+                break;
+              }
+            }
+            if (docRef) break;
+          } catch (_) {}
+        }
       }
 
       if (!docRef) {

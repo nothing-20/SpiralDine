@@ -251,13 +251,19 @@ export const billingService = {
 
       // If pending payment, synchronize with latest order items & totals
       // This guarantees that any newly added order items are never excluded from the bill
-      const currentSubtotal = Number(effectiveOrder.subtotal || 0);
+      let currentSubtotal = Number(effectiveOrder.subtotal || 0);
+      if (currentSubtotal === 0 && effectiveOrder.items?.length) {
+        currentSubtotal = effectiveOrder.items.reduce((acc, it) => acc + (Number(it.price || it.pricePerUnit || 0) * Number(it.count || 1)), 0);
+      }
       const currentDiscount = Number(effectiveOrder.discount || 0);
       const currentTax = Number(effectiveOrder.tax || 0);
       const currentServiceCharge = Number(effectiveOrder.serviceCharge || 0);
       const currentTip = Number((effectiveOrder as any).tip || 0);
       const currentRoundOff = Number(effectiveOrder.roundOff || 0);
-      const currentTotal = Number(effectiveOrder.total || (currentSubtotal - currentDiscount + currentTax + currentServiceCharge + currentTip + currentRoundOff));
+      let currentTotal = Number(effectiveOrder.total ?? (effectiveOrder as any).totalAmount ?? 0);
+      if (currentTotal === 0 && currentSubtotal > 0) {
+        currentTotal = currentSubtotal - currentDiscount + currentTax + currentServiceCharge + currentTip + currentRoundOff;
+      }
 
       const hasChanged = 
         existingData.total !== currentTotal || 
@@ -292,13 +298,19 @@ export const billingService = {
     const invoiceNumber = order.invoiceNumber || `INV-${dateStr}-${seq}`;
 
     // Extract financials from the effective order (authoritative source of truth)
-    const subtotal = Number(effectiveOrder.subtotal || 0);
+    let subtotal = Number(effectiveOrder.subtotal || 0);
+    if (subtotal === 0 && effectiveOrder.items?.length) {
+      subtotal = effectiveOrder.items.reduce((acc, it) => acc + (Number(it.price || it.pricePerUnit || 0) * Number(it.count || 1)), 0);
+    }
     const discount = Number(effectiveOrder.discount || 0);
     const tax = Number(effectiveOrder.tax || 0);
     const serviceCharge = Number(effectiveOrder.serviceCharge || 0);
     const tip = Number((effectiveOrder as any).tip || 0);
     const roundOff = Number(effectiveOrder.roundOff || 0);
-    const total = Number(effectiveOrder.total || (subtotal - discount + tax + serviceCharge + tip + roundOff));
+    let total = Number(effectiveOrder.total ?? (effectiveOrder as any).totalAmount ?? 0);
+    if (total === 0 && subtotal > 0) {
+      total = subtotal - discount + tax + serviceCharge + tip + roundOff;
+    }
 
     const initialPaymentMethods: IPaymentBreakdown = effectiveOrder.paymentMethods || {
       cash: 0,
@@ -588,38 +600,58 @@ export const billingService = {
 
     // 7. Update Order document while strictly honoring kitchen lifecycle
     try {
-      const orderRef = doc(db, 'restaurants', tenantId, 'orders', bill.orderId);
-      const currentOrderSnap = await getDoc(orderRef);
-      
-      let targetStatus = 'COMPLETED';
-      if (currentOrderSnap.exists()) {
-        const currData = currentOrderSnap.data();
-        const activeKitchenStatuses = ['NEW', 'PLACED', 'ACCEPTED', 'CHEF_ASSIGNED', 'PREPARING', 'READY'];
-        // If the food is still in the kitchen preparation cycle, do not prematurely overwrite food lifecycle
-        if (activeKitchenStatuses.includes(currData.status)) {
-          targetStatus = currData.status;
-        } else if (['SERVED', 'DELIVERED', 'DINING_COMPLETED', 'BILL_REQUESTED'].includes(currData.status)) {
-          targetStatus = 'COMPLETED';
-        } else {
-          targetStatus = currData.status || 'COMPLETED';
+      let orderRef = doc(db, 'restaurants', tenantId, 'orders', bill.orderId);
+      let currentOrderSnap = await getDoc(orderRef);
+
+      // Resilient lookup: query by orderId, id, or clean order number if direct doc key doesn't match
+      if (!currentOrderSnap.exists()) {
+        const cleanOrderId = bill.orderId.replace(/^ORD-/i, '').trim();
+        const candidateQueries = [
+          query(collection(db, 'restaurants', tenantId, 'orders'), where('orderId', '==', bill.orderId), limit(1)),
+          query(collection(db, 'restaurants', tenantId, 'orders'), where('id', '==', bill.orderId), limit(1)),
+          query(collection(db, 'restaurants', tenantId, 'orders'), where('orderId', '==', `ORD-${cleanOrderId}`), limit(1)),
+        ];
+        for (const qCandidate of candidateQueries) {
+          try {
+            const qSnap = await getDocs(qCandidate);
+            if (!qSnap.empty) {
+              currentOrderSnap = qSnap.docs[0];
+              orderRef = currentOrderSnap.ref;
+              break;
+            }
+          } catch (_) {}
         }
       }
+      
+      let targetStatus = 'COMPLETED';
+      let orderData: any = null;
+      if (currentOrderSnap.exists()) {
+        orderData = currentOrderSnap.data();
+        const activeKitchenStatuses = ['NEW', 'PLACED', 'ACCEPTED', 'CHEF_ASSIGNED', 'PREPARING', 'READY'];
+        // If the food is still in the kitchen preparation cycle, do not prematurely overwrite food lifecycle
+        if (activeKitchenStatuses.includes(orderData.status)) {
+          targetStatus = orderData.status;
+        } else if (['SERVED', 'DELIVERED', 'DINING_COMPLETED', 'BILL_REQUESTED'].includes(orderData.status)) {
+          targetStatus = 'COMPLETED';
+        } else {
+          targetStatus = orderData.status || 'COMPLETED';
+        }
 
-      await updateDoc(orderRef, {
-        paymentStatus: 'paid',
-        paidAt: nowIso,
-        status: targetStatus,
-        paymentMethods: paymentBreakdown,
-        transactionRef: generatedTxRef,
-        processedBy: actorUid,
-        processedByName: actorName,
-        processedByRole: actorRole,
-        ...(params.invoiceNumber ? { invoiceNumber: params.invoiceNumber } : {}),
-        updatedAt: nowIso
-      });
+        await updateDoc(orderRef, {
+          paymentStatus: 'paid',
+          paidAt: nowIso,
+          status: targetStatus,
+          paymentMethods: paymentBreakdown,
+          transactionRef: generatedTxRef,
+          processedBy: actorUid,
+          processedByName: actorName,
+          processedByRole: actorRole,
+          ...(params.invoiceNumber ? { invoiceNumber: params.invoiceNumber } : {}),
+          updatedAt: nowIso
+        });
+      }
 
-      // Settle all sibling orders in the same dining session
-      const orderData = currentOrderSnap.exists() ? currentOrderSnap.data() : null;
+      // Settle all sibling orders in the same dining session or on the same table
       const sessionId = (bill as any).sessionId || orderData?.sessionId;
       const targetPrimaryId = (orderData as any)?.primaryOrderId || bill.orderId;
       const cleanTableNum = String(bill.tableNumber || orderData?.tableNumber || '').trim();
@@ -635,7 +667,7 @@ export const billingService = {
           );
           const sessSnap = await getDocs(qSess);
           sessSnap.forEach(d => {
-            if (d.id !== bill.orderId) siblingOrderDocsToUpdate.set(d.id, d.ref);
+            if (d.id !== orderRef.id) siblingOrderDocsToUpdate.set(d.id, d.ref);
           });
         } catch (_) {}
       }
@@ -649,12 +681,12 @@ export const billingService = {
           );
           const primSnap = await getDocs(qPrim);
           primSnap.forEach(d => {
-            if (d.id !== bill.orderId) siblingOrderDocsToUpdate.set(d.id, d.ref);
+            if (d.id !== orderRef.id) siblingOrderDocsToUpdate.set(d.id, d.ref);
           });
         } catch (_) {}
 
         // Also check if targetPrimaryId itself is an order that needs settlement
-        if (targetPrimaryId !== bill.orderId) {
+        if (targetPrimaryId !== bill.orderId && targetPrimaryId !== orderRef.id) {
           try {
             const pDocRef = doc(db, 'restaurants', tenantId, 'orders', targetPrimaryId);
             siblingOrderDocsToUpdate.set(targetPrimaryId, pDocRef);
@@ -671,7 +703,7 @@ export const billingService = {
           );
           const tableSnap = await getDocs(qTable);
           tableSnap.forEach(d => {
-            if (d.id !== bill.orderId) {
+            if (d.id !== orderRef.id) {
               const dData = d.data();
               if (dData.paymentStatus !== 'paid' && dData.status !== 'CANCELLED' && dData.status !== 'ARCHIVED') {
                 siblingOrderDocsToUpdate.set(d.id, d.ref);
@@ -698,11 +730,13 @@ export const billingService = {
     }
 
     // 8. Update Table status to 'cleaning' with authoritative 10-minute timer and waiter alert
-    if (bill.tableId || bill.tableNumber) {
+    const targetTableNum = bill.tableNumber || '';
+    const targetTableId = bill.tableId || '';
+    if (targetTableId || targetTableNum) {
       try {
         await tableService.setTableCleaning(
           tenantId,
-          bill.tableId || bill.tableNumber,
+          targetTableId || targetTableNum,
           10
         );
       } catch (tableErr) {

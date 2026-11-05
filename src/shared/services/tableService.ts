@@ -591,7 +591,10 @@ export const tableService = {
         patch.subStatus = null;
         patch.diningStatus = null;
         patch.cleaningStartedAt = null;
+        patch.cleaningCompletedAt = nowIso;
+        patch.availableSince = nowIso;
         patch.seatedAt = null;
+        patch.occupiedAt = null;
         patch.guestsCount = 0;
       } else if (statusLower === 'cleaning') {
         patch.subStatus = 'cleaning';
