@@ -72,6 +72,8 @@ import {
   CheckSquare,
   BookOpen,
   User,
+  UserMinus,
+  UserX,
   ShoppingBag,
   X,
   Utensils
@@ -1598,9 +1600,75 @@ export const WaiterMatrix: React.FC = () => {
     }
   };
 
+  const handleReleaseTable = async (table: ITable) => {
+    if (!user?.tenantId) return;
+    try {
+      const nowIso = new Date().toISOString();
+
+      // 1. Optimistically update local table state
+      setTables(prev => prev.map(t => t.id === table.id ? ({
+        ...t,
+        status: 'Available',
+        tableStatus: 'Available',
+        activeOrderId: undefined,
+        currentOrderId: undefined,
+        customerPresent: false,
+        guestsCount: 0,
+        seatedAt: undefined,
+        occupiedAt: undefined,
+        tableNotes: '',
+        diningStatus: undefined,
+        subStatus: undefined,
+        cleaningStartedAt: undefined,
+        cleaningCompletedAt: nowIso,
+        availableSince: nowIso
+      } as ITable) : t));
+
+      if (selectedTable?.id === table.id) {
+        setSelectedTable(null);
+      }
+
+      // 2. Persist to Firestore
+      await tableService.updateTableStatusDirect(user.tenantId, table.id, 'Available', {
+        guestsCount: 0,
+        tableNotes: '',
+        customerPresent: false,
+        customerName: undefined,
+        customerPhone: undefined,
+        assignedWaiterId: table.assignedWaiterId || user.uid,
+        assignedWaiterName: table.assignedWaiterName || user.displayName || user.email || 'Staff Waiter'
+      });
+
+      // 3. Log activity event
+      logEvent(user.tenantId, {
+        eventType: 'Table Released',
+        eventCategory: 'Operational',
+        performedBy: user.displayName || user.email || 'Waiter',
+        performedByRole: user.role || 'waiter',
+        tableId: table.id,
+        tableNumber: table.number,
+        title: `Table ${table.number} Released`,
+        description: `Table ${table.number} released and marked Available (customer left or changed table).`
+      }).catch(() => {});
+
+      toast.success(`Table ${table.number} released and marked Available.`);
+    } catch (err) {
+      console.error('[WaiterMatrix] Release table failed:', err);
+      toast.error(`Failed to release Table ${table.number}.`);
+    }
+  };
+
   const handleQuickStatusChange = async (table: ITable, newStatus: string) => {
     if (!user?.tenantId) return;
     try {
+      if (newStatus.toLowerCase() === 'available') {
+        await handleReleaseTable(table);
+        return;
+      }
+
+      // Optimistic update
+      setTables(prev => prev.map(t => t.id === table.id ? { ...t, status: newStatus, tableStatus: newStatus } : t));
+
       await tableService.updateTableStatusDirect(user.tenantId, table.id, newStatus, {
         assignedWaiterId: table.assignedWaiterId || user.uid,
         assignedWaiterName: table.assignedWaiterName || user.displayName || user.email || 'Staff Waiter'
@@ -3326,6 +3394,10 @@ export const WaiterMatrix: React.FC = () => {
                                   <button onClick={() => handleQuickStatusChange(table, 'Occupied')} className="px-2 py-1 rounded-lg text-left hover:bg-[#FEF7EC] text-[#D97706] cursor-pointer">🟡 Dining</button>
                                   <button onClick={() => handleQuickStatusChange(table, 'cleaning')} className="px-2 py-1 rounded-lg text-left hover:bg-[#F5F0FD] text-[#7C3AED] cursor-pointer">🟣 Cleaning</button>
                                   <button onClick={() => handleQuickStatusChange(table, 'Reserved')} className="px-2 py-1 rounded-lg text-left hover:bg-stone-100 text-stone-700 cursor-pointer">🔒 Reserved</button>
+                                  <div className="border-t border-stone-100 my-1" />
+                                  <button onClick={() => handleReleaseTable(table)} className="px-2 py-1 rounded-lg text-left hover:bg-red-50 text-red-600 font-bold cursor-pointer flex items-center gap-1">
+                                    <UserMinus className="w-3.5 h-3.5 text-red-600" /> Release Table
+                                  </button>
                                 </div>
                               </div>
                             </div>
@@ -3469,6 +3541,18 @@ export const WaiterMatrix: React.FC = () => {
                                   <span>{seatedElapsedMins !== null ? `Seated ~${seatedElapsedMins}m ago` : 'Just seated'}</span>
                                   <span className="font-semibold text-[#D97706]">Ready for Waiter</span>
                                 </div>
+                                <div className="pt-1.5 flex items-center justify-between border-t border-[#FDE6B8]/70">
+                                  <span className="text-[10.5px] text-[#92400E] font-medium">Customer left or changed table?</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleReleaseTable(table)}
+                                    className="text-[10.5px] font-bold text-red-600 hover:text-red-700 hover:underline flex items-center gap-0.5 cursor-pointer"
+                                    title="Cancel check-in and reset to Available"
+                                  >
+                                    <UserMinus className="w-3 h-3 text-red-600" />
+                                    <span>Reset Table</span>
+                                  </button>
+                                </div>
                                 {table.tableNotes && (
                                   <div className="text-[10.5px] text-[#92400E] bg-white/80 border border-[#FDE6B8] px-2 py-1 rounded-lg truncate">
                                     <span className="font-bold">Note: </span>
@@ -3560,11 +3644,20 @@ export const WaiterMatrix: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => openSeatingModal(table)}
-                                className="py-2.5 px-3 rounded-xl bg-white hover:bg-stone-50 border border-[#E3DED5] text-[#18201D] font-bold text-xs flex items-center justify-center gap-1 shadow-xs transition-colors cursor-pointer"
+                                className="py-2.5 px-2.5 rounded-xl bg-white hover:bg-stone-50 border border-[#E3DED5] text-[#18201D] font-bold text-xs flex items-center justify-center gap-1 shadow-xs transition-colors cursor-pointer"
                                 title="Adjust seating details"
                               >
                                 <Users className="w-3.5 h-3.5 text-[#5F6875]" />
                                 <span>{table.guestsCount || table.capacity || table.seatingCapacity || 4}p</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleReleaseTable(table)}
+                                className="py-2.5 px-2.5 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold text-xs flex items-center justify-center gap-1 shadow-xs transition-colors cursor-pointer"
+                                title="Customer left or changed table — Release table to Available"
+                              >
+                                <UserMinus className="w-3.5 h-3.5 text-red-600" />
+                                <span>Release</span>
                               </button>
                             </>
                           ) : isOccupiedWithOrder && activeOrderForTable ? (
@@ -4051,21 +4144,31 @@ export const WaiterMatrix: React.FC = () => {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-3 pt-3 border-t border-[#E3DED5]">
+              <div className="flex gap-2.5 pt-3 border-t border-[#E3DED5]">
                 <button
                   type="button"
-                  className="flex-1 bg-[#FAF8F5] border border-[#E3DED5] text-[#18201D] hover:bg-[#EAE5DC] rounded-xl font-bold py-3 transition-all cursor-pointer"
+                  className="px-4 bg-[#FAF8F5] border border-[#E3DED5] text-[#18201D] hover:bg-[#EAE5DC] rounded-xl font-bold py-3 transition-all cursor-pointer"
                   onClick={() => setSelectedTable(null)}
                 >
                   Cancel
                 </button>
+                {isTableSeated(selectedTable, false) && (
+                  <button
+                    type="button"
+                    className="flex-1 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 rounded-xl font-bold py-3 px-3 transition-all cursor-pointer flex items-center justify-center gap-1.5 active:scale-95 text-xs sm:text-sm"
+                    onClick={() => handleReleaseTable(selectedTable)}
+                  >
+                    <UserMinus className="w-4 h-4 text-red-600" />
+                    <span>Release Table</span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  className="flex-1 bg-[#C85A3F] hover:bg-[#B34E35] text-white rounded-xl font-black py-3 shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-95"
+                  className="flex-1 bg-[#C85A3F] hover:bg-[#B34E35] text-white rounded-xl font-black py-3 shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-95 text-xs sm:text-sm"
                   onClick={handleOccupyTableCC}
                 >
                   <Users className="w-4 h-4" />
-                  Seat & Seize Table
+                  <span>{isTableSeated(selectedTable, false) ? 'Update Seating' : 'Seat & Seize Table'}</span>
                 </button>
               </div>
             </div>
