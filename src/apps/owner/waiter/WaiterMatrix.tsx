@@ -1345,9 +1345,24 @@ export const WaiterMatrix: React.FC = () => {
   };
 
   const handleServeFood = async (order: IOrder) => {
-    if (!user?.tenantId || !order.orderId) return;
+    if (!user?.tenantId || (!order.orderId && !order.id)) return;
     try {
-      const orderRef = doc(db, 'restaurants', user.tenantId, 'orders', order.orderId);
+      const candidateIds = Array.from(new Set([order.id, order.orderId, (order as any)._id].filter(Boolean) as string[]));
+      let orderRef = null;
+      for (const cId of candidateIds) {
+        const testRef = doc(db, 'restaurants', user.tenantId, 'orders', cId);
+        try {
+          const testSnap = await getDoc(testRef);
+          if (testSnap.exists()) {
+            orderRef = testRef;
+            break;
+          }
+        } catch (_) {}
+      }
+      if (!orderRef) {
+        orderRef = doc(db, 'restaurants', user.tenantId, 'orders', order.id || order.orderId);
+      }
+
       const nowIso = new Date().toISOString();
       const timelineEvent: ITimelineEvent = {
         type: 'SERVED',

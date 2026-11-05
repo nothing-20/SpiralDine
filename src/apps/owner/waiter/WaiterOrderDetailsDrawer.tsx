@@ -4,7 +4,7 @@ import { IOrder, ITable } from '../../../types';
 import { IOrderItem, TItemPreparationStatus } from '../../../shared/domain/orders/types';
 import { formatPrice } from '../../../utils/format';
 import { db } from '../../../config/firebase';
-import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, arrayUnion } from 'firebase/firestore';
 import { useAuth } from '../../../context/AuthContext';
 import { calculateDerivedOrderStatus } from '../../../shared/services/kitchenService';
 import { logEvent } from '../../../services/eventEngine';
@@ -258,49 +258,79 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
       // Recalculate derived overall order status
       const newOrderStatus = calculateDerivedOrderStatus(updatedItems, currentOrder.status);
 
-      const orderDocId = currentOrder.orderId || currentOrder.id;
-      if (!orderDocId) {
-        toast.error('Invalid order identifier.');
-        return;
+      // Resolve the authoritative Firestore document ID
+      const candidateIds = Array.from(new Set([
+        currentOrder.id,
+        currentOrder.orderId,
+        (currentOrder as any)._id
+      ].filter(Boolean) as string[]));
+
+      let docRef: any = null;
+      let targetDocId = '';
+
+      for (const cId of candidateIds) {
+        const testRef = doc(db, 'restaurants', user.tenantId, 'orders', cId);
+        try {
+          const testSnap = await getDoc(testRef);
+          if (testSnap.exists()) {
+            docRef = testRef;
+            targetDocId = cId;
+            break;
+          }
+        } catch (_) {}
       }
 
-      const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderDocId);
+      if (!docRef) {
+        targetDocId = currentOrder.id || currentOrder.orderId;
+        if (!targetDocId) {
+          toast.error('Invalid order identifier.');
+          return;
+        }
+        docRef = doc(db, 'restaurants', user.tenantId, 'orders', targetDocId);
+      }
+
+      const tableNumStr = String(table?.number || (table as any)?.tableNumber || 'Table');
       const timelineEvent = {
         type: 'SERVED' as const,
-        title: `Served ${eligibleIndicesToServe.length} item(s) to Table ${table.number}`,
+        title: `Served ${eligibleIndicesToServe.length} item(s) to Table ${tableNumStr}`,
         description: `Dishes served: ${servedDishNames.join(', ')}`,
         performedBy: waiterName,
         timestamp,
       };
 
+      // Sanitize updatedItems to avoid any undefined field exceptions in Firestore SDK
+      const cleanItems = JSON.parse(JSON.stringify(updatedItems));
+
       const updateFields: any = {
-        items: updatedItems,
+        items: cleanItems,
         status: newOrderStatus,
         updatedAt: timestamp,
         timeline: arrayUnion(timelineEvent),
       };
 
-      if (newOrderStatus === 'SERVED' && !currentOrder.deliveredAt) {
-        updateFields.deliveredAt = timestamp;
+      if (newOrderStatus === 'SERVED') {
+        if (!currentOrder.deliveredAt) updateFields.deliveredAt = timestamp;
+        if (!(currentOrder as any).servedAt) updateFields.servedAt = timestamp;
       }
 
       await updateDoc(docRef, updateFields);
 
-      // Log activity event
-      await logEvent(user.tenantId, {
+      // Log activity event (non-blocking)
+      logEvent(user.tenantId, {
         eventType: 'Order Served',
         eventCategory: 'Waiter',
         performedBy: waiterName,
         performedByRole: 'waiter',
-        orderId: currentOrder.orderId,
-        title: `Food Served to Table ${table.number}`,
+        orderId: currentOrder.orderId || targetDocId,
+        tableNumber: tableNumStr,
+        title: `Food Served to Table ${tableNumStr}`,
         description: `Waiter ${waiterName} marked ${eligibleIndicesToServe.length} dish(es) as SERVED: ${servedDishNames.join(', ')}.`,
-      });
+      }).catch(err => console.warn('[WaiterOrderDetailsDrawer] logEvent notice:', err));
 
       toast.success(
         eligibleIndicesToServe.length === 1
-          ? `✓ Served "${servedDishNames[0]}" to Table ${table.number}!`
-          : `✓ Served ${eligibleIndicesToServe.length} items to Table ${table.number}!`
+          ? `✓ Served "${servedDishNames[0]}" to Table ${tableNumStr}!`
+          : `✓ Served ${eligibleIndicesToServe.length} items to Table ${tableNumStr}!`
       );
 
       // Clear selection and close confirmation
