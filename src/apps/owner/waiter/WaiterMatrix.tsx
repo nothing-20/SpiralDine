@@ -25,6 +25,7 @@ import { getMenuItemPath } from '../../../firebase/collections';
 import { logEvent } from '../../../services/eventEngine';
 import { ActivityFeed } from '../../../components/ActivityFeed';
 import CanonicalBillModal from '../../../shared/ui/billing/CanonicalBillModal';
+import { WaiterOrderDetailsDrawer } from './WaiterOrderDetailsDrawer';
 
 // UI Kit
 import Card from '../../../components/ui/Card/Card';
@@ -286,6 +287,49 @@ const getCleaningCountdown = (table: ITable): { elapsedMins: number; remainingMi
   return { elapsedMins, remainingMins, remainingSecs, isOverdue: false, displayTime };
 };
 
+export const getTableItemServingMetrics = (table: ITable, orderList: IOrder[]) => {
+  const activeOrders = findAllActiveOrdersForTable(table, orderList);
+  let readyCount = 0;
+  let servedCount = 0;
+  let remainingCount = 0;
+  let hasReady = false;
+  let hasUnfinished = false;
+
+  activeOrders.forEach(order => {
+    const items = order.items || [];
+    items.forEach((item: any) => {
+      const isServed = item.servingStatus === 'SERVED' || item.status === 'SERVED' || order.status === 'SERVED';
+      const isReady = !isServed && (item.servingStatus === 'READY_TO_SERVE' || item.prepStatus === 'READY' || item.status === 'READY' || order.status === 'READY');
+      const isRemaining = !isServed && !isReady;
+      const count = Number(item.count || item.quantity || 1);
+
+      if (isServed) {
+        servedCount += count;
+      } else if (isReady) {
+        readyCount += count;
+        hasReady = true;
+      } else if (isRemaining) {
+        remainingCount += count;
+        hasUnfinished = true;
+      }
+    });
+  });
+
+  const isPartiallyReady = (hasReady && (hasUnfinished || activeOrders.some(o => o.status === 'PARTIALLY_READY'))) || activeOrders.some(o => o.status === 'PARTIALLY_READY');
+  const isFullyReady = hasReady && !hasUnfinished;
+
+  return {
+    activeOrders,
+    readyCount,
+    servedCount,
+    remainingCount,
+    hasReady,
+    hasUnfinished,
+    isPartiallyReady,
+    isFullyReady,
+  };
+};
+
 const getShiftWorkingTime = (s: IWaiterShift): number => {
   if (!s.startTime) return 0;
   const start = new Date(s.startTime).getTime();
@@ -387,8 +431,19 @@ export const WaiterMatrix: React.FC = () => {
   const [priorityOverrides, setPriorityOverrides] = useState<Record<string, 'critical' | 'high' | 'medium' | 'low'>>({});
   const [queueFilter, setQueueFilter] = useState<'all' | 'delivery' | 'request' | 'bill' | 'cleaning'>('all');
   const [actionFilter, setActionFilter] = useState<'All' | 'Kitchen' | 'Customers' | 'Payments' | 'Cleaning' | 'Manager'>('All');
-  const [floorFilter, setFloorFilter] = useState<'all' | 'available' | 'browsing' | 'occupied' | 'cleaning' | 'my_tables'>('all');
+  const [floorFilter, setFloorFilter] = useState<'all' | 'available' | 'browsing' | 'occupied' | 'partially_ready' | 'cleaning' | 'my_tables'>('all');
   const [floorSearch, setFloorSearch] = useState('');
+  const [drawerState, setDrawerState] = useState<{
+    isOpen: boolean;
+    table: ITable | null;
+    orders: IOrder[];
+    initialSelectReadyItems: boolean;
+  }>({
+    isOpen: false,
+    table: null,
+    orders: [],
+    initialSelectReadyItems: false,
+  });
 
   const [shift, setShift] = useState<IWaiterShift>(() => {
     const saved = localStorage.getItem(`shift_${user?.uid}`);
@@ -2011,6 +2066,36 @@ export const WaiterMatrix: React.FC = () => {
   // ─── Render 6 Metrics Overview Cards ───
   const renderCommandHeaderMetrics = () => {
     const myTablesCount = tables.filter(t => t.assignedWaiterId === user?.uid && (t.status === 'occupied' || t.status === 'Occupied')).length;
+    const activeOrders = orders.filter(o => isOrderActive(o));
+    const activeOrdersCount = activeOrders.length;
+
+    let readyItemsCount = 0;
+    let partiallyReadyOrdersCount = 0;
+
+    activeOrders.forEach(o => {
+      const items = o.items || [];
+      let orderHasReady = false;
+      let orderHasUnfinished = false;
+
+      items.forEach((item: any) => {
+        const isServed = item.servingStatus === 'SERVED' || item.status === 'SERVED' || o.status === 'SERVED';
+        const isReady = !isServed && (item.servingStatus === 'READY_TO_SERVE' || item.prepStatus === 'READY' || item.status === 'READY' || o.status === 'READY');
+        const isUnfinished = !isServed && !isReady;
+
+        if (isReady) {
+          orderHasReady = true;
+          readyItemsCount += Number(item.count || item.quantity || 1);
+        }
+        if (isUnfinished) {
+          orderHasUnfinished = true;
+        }
+      });
+
+      if (o.status === 'PARTIALLY_READY' || (orderHasReady && orderHasUnfinished)) {
+        partiallyReadyOrdersCount++;
+      }
+    });
+
     const pendingTasksCount = optimizedTasks.length;
     const efficiency = performanceStats.efficiencyScore;
 
@@ -2061,43 +2146,52 @@ export const WaiterMatrix: React.FC = () => {
           </div>
         </div>
 
-        {/* 2. Active Alerts / Tasks */}
+        {/* 2. Active Orders */}
         <div className="bg-white border border-[#E3DED5] rounded-2xl p-4 flex items-center gap-3.5 shadow-xs text-left">
-          <div className="w-10 h-10 rounded-xl bg-orange-50 text-orange-500 flex items-center justify-center shrink-0">
-            <CheckSquare className="w-5 h-5 text-orange-500" />
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+            <Utensils className="w-5 h-5 text-emerald-600" />
           </div>
           <div>
-            <div className="text-[9.5px] font-extrabold uppercase text-[#5F6875] tracking-wider">ACTIVE ALERTS / TASKS</div>
-            <div className="text-xl font-black text-[#18201D] leading-tight">{pendingTasksCount}</div>
+            <div className="text-[9.5px] font-extrabold uppercase text-[#5F6875] tracking-wider">ACTIVE ORDERS</div>
+            <div className="text-xl font-black text-[#18201D] leading-tight">{activeOrdersCount}</div>
+            <div className="text-[10px] text-[#5F6875] font-semibold">{activeOrdersCount === 1 ? '1 active order' : `${activeOrdersCount} active orders`}</div>
+          </div>
+        </div>
+
+        {/* 3. Ready Items */}
+        <div className={`bg-white border rounded-2xl p-4 flex items-center gap-3.5 shadow-xs text-left transition-all ${
+          readyItemsCount > 0 ? 'border-[#16A34A] ring-1 ring-[#16A34A]/20' : 'border-[#E3DED5]'
+        }`}>
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+            readyItemsCount > 0 ? 'bg-[#EAF6ED] text-[#16A34A] animate-pulse' : 'bg-emerald-50 text-emerald-500'
+          }`}>
+            <ChefHat className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-[9.5px] font-extrabold uppercase text-[#5F6875] tracking-wider">READY ITEMS</div>
+            <div className={`text-xl font-black leading-tight ${readyItemsCount > 0 ? 'text-[#16A34A]' : 'text-[#18201D]'}`}>
+              {readyItemsCount}
+            </div>
             <div className="text-[10px] text-[#5F6875] font-semibold">
-              {pendingTasksCount === 0 ? 'No pending tasks' : `${pendingTasksCount} urgent`}
+              {readyItemsCount > 0 ? 'Waiting to serve' : 'None waiting'}
             </div>
           </div>
         </div>
 
-        {/* 3. Delivered Shift */}
-        <div className="bg-white border border-[#E3DED5] rounded-2xl p-4 flex items-center gap-3.5 shadow-xs text-left">
-          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-500 flex items-center justify-center shrink-0">
-            <Utensils className="w-5 h-5 text-emerald-500" />
+        {/* 4. Partially Ready Orders */}
+        <div className={`bg-white border rounded-2xl p-4 flex items-center gap-3.5 shadow-xs text-left transition-all ${
+          partiallyReadyOrdersCount > 0 ? 'border-[#7C3AED] ring-1 ring-[#7C3AED]/20' : 'border-[#E3DED5]'
+        }`}>
+          <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center shrink-0">
+            <Clock className="w-5 h-5 text-purple-600" />
           </div>
           <div>
-            <div className="text-[9.5px] font-extrabold uppercase text-[#5F6875] tracking-wider">DELIVERED SHIFT</div>
-            <div className="text-xl font-black text-[#18201D] leading-tight">{shift.stats.ordersDelivered}</div>
-            <div className="text-[10px] text-[#5F6875] font-semibold">Orders delivered</div>
-          </div>
-        </div>
-
-        {/* 4. Efficiency Score */}
-        <div className="bg-white border border-[#E3DED5] rounded-2xl p-4 flex items-center gap-3.5 shadow-xs text-left">
-          <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-500 flex items-center justify-center shrink-0">
-            <TrendingUp className="w-5 h-5 text-purple-500" />
-          </div>
-          <div>
-            <div className="text-[9.5px] font-extrabold uppercase text-[#5F6875] tracking-wider">EFFICIENCY SCORE</div>
-            <div className="text-xl font-black text-[#18201D] leading-tight">{efficiency}%</div>
-            <div className="text-[10px] text-emerald-600 font-bold flex items-center gap-0.5">
-              <span>↑</span>
-              <span>+0% today</span>
+            <div className="text-[9.5px] font-extrabold uppercase text-[#5F6875] tracking-wider">PARTIALLY READY</div>
+            <div className={`text-xl font-black leading-tight ${partiallyReadyOrdersCount > 0 ? 'text-[#7C3AED]' : 'text-[#18201D]'}`}>
+              {partiallyReadyOrdersCount}
+            </div>
+            <div className="text-[10px] text-[#5F6875] font-semibold">
+              {partiallyReadyOrdersCount === 0 ? 'All synced' : 'Partial ready orders'}
             </div>
           </div>
         </div>
@@ -2808,6 +2902,18 @@ export const WaiterMatrix: React.FC = () => {
                   </button>
 
                   <button
+                    onClick={() => setFloorFilter('partially_ready')}
+                    className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
+                      floorFilter === 'partially_ready'
+                        ? 'bg-[#7C3AED] text-white border-[#7C3AED] shadow-xs'
+                        : 'bg-[#F5F0FD] text-[#7C3AED] border-[#E4D4FA] hover:bg-[#ECE4FB]'
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-[#9333EA] animate-pulse" />
+                    <span>Partially Ready ({tables.filter(t => getTableItemServingMetrics(t, orders).hasReady).length})</span>
+                  </button>
+
+                  <button
                     onClick={() => setFloorFilter('cleaning')}
                     className={`px-4 py-2 rounded-full text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer ${
                       floorFilter === 'cleaning'
@@ -2869,6 +2975,7 @@ export const WaiterMatrix: React.FC = () => {
                       case 'available': return isAvail;
                       case 'browsing': return isBrowse;
                       case 'occupied': return isDin;
+                      case 'partially_ready': return getTableItemServingMetrics(t, orders).hasReady;
                       case 'cleaning': return isClean;
                       case 'my_tables': return t.assignedWaiterId === user?.uid;
                       case 'all': default: return true;
@@ -2904,8 +3011,9 @@ export const WaiterMatrix: React.FC = () => {
                       (activeOrdersForTable[0] as any)?.userName || 
                       (isOccupiedWithOrder || isBrowsing ? 'Guest Diner' : null);
 
+                    const metrics = getTableItemServingMetrics(table, orders);
                     const readyOrder = activeOrdersForTable.find(o => o.status === 'READY');
-                    const hasReady = Boolean(readyOrder);
+                    const hasReady = metrics.hasReady || Boolean(readyOrder);
                     const hasPreparing = activeOrdersForTable.some(o => o.status === 'PREPARING');
                     const hasNew = activeOrdersForTable.some(o => o.status === 'NEW' || o.status === 'PLACED');
                     const allServed = activeOrdersForTable.length > 0 && activeOrdersForTable.every(o => o.status === 'SERVED' || o.status === 'DELIVERED' || o.status === 'DINING_COMPLETED');
@@ -2914,7 +3022,10 @@ export const WaiterMatrix: React.FC = () => {
                     let orderStatusDisplay = 'ACTIVE';
                     let statusBadgeClass = 'bg-stone-100 text-stone-700';
 
-                    if (hasReady) {
+                    if (metrics.isPartiallyReady) {
+                      orderStatusDisplay = 'PARTIALLY READY';
+                      statusBadgeClass = 'bg-[#F5F0FD] text-[#7C3AED] border border-[#E4D4FA]';
+                    } else if (metrics.isFullyReady || hasReady) {
                       orderStatusDisplay = 'FOOD READY';
                       statusBadgeClass = 'bg-[#EAF6ED] text-[#16A34A] animate-pulse';
                     } else if (allServed) {
@@ -2994,9 +3105,19 @@ export const WaiterMatrix: React.FC = () => {
                                   <span className="w-2 h-2 rounded-full bg-[#2563EB]" /> Browsing
                                 </span>
                               ) : isOccupiedWithOrder ? (
-                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-[#FEF7EC] text-[#D97706]">
-                                  <span className="w-2 h-2 rounded-full bg-[#F59E0B]" /> Dining
-                                </span>
+                                metrics.isPartiallyReady ? (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-[#F5F0FD] text-[#7C3AED] border border-[#E4D4FA]">
+                                    <span className="w-2 h-2 rounded-full bg-[#9333EA] animate-pulse" /> Partially Ready
+                                  </span>
+                                ) : (metrics.isFullyReady || hasReady) ? (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-[#EAF6ED] text-[#16A34A] border border-[#CDE9D5]">
+                                    <span className="w-2 h-2 rounded-full bg-[#16A34A] animate-pulse" /> Ready to Serve
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-[#FEF7EC] text-[#D97706]">
+                                    <span className="w-2 h-2 rounded-full bg-[#F59E0B]" /> Dining
+                                  </span>
+                                )
                               ) : (
                                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-[#EAF6ED] text-[#227244]">
                                   <span className="w-2 h-2 rounded-full bg-[#16A34A]" /> Available
@@ -3084,7 +3205,12 @@ export const WaiterMatrix: React.FC = () => {
                                     {isMultiRound ? (
                                       <button
                                         type="button"
-                                        onClick={() => setViewingRoundsTable({ table, orders: activeOrdersForTable })}
+                                        onClick={() => setDrawerState({
+                                          isOpen: true,
+                                          table,
+                                          orders: activeOrdersForTable,
+                                          initialSelectReadyItems: false,
+                                        })}
                                         className="inline-flex items-center gap-1 font-bold text-[10px] bg-amber-100/80 hover:bg-amber-100 text-amber-900 border border-amber-300 px-1.5 py-0.5 rounded-md cursor-pointer transition-colors"
                                         title="Click to view all rounds"
                                       >
@@ -3099,6 +3225,25 @@ export const WaiterMatrix: React.FC = () => {
                                     {orderStatusDisplay}
                                   </span>
                                 </div>
+
+                                {/* Item serving summary breakdown for active orders */}
+                                {(metrics.hasReady || metrics.servedCount > 0) && (
+                                  <div className="bg-[#FAF7FD] border border-[#EADDFB] p-2 rounded-lg flex items-center justify-between text-[10.5px] font-bold text-[#5F6875] my-1">
+                                    <span className={metrics.readyCount > 0 ? 'text-[#16A34A] flex items-center gap-1' : 'text-stone-400'}>
+                                      {metrics.readyCount > 0 && <span className="w-1.5 h-1.5 rounded-full bg-[#16A34A] animate-pulse" />}
+                                      <span>{metrics.readyCount} Ready</span>
+                                    </span>
+                                    <span className="text-stone-300">|</span>
+                                    <span className={metrics.servedCount > 0 ? 'text-[#18201D]' : 'text-stone-400'}>
+                                      {metrics.servedCount} Served
+                                    </span>
+                                    <span className="text-stone-300">|</span>
+                                    <span className={metrics.remainingCount > 0 ? 'text-[#D97706]' : 'text-stone-400'}>
+                                      {metrics.remainingCount} Remaining
+                                    </span>
+                                  </div>
+                                )}
+
                                 {isMultiRound && (
                                   <div className="text-[10px] text-[#71717A] flex items-center justify-between bg-white/70 px-2 py-1 rounded-lg border border-[#F0ECE6]">
                                     <span>Round 1: <strong className="text-[#18201D]">{formatPrice(activeOrderForTable.total || (activeOrderForTable as any)?.totalAmount || 0)}</strong></span>
@@ -3149,10 +3294,10 @@ export const WaiterMatrix: React.FC = () => {
                             </div>
 
                             {/* Attention Alerts */}
-                            {hasReady && (
+                            {metrics.hasReady && (
                               <div className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-bold text-[#16A34A] bg-[#EAF6ED] border border-[#CDE9D5] px-2.5 py-1 rounded-lg w-full animate-pulse">
                                 <ChefHat className="w-3.5 h-3.5" />
-                                <span>Food Ready for Pick-up!</span>
+                                <span>{metrics.readyCount} Dish{metrics.readyCount > 1 ? 'es' : ''} Ready for Pick-up!</span>
                               </div>
                             )}
                             {activeAssistanceForTable && (
@@ -3202,14 +3347,34 @@ export const WaiterMatrix: React.FC = () => {
                             </>
                           ) : isOccupiedWithOrder && activeOrderForTable ? (
                             <>
-                              {hasReady && readyOrder ? (
-                                <button
-                                  onClick={() => handleServeFood(readyOrder)}
-                                  className="w-full py-2.5 px-3 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors animate-pulse cursor-pointer"
-                                >
-                                  <ChefHat className="w-3.5 h-3.5" />
-                                  <span>Serve Food to Table</span>
-                                </button>
+                              {metrics.hasReady ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDrawerState({
+                                      isOpen: true,
+                                      table,
+                                      orders: activeOrdersForTable,
+                                      initialSelectReadyItems: false,
+                                    })}
+                                    className="flex-1 py-2 px-3 rounded-xl bg-white hover:bg-stone-50 border border-[#E3DED5] text-[#18201D] font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                                  >
+                                    <span>View Order</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDrawerState({
+                                      isOpen: true,
+                                      table,
+                                      orders: activeOrdersForTable,
+                                      initialSelectReadyItems: true,
+                                    })}
+                                    className="flex-1 py-2 px-3 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors animate-pulse cursor-pointer"
+                                  >
+                                    <ChefHat className="w-3.5 h-3.5" />
+                                    <span>Serve Ready Items ({metrics.readyCount})</span>
+                                  </button>
+                                </>
                               ) : isOrderPaid ? (
                                 <button
                                   onClick={() => handleStartCleaning(table)}
@@ -3222,9 +3387,14 @@ export const WaiterMatrix: React.FC = () => {
                                 <>
                                   <button
                                     type="button"
-                                    onClick={() => setViewingRoundsTable({ table, orders: activeOrdersForTable })}
+                                    onClick={() => setDrawerState({
+                                      isOpen: true,
+                                      table,
+                                      orders: activeOrdersForTable,
+                                      initialSelectReadyItems: false,
+                                    })}
                                     className="flex-1 py-2 px-2.5 rounded-xl bg-white hover:bg-stone-50 border border-[#E3DED5] text-[#18201D] font-bold text-xs flex items-center justify-center gap-1 shadow-xs transition-colors cursor-pointer"
-                                    title="View individual order rounds for this table"
+                                    title="View order details drawer"
                                   >
                                     <Utensils className="w-3.5 h-3.5 text-[#C85A3F]" />
                                     <span>{roundsCount} Rounds</span>
@@ -3249,12 +3419,19 @@ export const WaiterMatrix: React.FC = () => {
                               ) : (
                                 <>
                                   <button
-                                    onClick={() => setViewingRoundsTable({ table, orders: activeOrdersForTable })}
-                                    className="flex-1 py-2 px-3 rounded-xl bg-[#C85A3F] hover:bg-[#B34E35] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                                    type="button"
+                                    onClick={() => setDrawerState({
+                                      isOpen: true,
+                                      table,
+                                      orders: activeOrdersForTable,
+                                      initialSelectReadyItems: false,
+                                    })}
+                                    className="flex-1 py-2 px-3 rounded-xl bg-white hover:bg-stone-50 border border-[#E3DED5] text-[#18201D] font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                                   >
                                     <span>View Order</span>
                                   </button>
                                   <button
+                                    type="button"
                                     onClick={() => handleGenerateBill(activeOrderForTable)}
                                     className="flex-1 py-2 px-3 rounded-xl bg-[#183B2B] hover:bg-[#122c20] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                                   >
@@ -4546,6 +4723,21 @@ export const WaiterMatrix: React.FC = () => {
           </div>
         </div>
       </Modal>
+
+      {/* ─── Item-Level Serving Order Details Drawer ─── */}
+      {drawerState.isOpen && drawerState.table && (
+        <WaiterOrderDetailsDrawer
+          isOpen={drawerState.isOpen}
+          onClose={() => setDrawerState(prev => ({ ...prev, isOpen: false }))}
+          table={tables.find(t => t.id === drawerState.table?.id) || drawerState.table}
+          orders={findAllActiveOrdersForTable(drawerState.table, orders)}
+          initialSelectReadyItems={drawerState.initialSelectReadyItems}
+          onSettleBill={(order) => {
+            setDrawerState(prev => ({ ...prev, isOpen: false }));
+            handleGenerateBill(order);
+          }}
+        />
+      )}
     </div>
   );
 };

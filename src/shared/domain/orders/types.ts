@@ -1,4 +1,5 @@
 export type TItemPreparationStatus = 'NOT_STARTED' | 'PREPARING' | 'READY' | 'SERVED' | 'ON_HOLD' | 'CANCELLED';
+export type TItemServingStatus = 'WAITING_FOR_READY' | 'READY_TO_SERVE' | 'SERVED';
 
 export interface IOrderItem {
   itemId: string;
@@ -8,13 +9,17 @@ export interface IOrderItem {
   count: number;
   notes: string;
   pricePerUnit: number; // in cents snapshotted at purchase
+  price?: number;
   
-  // Item-level KDS preparation fields
+  // Item-level KDS preparation & Waiter serving fields
   status?: TItemPreparationStatus;
   prepStatus?: TItemPreparationStatus;
+  servingStatus?: TItemServingStatus;
   preparationStartedAt?: string; // ISO string
   readyAt?: string; // ISO string
   servedAt?: string; // ISO string
+  servedBy?: string;
+  servedByUid?: string;
   pausedAt?: string;
   course?: 'Starters' | 'Main Course' | 'Desserts' | 'Beverages' | string;
   station?: string;
