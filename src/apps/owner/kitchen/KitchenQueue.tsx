@@ -44,7 +44,9 @@ import {
   DEFAULT_STATIONS, 
   inferStationForItem, 
   inferCourseForItem, 
-  calculateDerivedOrderStatus 
+  calculateDerivedOrderStatus,
+  resolveItemPreparationStatus,
+  getOrderItemIdentifier
 } from '../../../shared/services/kitchenService';
 import { kotService } from '../../../shared/services/kotService';
 
@@ -244,8 +246,7 @@ export const KitchenQueue: React.FC = () => {
       const isOrderDelayed = orderElapsed > (order.estimatedPrepTime || 15);
 
       order.items.forEach(item => {
-        const st: TItemPreparationStatus = (item as any).status || (item as any).prepStatus || 
-          (order.status === 'READY' ? 'READY' : order.status === 'PREPARING' ? 'PREPARING' : 'NOT_STARTED');
+        const st: TItemPreparationStatus = resolveItemPreparationStatus(item, order.status);
 
         const qty = Number(item.count || 1);
 
@@ -369,31 +370,56 @@ export const KitchenQueue: React.FC = () => {
 
   // ── Item-Level Status Update Handler ──────────────────────────────────────
   const handleItemStatusUpdate = useCallback(
-    async (orderId: string, itemIndex: number, nextItemStatus: TItemPreparationStatus) => {
+    async (orderId: string, itemKeyOrIndex: string | number, nextItemStatus: TItemPreparationStatus) => {
       if (!user?.tenantId) return;
       try {
         const targetOrder = allOrders.find(o => o.orderId === orderId || o.id === orderId);
         if (!targetOrder) return;
 
-        const updatedItems = [...targetOrder.items];
-        const currentItem = { ...updatedItems[itemIndex] };
+        const targetKeyStr = String(itemKeyOrIndex);
         const timestamp = new Date().toISOString();
+        let targetItemName = '';
 
-        currentItem.status = nextItemStatus;
-        (currentItem as any).prepStatus = nextItemStatus;
+        const updatedItems = (targetOrder.items || []).map((item, idx) => {
+          const itemIdentifier = getOrderItemIdentifier(item, idx, targetOrder.orderId || targetOrder.id);
+          const isTarget = itemIdentifier === targetKeyStr || String(idx) === targetKeyStr;
+          const existingStatus = resolveItemPreparationStatus(item, targetOrder.status);
 
-        if (nextItemStatus === 'PREPARING') {
-          if (!currentItem.preparationStartedAt) currentItem.preparationStartedAt = timestamp;
-        } else if (nextItemStatus === 'READY') {
-          currentItem.readyAt = timestamp;
-          await deductBatchItemPortion(currentItem);
-        } else if (nextItemStatus === 'SERVED') {
-          currentItem.servedAt = timestamp;
-        } else if (nextItemStatus === 'ON_HOLD') {
-          currentItem.pausedAt = timestamp;
+          if (!isTarget) {
+            // UNSELECTED ITEM: Strictly preserve all existing properties and explicit status
+            return {
+              ...item,
+              id: item.id || itemIdentifier,
+              status: existingStatus,
+              prepStatus: existingStatus,
+            };
+          }
+
+          targetItemName = item.name;
+          const updatedItem = {
+            ...item,
+            id: item.id || itemIdentifier,
+            status: nextItemStatus,
+            prepStatus: nextItemStatus,
+          };
+
+          if (nextItemStatus === 'PREPARING') {
+            if (!updatedItem.preparationStartedAt) updatedItem.preparationStartedAt = timestamp;
+          } else if (nextItemStatus === 'READY') {
+            updatedItem.readyAt = timestamp;
+          } else if (nextItemStatus === 'SERVED') {
+            updatedItem.servedAt = timestamp;
+          } else if (nextItemStatus === 'ON_HOLD') {
+            updatedItem.pausedAt = timestamp;
+          }
+
+          return updatedItem;
+        });
+
+        if (nextItemStatus === 'READY') {
+          const matchedItem = updatedItems.find(it => it.id === targetKeyStr || it.name === targetItemName);
+          if (matchedItem) await deductBatchItemPortion(matchedItem);
         }
-
-        updatedItems[itemIndex] = currentItem;
 
         // Recalculate derived overall order status
         const newOrderStatus = calculateDerivedOrderStatus(updatedItems, targetOrder.status);
@@ -401,7 +427,7 @@ export const KitchenQueue: React.FC = () => {
         const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
         const timelineEvent: ITimelineEvent = {
           type: (nextItemStatus === 'READY' ? 'READY' : nextItemStatus === 'PREPARING' ? 'PREPARING' : 'ACCEPTED') as any,
-          title: `Item "${currentItem.name}" → ${nextItemStatus}`,
+          title: `Item "${targetItemName}" → ${nextItemStatus}`,
           timestamp,
           performedBy: user.displayName || 'Kitchen Chef',
         };
@@ -421,7 +447,7 @@ export const KitchenQueue: React.FC = () => {
         }
 
         await updateDoc(docRef, updateFields);
-        toast.success(`${currentItem.name} → ${nextItemStatus}`);
+        toast.success(`${targetItemName} → ${nextItemStatus}`);
       } catch (err) {
         console.error('Failed to update item status:', err);
         toast.error('Failed to update item status.');
@@ -432,52 +458,96 @@ export const KitchenQueue: React.FC = () => {
 
   // ── Bulk Item Status Update Handler ───────────────────────────────────────
   const handleBulkItemStatusUpdate = useCallback(
-    async (orderId: string, itemIndices: number[], nextStatus: TItemPreparationStatus) => {
-      if (!user?.tenantId || itemIndices.length === 0) return;
+    async (
+      orderId: string,
+      itemKeysOrIndices: Array<string | number>,
+      nextStatus: TItemPreparationStatus
+    ) => {
+      if (!user?.tenantId || itemKeysOrIndices.length === 0) return;
       try {
         const targetOrder = allOrders.find(o => o.orderId === orderId || o.id === orderId);
         if (!targetOrder) return;
 
-        const updatedItems = [...targetOrder.items];
+        const targetKeysSet = new Set(itemKeysOrIndices.map(String));
         const timestamp = new Date().toISOString();
+        const affectedItemNames: string[] = [];
 
-        for (const idx of itemIndices) {
-          const item = { ...updatedItems[idx] };
-          item.status = nextStatus;
-          (item as any).prepStatus = nextStatus;
+        const updatedItems = (targetOrder.items || []).map((item, idx) => {
+          const itemIdentifier = getOrderItemIdentifier(item, idx, targetOrder.orderId || targetOrder.id);
+          const isSelected = targetKeysSet.has(itemIdentifier) || targetKeysSet.has(String(idx));
+          const existingStatus = resolveItemPreparationStatus(item, targetOrder.status);
 
-          if (nextStatus === 'PREPARING' && !item.preparationStartedAt) {
-            item.preparationStartedAt = timestamp;
-          } else if (nextStatus === 'READY') {
-            item.readyAt = timestamp;
-            await deductBatchItemPortion(item);
-          } else if (nextStatus === 'SERVED') {
-            item.servedAt = timestamp;
-          } else if (nextStatus === 'ON_HOLD') {
-            item.pausedAt = timestamp;
+          if (!isSelected) {
+            // UNSELECTED ITEM: Strictly preserve all existing properties and explicit status
+            return {
+              ...item,
+              id: item.id || itemIdentifier,
+              status: existingStatus,
+              prepStatus: existingStatus,
+            };
           }
 
-          updatedItems[idx] = item;
+          // SELECTED ITEM: Validate and update
+          affectedItemNames.push(item.name);
+          const updatedItem = {
+            ...item,
+            id: item.id || itemIdentifier,
+            status: nextStatus,
+            prepStatus: nextStatus,
+          };
+
+          if (nextStatus === 'PREPARING') {
+            if (!updatedItem.preparationStartedAt) {
+              updatedItem.preparationStartedAt = timestamp;
+            }
+          } else if (nextStatus === 'READY') {
+            updatedItem.readyAt = timestamp;
+          } else if (nextStatus === 'SERVED') {
+            updatedItem.servedAt = timestamp;
+          } else if (nextStatus === 'ON_HOLD') {
+            updatedItem.pausedAt = timestamp;
+          }
+
+          return updatedItem;
+        });
+
+        // Deduct inventory portions for items newly marked READY
+        if (nextStatus === 'READY') {
+          for (const item of updatedItems) {
+            const key = getOrderItemIdentifier(item, 0, targetOrder.orderId);
+            if (targetKeysSet.has(key) || targetKeysSet.has(String(item.id))) {
+              await deductBatchItemPortion(item);
+            }
+          }
         }
 
         const newOrderStatus = calculateDerivedOrderStatus(updatedItems, targetOrder.status);
         const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
 
+        const summaryNames = affectedItemNames.slice(0, 2).join(', ') + (affectedItemNames.length > 2 ? '...' : '');
         const timelineEvent: ITimelineEvent = {
           type: (nextStatus === 'READY' ? 'READY' : nextStatus === 'PREPARING' ? 'PREPARING' : 'ACCEPTED') as any,
-          title: `Bulk update (${itemIndices.length} items) → ${nextStatus}`,
+          title: `Bulk update (${affectedItemNames.length} items: ${summaryNames}) → ${nextStatus}`,
           timestamp,
           performedBy: user.displayName || 'Kitchen Chef',
         };
 
-        await updateDoc(docRef, {
+        const updateFields: any = {
           items: updatedItems,
           status: newOrderStatus,
           updatedAt: timestamp,
           timeline: arrayUnion(timelineEvent),
-        });
+        };
 
-        toast.success(`Updated ${itemIndices.length} items to ${nextStatus}`);
+        if (newOrderStatus === 'PREPARING' && !targetOrder.cookingStartedAt) {
+          updateFields.cookingStartedAt = timestamp;
+        }
+        if (newOrderStatus === 'READY' && !targetOrder.readyAt) {
+          updateFields.readyAt = timestamp;
+        }
+
+        await updateDoc(docRef, updateFields);
+        toast.success(`Updated ${affectedItemNames.length} items to ${nextStatus}`);
       } catch (err) {
         console.error('Failed to bulk update items:', err);
         toast.error('Failed to update items.');
@@ -759,7 +829,7 @@ export const KitchenQueue: React.FC = () => {
                   </div>
                 ) : (
                   stationItems.map(({ orderId, tableNumber, itemIndex, item }, i) => {
-                    const st = (item as any).status || (item as any).prepStatus || 'NOT_STARTED';
+                    const st = resolveItemPreparationStatus(item);
                     const isReady = st === 'READY';
                     const isCooking = st === 'PREPARING';
 
@@ -861,7 +931,7 @@ export const KitchenQueue: React.FC = () => {
                     </div>
                   ) : (
                     courseItems.map(({ orderId, tableNumber, itemIndex, item }, i) => {
-                      const st = (item as any).status || (item as any).prepStatus || 'NOT_STARTED';
+                      const st = resolveItemPreparationStatus(item);
                       const isReady = st === 'READY';
                       const isCooking = st === 'PREPARING';
                       const isHold = st === 'ON_HOLD';
@@ -921,7 +991,7 @@ export const KitchenQueue: React.FC = () => {
                   <button
                     onClick={() => {
                       courseItems.forEach(ci => {
-                        const st = (ci.item as any).status || (ci.item as any).prepStatus;
+                        const st = resolveItemPreparationStatus(ci.item);
                         if (st !== 'READY' && st !== 'PREPARING') {
                           handleItemStatusUpdate(ci.orderId, ci.itemIndex, 'PREPARING');
                         }

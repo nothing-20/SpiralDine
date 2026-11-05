@@ -11,7 +11,7 @@ import { db } from '../../config/firebase';
 import {
   IChefAvailability, IKitchenAnnouncement, IShiftRecord,
   IStationConfig, IRecipeValidation, IIngredientCheck,
-  TChefStatus, IKdsOrder, TOrderStatus
+  TChefStatus, IKdsOrder, TOrderStatus, TItemPreparationStatus
 } from '../domain/orders/types';
 
 const ACTIVE_STATUSES: TOrderStatus[] = ['NEW', 'PLACED', 'ACCEPTED', 'CHEF_ASSIGNED', 'PREPARING', 'PAUSED', 'READY', 'PICKED_UP', 'SERVED'];
@@ -323,13 +323,60 @@ export function inferStationForItem(
   return 'Main Course';
 }
 
+/**
+ * Resolves the preparation status for an individual order item.
+ * Strictly maintains item-level independence:
+ * Never infers an item is 'PREPARING' just because parent order.status is 'PREPARING'.
+ */
+export function resolveItemPreparationStatus(
+  item: any,
+  parentOrderStatus?: string
+): TItemPreparationStatus {
+  // 1. Explicit status on item
+  const raw = (item?.status || item?.prepStatus || '').toUpperCase();
+  if (raw === 'READY') return 'READY';
+  if (raw === 'PREPARING' || raw === 'COOKING') return 'PREPARING';
+  if (raw === 'SERVED' || raw === 'DELIVERED' || raw === 'COMPLETED') return 'SERVED';
+  if (raw === 'ON_HOLD' || raw === 'PAUSED') return 'ON_HOLD';
+  if (raw === 'CANCELLED') return 'CANCELLED';
+  if (raw === 'NOT_STARTED') return 'NOT_STARTED';
+
+  // 2. Explicit timestamps on item
+  if (item?.readyAt) return 'READY';
+  if (item?.servedAt) return 'SERVED';
+  if (item?.pausedAt) return 'ON_HOLD';
+  if (item?.preparationStartedAt) return 'PREPARING';
+
+  // 3. Fallback based strictly on final parent order completion (NOT partial/in-flight states)
+  const parent = (parentOrderStatus || '').toUpperCase();
+  if (parent === 'READY') return 'READY';
+  if (['DELIVERED', 'SERVED', 'COMPLETED', 'ARCHIVED'].includes(parent)) return 'SERVED';
+  if (parent === 'CANCELLED') return 'CANCELLED';
+
+  // Any other state (NEW, PLACED, ACCEPTED, PREPARING, PARTIALLY_READY) defaults to NOT_STARTED
+  return 'NOT_STARTED';
+}
+
+/**
+ * Generates or retrieves a unique, stable identifier for an individual order item.
+ * Ensures isolation even when multiple identical dishes are in the same order.
+ */
+export function getOrderItemIdentifier(item: any, index: number, orderId?: string): string {
+  if (item?.id) return String(item.id);
+  if (item?.orderItemId) return String(item.orderItemId);
+  if (item?.uid) return String(item.uid);
+  const orderPrefix = orderId ? `${orderId}-` : '';
+  const itemPrefix = item?.itemId ? `${item.itemId}-` : '';
+  return `${orderPrefix}${itemPrefix}item-${index}`;
+}
+
 export function calculateDerivedOrderStatus(items: any[], currentStatus: TOrderStatus): TOrderStatus {
   if (!items || items.length === 0) return currentStatus;
   
   const activeItems = items.filter(it => (it.status || '').toUpperCase() !== 'CANCELLED');
   if (activeItems.length === 0) return 'CANCELLED';
   
-  const statuses = activeItems.map(it => (it.status || 'NOT_STARTED').toUpperCase());
+  const statuses = activeItems.map(it => resolveItemPreparationStatus(it, currentStatus));
   
   const allServed = statuses.every(s => s === 'SERVED');
   if (allServed) return 'SERVED';
@@ -526,6 +573,8 @@ export const kitchenService = {
   inferStationForItem,
   inferCourseForItem,
   calculateDerivedOrderStatus,
+  resolveItemPreparationStatus,
+  getOrderItemIdentifier,
 
   // Kitchen Load
   calculateKitchenLoad,

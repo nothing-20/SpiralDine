@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { IKdsOrder, TPriority } from '../../../features/kitchen-dashboard/types';
 import { TItemPreparationStatus, IOrderItem } from '../../../shared/domain/orders/types';
 import { getElapsedSeconds, formatElapsedSeconds } from '../../../features/kitchen-dashboard/utils/kitchenMetrics';
-import { inferCourseForItem, inferStationForItem } from '../../../shared/services/kitchenService';
+import { inferCourseForItem, inferStationForItem, resolveItemPreparationStatus, getOrderItemIdentifier } from '../../../shared/services/kitchenService';
 import { kotPrintService } from '../../../shared/services/kotPrintService';
 import { useAuth } from '../../../context/AuthContext';
 import OrderTimeline from './OrderTimeline';
@@ -59,8 +59,8 @@ interface IKitchenTicketProps {
   order: IKdsOrder;
   isSelected?: boolean;
   onToggleSelect?: (orderId: string) => void;
-  onItemStatusUpdate: (orderId: string, itemIndex: number, nextStatus: TItemPreparationStatus) => void;
-  onBulkItemStatusUpdate: (orderId: string, itemIndices: number[], nextStatus: TItemPreparationStatus) => void;
+  onItemStatusUpdate: (orderId: string, itemKeyOrIndex: string | number, nextStatus: TItemPreparationStatus) => void;
+  onBulkItemStatusUpdate: (orderId: string, itemKeysOrIndices: Array<string | number>, nextStatus: TItemPreparationStatus) => void;
   onStatusUpdate: (orderId: string, nextStatus: string) => void;
   employees: any[];
   onAssignChef: (orderId: string, chefId: string, chefName: string) => void;
@@ -91,7 +91,8 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
   menuItems = [],
 }) => {
   const { user } = useAuth();
-  const [selectedItemIndices, setSelectedItemIndices] = useState<Set<number>>(new Set());
+  // Multi-item selection tracked by unique, stable order item identifiers (isolated per card)
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
@@ -105,16 +106,11 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
 
   const elapsedMins = Math.floor(elapsedSecs / 60);
 
-  // Derive status for each item (ensuring backward compatibility with legacy orders)
+  // Derive status for each item (strictly maintaining item independence)
   const itemsWithMeta = useMemo(() => {
     return (order.items || []).map((item, idx) => {
-      let rawStatus: TItemPreparationStatus = (item as any).status || (item as any).prepStatus;
-      if (!rawStatus) {
-        if (order.status === 'READY') rawStatus = 'READY';
-        else if (order.status === 'PREPARING') rawStatus = 'PREPARING';
-        else if (['DELIVERED', 'SERVED', 'COMPLETED'].includes(order.status)) rawStatus = 'SERVED';
-        else rawStatus = 'NOT_STARTED';
-      }
+      const itemIdentifier = getOrderItemIdentifier(item, idx, order.orderId);
+      const rawStatus = resolveItemPreparationStatus(item, order.status);
 
       const course = (item as any).course || inferCourseForItem(item.name, (item as any).category);
       const station = (item as any).station || inferStationForItem(item.name, (item as any).category);
@@ -129,6 +125,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
 
       return {
         ...item,
+        itemIdentifier,
         resolvedStatus: rawStatus,
         course,
         station,
@@ -137,7 +134,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
         originalIndex: idx,
       };
     });
-  }, [order.items, order.status, elapsedMins]);
+  }, [order.items, order.status, order.orderId, elapsedMins]);
 
   // Group items by course for the header pills
   const courseCounts = useMemo(() => {
@@ -152,20 +149,46 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
   const isDelayed = elapsedMins > (order.estimatedPrepTime || 15);
   const isPriority = order.priority === 'critical' || order.priority === 'high' || isDelayed;
 
-  // Toggle selection for an individual item
-  const toggleItemCheckbox = (index: number) => {
-    setSelectedItemIndices(prev => {
+  // Toggle selection for an individual item using unique item identifier
+  const toggleItemCheckbox = (identifier: string) => {
+    setSelectedItemIds(prev => {
       const copy = new Set(prev);
-      if (copy.has(index)) copy.delete(index);
-      else copy.add(index);
+      if (copy.has(identifier)) copy.delete(identifier);
+      else copy.add(identifier);
       return copy;
     });
   };
 
-  // Determine context-sensitive footer action
+  // Explicit user actions to select all unserved items or clear selection
+  const selectAllUnserved = () => {
+    const unservedIds = itemsWithMeta
+      .filter(i => i.resolvedStatus !== 'SERVED' && i.resolvedStatus !== 'CANCELLED')
+      .map(i => i.itemIdentifier);
+    setSelectedItemIds(new Set(unservedIds));
+  };
+
+  const clearSelection = () => {
+    setSelectedItemIds(new Set());
+  };
+
+  // Currently selected items
   const selectedList = useMemo(() => {
-    return itemsWithMeta.filter(i => selectedItemIndices.has(i.originalIndex));
-  }, [itemsWithMeta, selectedItemIndices]);
+    return itemsWithMeta.filter(i => selectedItemIds.has(i.itemIdentifier));
+  }, [itemsWithMeta, selectedItemIds]);
+
+  // Items eligible to start preparing (must be NOT_STARTED, ON_HOLD, or PENDING)
+  const eligibleToStart = useMemo(() => {
+    return selectedList.filter(i => 
+      i.resolvedStatus === 'NOT_STARTED' || 
+      i.resolvedStatus === 'ON_HOLD' || 
+      (i.resolvedStatus as string) === 'PENDING'
+    );
+  }, [selectedList]);
+
+  // Items eligible to be marked ready (must be PREPARING)
+  const eligibleToReady = useMemo(() => {
+    return selectedList.filter(i => i.resolvedStatus === 'PREPARING');
+  }, [selectedList]);
 
   const activeNonServedItems = useMemo(() => {
     return itemsWithMeta.filter(i => i.resolvedStatus !== 'SERVED' && i.resolvedStatus !== 'CANCELLED');
@@ -175,68 +198,128 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
   const preparingItems = itemsWithMeta.filter(i => i.resolvedStatus === 'PREPARING');
   const notStartedItems = itemsWithMeta.filter(i => i.resolvedStatus === 'NOT_STARTED');
 
-  // Primary action button calculation
-  const primaryButtonConfig = useMemo(() => {
+  // Context-sensitive footer action button configuration
+  const footerButtons = useMemo(() => {
+    // 1. User has selected one or more items
     if (selectedList.length > 0) {
-      const anyPreparing = selectedList.some(i => i.resolvedStatus === 'PREPARING');
-      if (anyPreparing) {
+      const hasReadyable = eligibleToReady.length > 0;
+      const hasStartable = eligibleToStart.length > 0;
+
+      // Both pending and cooking items are selected -> show split action buttons
+      if (hasReadyable && hasStartable) {
         return {
-          label: '✓ Mark Selected Ready',
-          action: () => {
-            const indicesToReady = selectedList
-              .filter(i => i.resolvedStatus === 'PREPARING')
-              .map(i => i.originalIndex);
-            onBulkItemStatusUpdate(order.orderId, indicesToReady, 'READY');
-            setSelectedItemIndices(new Set());
+          type: 'split' as const,
+          startCount: eligibleToStart.length,
+          readyCount: eligibleToReady.length,
+          onStart: () => {
+            const idsToStart = eligibleToStart.map(i => i.itemIdentifier);
+            onBulkItemStatusUpdate(order.orderId, idsToStart, 'PREPARING');
+            setSelectedItemIds(prev => {
+              const next = new Set(prev);
+              idsToStart.forEach(id => next.delete(id));
+              return next;
+            });
+          },
+          onReady: () => {
+            const idsToReady = eligibleToReady.map(i => i.itemIdentifier);
+            onBulkItemStatusUpdate(order.orderId, idsToReady, 'READY');
+            setSelectedItemIds(prev => {
+              const next = new Set(prev);
+              idsToReady.forEach(id => next.delete(id));
+              return next;
+            });
           },
         };
       }
+
+      // Only cooking items selected -> Mark Selected Ready
+      if (hasReadyable) {
+        return {
+          type: 'single' as const,
+          label: `✓ MARK SELECTED READY (${eligibleToReady.length})`,
+          disabled: false,
+          action: () => {
+            const idsToReady = eligibleToReady.map(i => i.itemIdentifier);
+            onBulkItemStatusUpdate(order.orderId, idsToReady, 'READY');
+            clearSelection();
+          },
+        };
+      }
+
+      // Only pending items selected -> Start Selected Items
+      if (hasStartable) {
+        return {
+          type: 'single' as const,
+          label: `▶ START SELECTED (${eligibleToStart.length})`,
+          disabled: false,
+          action: () => {
+            const idsToStart = eligibleToStart.map(i => i.itemIdentifier);
+            onBulkItemStatusUpdate(order.orderId, idsToStart, 'PREPARING');
+            clearSelection();
+          },
+        };
+      }
+
+      // Selected items are already served or cancelled -> disable bulk action
       return {
-        label: '▶ Start Selected Items',
-        action: () => {
-          const indicesToStart = selectedList
-            .filter(i => i.resolvedStatus === 'NOT_STARTED' || i.resolvedStatus === 'ON_HOLD')
-            .map(i => i.originalIndex);
-          onBulkItemStatusUpdate(order.orderId, indicesToStart, 'PREPARING');
-          setSelectedItemIndices(new Set());
-        },
+        type: 'single' as const,
+        label: 'NO VALID ITEMS SELECTED',
+        disabled: true,
+        action: () => {},
       };
     }
 
+    // 2. No items selected: standard ticket-level actions
     if (allActiveReady) {
       return {
+        type: 'single' as const,
         label: '✓ Mark Order Served',
+        disabled: false,
         action: () => {
           onStatusUpdate(order.orderId, 'SERVED');
         },
       };
     }
 
-    if (preparingItems.length > 0) {
+    if (notStartedItems.length > 0) {
       return {
-        label: '✓ Mark Selected Ready',
+        type: 'single' as const,
+        label: '▶ Start Next Item',
+        disabled: false,
         action: () => {
-          const indices = preparingItems.map(i => i.originalIndex);
-          onBulkItemStatusUpdate(order.orderId, indices, 'READY');
+          const firstPending = notStartedItems[0];
+          onItemStatusUpdate(order.orderId, firstPending.itemIdentifier, 'PREPARING');
         },
       };
     }
 
-    if (notStartedItems.length > 0) {
+    if (preparingItems.length > 0) {
       return {
-        label: '▶ Start Next Item',
-        action: () => {
-          const firstPending = notStartedItems[0];
-          onItemStatusUpdate(order.orderId, firstPending.originalIndex, 'PREPARING');
-        },
+        type: 'single' as const,
+        label: 'Select Items to Mark Ready',
+        disabled: true,
+        action: () => {},
       };
     }
 
     return {
+      type: 'single' as const,
       label: '✓ Mark Order Served',
+      disabled: false,
       action: () => onStatusUpdate(order.orderId, 'SERVED'),
     };
-  }, [selectedList, allActiveReady, preparingItems, notStartedItems, onBulkItemStatusUpdate, onItemStatusUpdate, onStatusUpdate, order.orderId]);
+  }, [
+    selectedList,
+    eligibleToStart,
+    eligibleToReady,
+    allActiveReady,
+    preparingItems,
+    notStartedItems,
+    onBulkItemStatusUpdate,
+    onItemStatusUpdate,
+    onStatusUpdate,
+    order.orderId,
+  ]);
 
   // Thermal Print Handler
   const handlePrintKot = async (e: React.MouseEvent) => {
@@ -372,31 +455,57 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
           </div>
         </div>
 
-        {/* Course Group Pills */}
-        <div className="flex flex-wrap items-center gap-1.5 mt-3">
-          {Object.entries(courseCounts).map(([courseName, count]) => {
-            let pillClass = 'bg-[#F4F4F5] text-[#52525B]';
-            if (courseName.toLowerCase().includes('starter')) pillClass = 'bg-[#FEECEC] text-[#DC2626] border border-red-200';
-            else if (courseName.toLowerCase().includes('main')) pillClass = 'bg-[#FEF5E7] text-[#D97706] border border-amber-200';
-            else if (courseName.toLowerCase().includes('beverage') || courseName.toLowerCase().includes('drink')) pillClass = 'bg-[#EFF6FF] text-[#2563EB] border border-blue-200';
-            else if (courseName.toLowerCase().includes('dessert')) pillClass = 'bg-[#FAF5FF] text-[#9333EA] border border-purple-200';
+        {/* Course Group Pills & Selection Controls */}
+        <div className="flex items-center justify-between gap-1 mt-3">
+          <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+            {Object.entries(courseCounts).map(([courseName, count]) => {
+              let pillClass = 'bg-[#F4F4F5] text-[#52525B]';
+              if (courseName.toLowerCase().includes('starter')) pillClass = 'bg-[#FEECEC] text-[#DC2626] border border-red-200';
+              else if (courseName.toLowerCase().includes('main')) pillClass = 'bg-[#FEF5E7] text-[#D97706] border border-amber-200';
+              else if (courseName.toLowerCase().includes('beverage') || courseName.toLowerCase().includes('drink')) pillClass = 'bg-[#EFF6FF] text-[#2563EB] border border-blue-200';
+              else if (courseName.toLowerCase().includes('dessert')) pillClass = 'bg-[#FAF5FF] text-[#9333EA] border border-purple-200';
 
-            return (
-              <span
-                key={courseName}
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${pillClass}`}
-              >
-                {courseName} ({count})
-              </span>
-            );
-          })}
+              return (
+                <span
+                  key={courseName}
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${pillClass}`}
+                >
+                  {courseName} ({count})
+                </span>
+              );
+            })}
+          </div>
+
+          {itemsWithMeta.length > 1 && (
+            <div className="shrink-0">
+              {selectedItemIds.size > 0 ? (
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="text-[10px] font-bold text-amber-800 hover:text-amber-950 bg-amber-100/70 hover:bg-amber-100 border border-amber-300/80 px-2 py-0.5 rounded-md transition-colors cursor-pointer"
+                  title="Deselect all items"
+                >
+                  Clear ({selectedItemIds.size})
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={selectAllUnserved}
+                  className="text-[10px] font-semibold text-stone-500 hover:text-stone-800 bg-[#F4F4F5] hover:bg-[#E4E4E7] border border-[#E3DED5] px-2 py-0.5 rounded-md transition-colors cursor-pointer"
+                  title="Select all unserved items"
+                >
+                  Select All
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       {/* ── Items List ─────────────────────────────────────────── */}
       <div className="p-4 space-y-2 flex-1 overflow-y-auto max-h-[360px]">
         {itemsWithMeta.map((item) => {
-          const isItemChecked = selectedItemIndices.has(item.originalIndex);
+          const isItemChecked = selectedItemIds.has(item.itemIdentifier);
           const isItemReady = item.resolvedStatus === 'READY';
           const isItemPreparing = item.resolvedStatus === 'PREPARING';
           const isItemOnHold = item.resolvedStatus === 'ON_HOLD';
@@ -405,7 +514,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
 
           return (
             <div
-              key={item.originalIndex}
+              key={item.itemIdentifier}
               className={`p-2 rounded-xl transition-colors border ${
                 isItemChecked 
                   ? 'bg-amber-50/70 border-amber-200' 
@@ -417,9 +526,9 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
                 <input
                   type="checkbox"
                   checked={isItemChecked}
-                  onChange={() => toggleItemCheckbox(item.originalIndex)}
+                  onChange={() => toggleItemCheckbox(item.itemIdentifier)}
                   disabled={isItemServed || isItemCancelled}
-                  className="mt-0.5 w-4 h-4 rounded text-[#183B2B] focus:ring-[#183B2B] border-[#D1C9BC] shrink-0 cursor-pointer"
+                  className="mt-0.5 w-4 h-4 rounded text-[#183B2B] focus:ring-[#183B2B] border-[#D1C9BC] shrink-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   aria-label={`Select ${item.name}`}
                 />
 
@@ -464,7 +573,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
                   {isItemPreparing ? (
                     <button
                       type="button"
-                      onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'READY')}
+                      onClick={() => onItemStatusUpdate(order.orderId, item.itemIdentifier, 'READY')}
                       title="Click to mark Ready"
                       className="bg-[#EAF3FD] hover:bg-[#DCEBFC] text-[#2563EB] text-[10.5px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors cursor-pointer border border-blue-200/50"
                     >
@@ -476,7 +585,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
                   ) : isItemReady ? (
                     <button
                       type="button"
-                      onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'PREPARING')}
+                      onClick={() => onItemStatusUpdate(order.orderId, item.itemIdentifier, 'PREPARING')}
                       title="Click to recall to Preparing"
                       className="bg-[#EAF7EE] hover:bg-[#D5F2DD] text-[#16A34A] text-[10.5px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors cursor-pointer border border-green-200/50"
                     >
@@ -486,7 +595,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
                   ) : isItemOnHold ? (
                     <button
                       type="button"
-                      onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'PREPARING')}
+                      onClick={() => onItemStatusUpdate(order.orderId, item.itemIdentifier, 'PREPARING')}
                       title="Click to release and start"
                       className="bg-[#FEF5E7] hover:bg-[#FDECC8] text-[#D97706] text-[10.5px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors cursor-pointer border border-amber-200/50"
                     >
@@ -505,7 +614,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
                   ) : (
                     <button
                       type="button"
-                      onClick={() => onItemStatusUpdate(order.orderId, item.originalIndex, 'PREPARING')}
+                      onClick={() => onItemStatusUpdate(order.orderId, item.itemIdentifier, 'PREPARING')}
                       title="Click to start preparing"
                       className="bg-[#F4F4F5] hover:bg-[#E4E4E7] text-[#71717A] text-[10.5px] font-medium px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors cursor-pointer border border-stone-200/60"
                     >
@@ -558,13 +667,42 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
 
       {/* ── Card Footer ────────────────────────────────────────── */}
       <div className="p-3 bg-[#FAF8F5] border-t border-[#E3DED5] flex items-center space-x-2">
-        {/* Context-Sensitive Primary Button */}
-        <button
-          onClick={primaryButtonConfig.action}
-          className="flex-1 bg-[#183B2B] hover:bg-[#132E22] active:scale-[0.99] text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all shadow-xs flex items-center justify-center space-x-1.5 cursor-pointer"
-        >
-          <span>{primaryButtonConfig.label}</span>
-        </button>
+        {/* Context-Sensitive Action Buttons */}
+        {footerButtons.type === 'split' ? (
+          <div className="flex-1 flex items-center space-x-1.5 min-w-0">
+            <button
+              type="button"
+              onClick={footerButtons.onStart}
+              className="flex-1 bg-[#183B2B] hover:bg-[#132E22] active:scale-[0.99] text-white text-[11px] font-bold py-2.5 px-2 rounded-xl transition-all shadow-xs flex items-center justify-center space-x-1 truncate cursor-pointer"
+              title="Start cooking selected pending items"
+            >
+              <Play className="w-3 h-3 shrink-0" />
+              <span className="truncate">START ({footerButtons.startCount})</span>
+            </button>
+            <button
+              type="button"
+              onClick={footerButtons.onReady}
+              className="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white text-[11px] font-bold py-2.5 px-2 rounded-xl transition-all shadow-xs flex items-center justify-center space-x-1 truncate cursor-pointer"
+              title="Mark selected cooking items ready"
+            >
+              <Check className="w-3 h-3 stroke-[2.5] shrink-0" />
+              <span className="truncate">READY ({footerButtons.readyCount})</span>
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={footerButtons.action}
+            disabled={footerButtons.disabled}
+            className={`flex-1 text-xs font-bold py-2.5 px-4 rounded-xl transition-all shadow-xs flex items-center justify-center space-x-1.5 ${
+              footerButtons.disabled
+                ? 'bg-[#F4F4F5] text-stone-400 border border-stone-200 cursor-not-allowed'
+                : 'bg-[#183B2B] hover:bg-[#132E22] active:scale-[0.99] text-white cursor-pointer'
+            }`}
+          >
+            <span>{footerButtons.label}</span>
+          </button>
+        )}
 
         {/* More Actions Menu Button */}
         <div className="relative">
@@ -578,7 +716,33 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
 
           {/* More Actions Dropdown */}
           {showMoreMenu && (
-            <div className="absolute right-0 bottom-full mb-1 w-48 bg-white border border-[#E3DED5] rounded-xl shadow-lg p-1.5 z-30 space-y-0.5 text-xs">
+            <div className="absolute right-0 bottom-full mb-1 w-52 bg-white border border-[#E3DED5] rounded-xl shadow-lg p-1.5 z-30 space-y-0.5 text-xs">
+              {selectedItemIds.size > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearSelection();
+                    setShowMoreMenu(false);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#FAF8F5] flex items-center space-x-2 text-[#18201D] font-medium"
+                >
+                  <XCircle className="w-3.5 h-3.5 text-stone-600" />
+                  <span>Clear Selection ({selectedItemIds.size})</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    selectAllUnserved();
+                    setShowMoreMenu(false);
+                  }}
+                  className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#FAF8F5] flex items-center space-x-2 text-[#18201D] font-medium"
+                >
+                  <Check className="w-3.5 h-3.5 text-stone-600" />
+                  <span>Select All Items</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={handlePrintKot}
