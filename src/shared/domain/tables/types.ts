@@ -120,7 +120,12 @@ export const isTableBrowsing = (table: ITable, maxAgeMinutes: number = 5): boole
   const hasOrder = Boolean(table.activeOrderId || table.currentOrderId);
   if (hasOrder) return false;
 
-  const isBrowsingStatus = status === 'browsing' || sub === 'browsing' || (status === 'occupied' && sub === 'seated');
+  // Seated diners awaiting waiter or order are occupied, not ephemeral menu browsers
+  if (table.customerPresent === true || sub === 'seated' || (status === 'occupied' && (table.guestsCount || 0) > 0)) {
+    return false;
+  }
+
+  const isBrowsingStatus = status === 'browsing' || sub === 'browsing';
   if (!isBrowsingStatus) return false;
 
   const timestamp = table.lastActiveAt || table.seatedAt || table.occupiedAt || (table as any).updatedAt;
@@ -132,6 +137,22 @@ export const isTableBrowsing = (table: ITable, maxAgeMinutes: number = 5): boole
   }
 
   return true;
+};
+
+/**
+ * Checks whether a table is occupied by seated diners awaiting orders.
+ */
+export const isTableSeated = (table: ITable, hasActiveOrders: boolean = false): boolean => {
+  if (hasActiveOrders) return false;
+  const status = (table.status || table.tableStatus || '').toLowerCase().trim();
+  const sub = (table.subStatus || table.diningStatus || '').toLowerCase().trim();
+  if (isTableCleaning(status)) return false;
+  return (
+    status === 'occupied' || 
+    status === 'seated' || 
+    sub === 'seated' || 
+    table.customerPresent === true
+  );
 };
 
 /**

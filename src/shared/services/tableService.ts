@@ -1,11 +1,11 @@
-import { 
-  collection, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  setDoc, 
-  updateDoc, 
-  query, 
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  query,
   where,
   addDoc,
   writeBatch
@@ -55,7 +55,7 @@ export const tableService = {
           return { id: directSnap.id, table: { id: directSnap.id, ...data } as ITable };
         }
       }
-    } catch (_) {}
+    } catch (_) { }
 
     // 2. Check TBL- prefix if not already present
     if (!rawStr.toUpperCase().startsWith('TBL-') && cleanNum) {
@@ -68,13 +68,13 @@ export const tableService = {
             return { id: tblSnap.id, table: { id: tblSnap.id, ...data } as ITable };
           }
         }
-      } catch (_) {}
+      } catch (_) { }
     }
 
     // 3. Query collection by fields: number, tableNumber, tableName, name
     if (cleanNum) {
       const colRef = collection(db, 'restaurants', tenantId, 'tables');
-      
+
       // Try query by number
       const qNum = query(colRef, where('number', '==', cleanNum));
       const snapNum = await getDocs(qNum);
@@ -173,7 +173,7 @@ export const tableService = {
               }
             }
           }
-        } catch (_) {}
+        } catch (_) { }
       }
 
       // 2. Only transition to browsing if table is currently available or unseated
@@ -211,7 +211,7 @@ export const tableService = {
             read: false,
             createdAt: nowIso
           });
-        } catch (_) {}
+        } catch (_) { }
       } else {
         // Just touch lastActiveAt and update customer name if available
         await updateDoc(tableRef, {
@@ -219,7 +219,7 @@ export const tableService = {
           updatedAt: nowIso,
           ...(customerInfo?.name ? { customerName: customerInfo.name } : {}),
           ...(customerInfo?.phone ? { customerPhone: customerInfo.phone } : {})
-        }).catch(() => {});
+        }).catch(() => { });
       }
     } catch (err) {
       console.warn('[tableService] setTableBrowsing warning:', err);
@@ -274,8 +274,8 @@ export const tableService = {
       const tableRef = doc(db, 'restaurants', tenantId, 'tables', match.id);
       await updateDoc(tableRef, {
         lastActiveAt: new Date().toISOString()
-      }).catch(() => {});
-    } catch (_) {}
+      }).catch(() => { });
+    } catch (_) { }
   },
 
   /**
@@ -293,12 +293,12 @@ export const tableService = {
 
       for (const t of allTables) {
         const hasOrder = Boolean(t.activeOrderId || (t as any)?.currentOrderId);
+        const isSeated = t.subStatus === 'seated' || t.diningStatus === 'seated' || t.customerPresent === true || ((t.guestsCount || 0) > 0);
         const isBrowsingOnly = (
-          t.subStatus === 'browsing' || 
-          t.diningStatus === 'browsing' || 
-          t.status === 'browsing' || 
-          (t.status === 'occupied' && !hasOrder)
-        ) && !hasOrder;
+          t.subStatus === 'browsing' ||
+          t.diningStatus === 'browsing' ||
+          t.status === 'browsing'
+        ) && !hasOrder && !isSeated;
 
         if (isBrowsingOnly) {
           const timestamp = t.lastActiveAt || t.seatedAt || t.occupiedAt || (t as any).updatedAt;
@@ -371,7 +371,7 @@ export const tableService = {
           priority: 'high',
           createdAt: nowIso
         });
-      } catch (_) {}
+      } catch (_) { }
     } catch (err) {
       console.warn('[tableService] setTableOccupiedWithOrder warning:', err);
     }
@@ -452,7 +452,7 @@ export const tableService = {
             createdAt: nowIso
           });
         }
-      } catch (_) {}
+      } catch (_) { }
     } catch (err) {
       console.warn('[tableService] setTableCleaning warning:', err);
     }
@@ -613,7 +613,7 @@ export const tableService = {
             actorName: extraData.assignedWaiterName || 'Staff Waiter',
             actorRole: 'waiter'
           });
-        } catch (_) {}
+        } catch (_) { }
       }
     } catch (err) {
       console.error('[tableService] updateTableStatusDirect error:', err);

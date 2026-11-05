@@ -17,7 +17,7 @@ import {
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import { generateUniqueOrderId, isOrderActive } from '../../../shared/utils/orderUtils';
-import { isTableAvailable, isTableOccupied, isTableCleaning, isTableBrowsing } from '../../../shared/domain/tables/types';
+import { isTableAvailable, isTableOccupied, isTableCleaning, isTableBrowsing, isTableSeated } from '../../../shared/domain/tables/types';
 import { tableService, cleanTableIdentifier } from '../../../shared/services/tableService';
 import { IOrder, ITable, IServiceRequest, ITimelineEvent, IHandoverDoc, ISatisfactionRating } from '../../../types';
 import { formatPrice } from '../../../utils/format';
@@ -426,6 +426,22 @@ export const WaiterMatrix: React.FC = () => {
   const [menuDietaryFilter, setMenuDietaryFilter] = useState<'all' | 'veg' | 'non-veg'>('all');
   const [orderNotes, setOrderNotes] = useState<string>('');
   const [isSubmittingOrder, setIsSubmittingOrder] = useState<boolean>(false);
+
+  const openSeatingModal = (table: ITable) => {
+    const cap = Number(table.capacity || table.seatingCapacity || 4);
+    setSelectedTable(table);
+    setGuestsCount(Math.min(cap, Math.max(1, table.guestsCount || cap)));
+    setTableSectionInput(table.section || (table as any).floorSection || 'Indoor Main');
+    setTableNotesInput(table.tableNotes || '');
+  };
+
+  const openQuickOrderModal = (table: ITable) => {
+    setOrderTable(table);
+    setCart({});
+    setCustomerName(table.customerName || '');
+    setCustomerPhone(table.customerPhone || '');
+    setOrderNotes(table.tableNotes || '');
+  };
 
   const filteredDishes = useMemo(() => {
     return menuItems.filter(item => {
@@ -1283,15 +1299,35 @@ export const WaiterMatrix: React.FC = () => {
   const handleOccupyTableCC = async () => {
     if (!user?.tenantId || !selectedTable) return;
     try {
+      const nowIso = new Date().toISOString();
       const tableRef = doc(db, 'restaurants', user.tenantId, 'tables', selectedTable.id);
-      await updateDoc(tableRef, {
+      const cap = Number(selectedTable.capacity || selectedTable.seatingCapacity || 4);
+      const safeGuestsCount = Math.min(cap, Math.max(1, Number(guestsCount) || cap));
+      const safeSection = tableSectionInput || selectedTable.section || (selectedTable as any).floorSection || 'Indoor Main';
+      const safeNotes = (tableNotesInput || '').trim();
+
+      const patchData = {
         status: 'occupied',
+        tableStatus: 'Occupied',
+        subStatus: 'seated',
+        diningStatus: 'seated',
+        customerPresent: true,
+        seatedAt: selectedTable.seatedAt || nowIso,
+        occupiedAt: selectedTable.occupiedAt || nowIso,
+        lastActiveAt: nowIso,
         assignedWaiterId: user.uid,
         assignedWaiterName: user.displayName || user.email || 'Waiter',
-        guestsCount: guestsCount,
-        tableNotes: tableNotesInput,
-        section: tableSectionInput
-      });
+        guestsCount: safeGuestsCount,
+        tableNotes: safeNotes,
+        section: safeSection,
+        updatedAt: nowIso
+      };
+
+      await updateDoc(tableRef, patchData);
+
+      // Instant optimistic state update
+      setTables(prev => prev.map(t => t.id === selectedTable.id ? { ...t, ...patchData } : t));
+
       toast.success(`Guests checked in on Table ${selectedTable.number}.`);
       
       setShift(prev => ({
@@ -1307,7 +1343,7 @@ export const WaiterMatrix: React.FC = () => {
         tableId: selectedTable.id,
         tableNumber: selectedTable.number,
         title: 'Customer Seated',
-        description: `Table ${selectedTable.number} occupies ${guestsCount} guests. Notes: ${tableNotesInput}`
+        description: `Table ${selectedTable.number} occupies ${safeGuestsCount} guests. Notes: ${safeNotes}`
       });
 
       setSelectedTable(null);
@@ -2948,7 +2984,11 @@ export const WaiterMatrix: React.FC = () => {
                     }`}
                   >
                     <span className="w-2 h-2 rounded-full bg-[#16A34A]" />
-                    <span>Available ({tables.filter(t => !findActiveOrderForTable(t, orders) && !isTableCleaning(t.status || (t as any).tableStatus) && !isTableBrowsing(t, 5)).length})</span>
+                    <span>Available ({tables.filter(t => {
+                      const activeOrders = findAllActiveOrdersForTable(t, orders);
+                      const raw = t.status || (t as any).tableStatus;
+                      return activeOrders.length === 0 && !isTableCleaning(raw) && !isTableSeated(t, false) && !isTableBrowsing(t, 5);
+                    }).length})</span>
                   </button>
 
                   <button
@@ -2960,7 +3000,11 @@ export const WaiterMatrix: React.FC = () => {
                     }`}
                   >
                     <span className="w-2 h-2 rounded-full bg-[#2563EB]" />
-                    <span>Browsing ({tables.filter(t => !findActiveOrderForTable(t, orders) && !isTableCleaning(t.status || (t as any).tableStatus) && isTableBrowsing(t, 5)).length})</span>
+                    <span>Browsing ({tables.filter(t => {
+                      const activeOrders = findAllActiveOrdersForTable(t, orders);
+                      const raw = t.status || (t as any).tableStatus;
+                      return activeOrders.length === 0 && !isTableCleaning(raw) && !isTableSeated(t, false) && isTableBrowsing(t, 5);
+                    }).length})</span>
                   </button>
 
                   <button
@@ -2972,7 +3016,10 @@ export const WaiterMatrix: React.FC = () => {
                     }`}
                   >
                     <span className="w-2 h-2 rounded-full bg-[#F59E0B]" />
-                    <span>Dining ({tables.filter(t => Boolean(findActiveOrderForTable(t, orders))).length})</span>
+                    <span>Occupied ({tables.filter(t => {
+                      const activeOrders = findAllActiveOrdersForTable(t, orders);
+                      return activeOrders.length > 0 || isTableSeated(t, false);
+                    }).length})</span>
                   </button>
 
                   <button
@@ -3038,17 +3085,18 @@ export const WaiterMatrix: React.FC = () => {
                       const secMatch = String(t.section || '').toLowerCase().includes(q);
                       if (!numMatch && !secMatch) return false;
                     }
-                    const activeOrder = findActiveOrderForTable(t, orders);
+                    const activeOrders = findAllActiveOrdersForTable(t, orders);
                     const rawStatus = t.status || (t as any).tableStatus;
                     const isClean = isTableCleaning(rawStatus);
-                    const isDin = Boolean(activeOrder);
-                    const isBrowse = !isDin && !isClean && isTableBrowsing(t, 5);
-                    const isAvail = !isDin && !isClean && !isBrowse;
+                    const isDin = activeOrders.length > 0;
+                    const isSeated = !isDin && !isClean && isTableSeated(t, false);
+                    const isBrowse = !isDin && !isClean && !isSeated && isTableBrowsing(t, 5);
+                    const isAvail = !isDin && !isClean && !isSeated && !isBrowse;
 
                     switch (floorFilter) {
                       case 'available': return isAvail;
                       case 'browsing': return isBrowse;
-                      case 'occupied': return isDin;
+                      case 'occupied': return isDin || isSeated;
                       case 'partially_ready': return getTableItemServingMetrics(t, orders).hasReady;
                       case 'cleaning': return isClean;
                       case 'my_tables': return t.assignedWaiterId === user?.uid;
@@ -3063,8 +3111,9 @@ export const WaiterMatrix: React.FC = () => {
                     const latestOrderForTable = activeOrdersForTable[activeOrdersForTable.length - 1];
                     const isOccupiedWithOrder = activeOrdersForTable.length > 0;
                     const isCleaning = isTableCleaning(rawStatus);
-                    const isBrowsing = !isOccupiedWithOrder && !isCleaning && isTableBrowsing(table, 5);
-                    const isAvailable = !isOccupiedWithOrder && !isCleaning && !isBrowsing;
+                    const isOccupiedWithoutOrder = !isOccupiedWithOrder && !isCleaning && isTableSeated(table, false);
+                    const isBrowsing = !isOccupiedWithOrder && !isCleaning && !isOccupiedWithoutOrder && isTableBrowsing(table, 5);
+                    const isAvailable = !isOccupiedWithOrder && !isCleaning && !isOccupiedWithoutOrder && !isBrowsing;
 
                     const roundsCount = activeOrdersForTable.length;
                     const isMultiRound = roundsCount > 1;
@@ -3177,6 +3226,10 @@ export const WaiterMatrix: React.FC = () => {
                               ) : isBrowsing ? (
                                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-[#EAF2FD] text-[#2563EB]">
                                   <span className="w-2 h-2 rounded-full bg-[#2563EB]" /> Browsing
+                                </span>
+                              ) : isOccupiedWithoutOrder ? (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold bg-[#FEF7EC] text-[#D97706] border border-[#FDE6B8]">
+                                  <span className="w-2 h-2 rounded-full bg-[#F59E0B] animate-pulse" /> Occupied
                                 </span>
                               ) : isOccupiedWithOrder ? (
                                 metrics.isPartiallyReady ? (
@@ -3338,6 +3391,32 @@ export const WaiterMatrix: React.FC = () => {
                                   </div>
                                 )}
                               </div>
+                            ) : isOccupiedWithoutOrder ? (
+                              <div className="bg-[#FEF7EC] border border-[#FDE6B8] p-3 rounded-xl space-y-2">
+                                <div className="flex items-center justify-between text-xs">
+                                  <span className="font-extrabold text-[#D97706] flex items-center gap-1.5">
+                                    <Users className="w-3.5 h-3.5 text-[#D97706]" />
+                                    <span>{table.guestsCount || table.capacity || table.seatingCapacity || 4} Guests Seated</span>
+                                  </span>
+                                  <span className="text-[10px] font-bold text-[#D97706] bg-white border border-[#FDE6B8] px-2 py-0.5 rounded-md shadow-2xs">
+                                    Awaiting Order
+                                  </span>
+                                </div>
+                                <div className="text-xs font-bold text-[#18201D] truncate flex items-center gap-1.5">
+                                  <Armchair className="w-3.5 h-3.5 text-[#D97706]" />
+                                  <span className="truncate">{table.customerName || 'Diners at Table'}</span>
+                                </div>
+                                <div className="text-[11px] text-[#71717A] flex items-center justify-between pt-0.5">
+                                  <span>{seatedElapsedMins !== null ? `Seated ~${seatedElapsedMins}m ago` : 'Just seated'}</span>
+                                  <span className="font-semibold text-[#D97706]">Ready for Waiter</span>
+                                </div>
+                                {table.tableNotes && (
+                                  <div className="text-[10.5px] text-[#92400E] bg-white/80 border border-[#FDE6B8] px-2 py-1 rounded-lg truncate">
+                                    <span className="font-bold">Note: </span>
+                                    <span>{table.tableNotes}</span>
+                                  </div>
+                                )}
+                              </div>
                             ) : (
                               <div className="py-2.5 px-0.5 space-y-1.5">
                                 <div className="flex items-center gap-2 text-sm font-bold text-[#16A34A]">
@@ -3345,7 +3424,7 @@ export const WaiterMatrix: React.FC = () => {
                                   <span>Ready for Dining</span>
                                 </div>
                                 <div className="text-xs text-[#71717A]">
-                                  Capacity: <span className="font-medium text-[#18201D]">{table.seatingCapacity || table.capacity || 4} seats</span>
+                                  Capacity: <span className="font-medium text-[#18201D]">{table.capacity || table.seatingCapacity || 4} seats</span>
                                 </div>
                               </div>
                             )}
@@ -3396,27 +3475,37 @@ export const WaiterMatrix: React.FC = () => {
                           ) : isBrowsing ? (
                             <>
                               <button
-                                onClick={() => {
-                                  setOrderTable(table);
-                                  setCart({});
-                                  setCustomerName(table.customerName || '');
-                                  setCustomerPhone(table.customerPhone || '');
-                                }}
+                                onClick={() => openQuickOrderModal(table)}
                                 className="flex-1 py-2 px-3 rounded-xl bg-[#C85A3F] hover:bg-[#B34E35] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                               >
                                 <span>+ Punch Order</span>
                               </button>
                               <button
-                                onClick={() => {
-                                  setSelectedTable(table);
-                                  setGuestsCount(table.guestsCount || table.seatingCapacity || 2);
-                                  setTableSectionInput(table.section || 'Indoor Main');
-                                  setTableNotesInput(table.tableNotes || '');
-                                }}
+                                onClick={() => openSeatingModal(table)}
                                 className="flex-1 py-2 px-3 rounded-xl bg-white hover:bg-stone-50 border border-[#E3DED5] text-[#18201D] font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                               >
                                 <User className="w-3.5 h-3.5 text-[#5F6875]" />
                                 <span>Seat Guest</span>
+                              </button>
+                            </>
+                          ) : isOccupiedWithoutOrder ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => openQuickOrderModal(table)}
+                                className="flex-1 py-2.5 px-3 rounded-xl bg-[#183B2B] hover:bg-[#122c20] text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
+                              >
+                                <Utensils className="w-3.5 h-3.5 text-white" />
+                                <span>+ Take Order</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openSeatingModal(table)}
+                                className="py-2.5 px-3 rounded-xl bg-white hover:bg-stone-50 border border-[#E3DED5] text-[#18201D] font-bold text-xs flex items-center justify-center gap-1 shadow-xs transition-colors cursor-pointer"
+                                title="Adjust seating details"
+                              >
+                                <Users className="w-3.5 h-3.5 text-[#5F6875]" />
+                                <span>{table.guestsCount || table.capacity || table.seatingCapacity || 4}p</span>
                               </button>
                             </>
                           ) : isOccupiedWithOrder && activeOrderForTable ? (
@@ -3518,24 +3607,14 @@ export const WaiterMatrix: React.FC = () => {
                           ) : (
                             <>
                               <button
-                                onClick={() => {
-                                  setSelectedTable(table);
-                                  setGuestsCount(table.seatingCapacity || 4);
-                                  setTableSectionInput(table.section || 'Indoor Main');
-                                  setTableNotesInput('');
-                                }}
+                                onClick={() => openSeatingModal(table)}
                                 className="flex-1 py-2 px-3 rounded-xl bg-[#183B2B] hover:bg-[#122c20] text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer"
                               >
                                 <User className="w-3.5 h-3.5 text-white" />
                                 <span>Seat Guests</span>
                               </button>
                               <button
-                                onClick={() => {
-                                  setOrderTable(table);
-                                  setCart({});
-                                  setCustomerName('');
-                                  setCustomerPhone('');
-                                }}
+                                onClick={() => openQuickOrderModal(table)}
                                 className="py-2 px-3 rounded-xl bg-[#FDF0E6] hover:bg-[#F9E2D2] text-[#C85A3F] font-bold text-xs flex items-center justify-center gap-1 shadow-xs transition-colors cursor-pointer"
                                 title="Punch Walk-in Order"
                               >
@@ -3828,7 +3907,7 @@ export const WaiterMatrix: React.FC = () => {
                     Seating Setup — Table {selectedTable.number}
                   </h3>
                   <p className="text-xs font-semibold text-[#5F6875]">
-                    {selectedTable.section || 'Indoor Main'} • Capacity: {selectedTable.seatingCapacity || 4} Guests
+                    {selectedTable.section || 'Indoor Main'} • Capacity: {selectedTable.capacity || selectedTable.seatingCapacity || 4} Guests
                   </p>
                 </div>
               </div>
@@ -3849,7 +3928,7 @@ export const WaiterMatrix: React.FC = () => {
                     Number of Guests
                   </label>
                   <span className="text-xs font-bold text-[#5F6875] bg-[#FAF8F5] px-2.5 py-0.5 rounded-md border border-[#E3DED5]">
-                    Max: {(selectedTable.seatingCapacity || 4) + 4}
+                    Max: {Number(selectedTable.capacity || selectedTable.seatingCapacity || 4)}
                   </span>
                 </div>
 
@@ -3871,29 +3950,31 @@ export const WaiterMatrix: React.FC = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setGuestsCount(c => Math.min((selectedTable.seatingCapacity || 4) + 4, c + 1))}
+                    onClick={() => setGuestsCount(c => Math.min(Number(selectedTable.capacity || selectedTable.seatingCapacity || 4), c + 1))}
                     className="w-12 h-12 border border-[#E3DED5] bg-white hover:bg-[#F0EBE1] rounded-xl text-2xl font-black flex items-center justify-center text-[#18201D] shadow-xs cursor-pointer active:scale-95 transition-all"
                   >
                     +
                   </button>
                 </div>
                 <p className="text-[11px] text-[#5F6875] font-semibold">
-                  Standard table capacity is {selectedTable.seatingCapacity || 4} guests.
+                  Standard table capacity is {selectedTable.capacity || selectedTable.seatingCapacity || 4} guests.
                 </p>
               </div>
 
               {/* Floor Section */}
               <div className="space-y-1.5">
-                <label className="text-xs font-black uppercase tracking-wider text-[#18201D]">
-                  Floor Section
-                </label>
-                <input
-                  type="text"
-                  value={tableSectionInput}
-                  onChange={e => setTableSectionInput(e.target.value)}
-                  placeholder="Main Room / Patio / Bar"
-                  className="w-full px-4 py-2.5 bg-[#FAF8F5] border border-[#E3DED5] text-[#18201D] font-medium placeholder-[#9CA3AF] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#C85A3F]/30 focus:border-[#C85A3F] transition-all"
-                />
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black uppercase tracking-wider text-[#18201D]">
+                    Floor Section
+                  </label>
+                  <span className="text-[10.5px] font-bold text-[#16A34A] bg-[#EAF6ED] px-2 py-0.5 rounded-md border border-[#CDE9D5] flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" /> Auto-Selected
+                  </span>
+                </div>
+                <div className="w-full px-4 py-2.5 bg-[#FAF8F5] border border-[#E3DED5] text-[#18201D] font-bold rounded-xl text-sm flex items-center gap-2 select-none shadow-2xs">
+                  <MapPin className="w-4 h-4 text-[#C85A3F] shrink-0" />
+                  <span className="text-[#18201D]">{tableSectionInput || selectedTable.section || (selectedTable as any).floorSection || 'Indoor Main'}</span>
+                </div>
               </div>
 
               {/* Special Seating Notes */}
