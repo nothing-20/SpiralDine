@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { IOrder, ITable } from '../../../types';
 import { IOrderItem, TItemPreparationStatus } from '../../../shared/domain/orders/types';
 import { formatPrice } from '../../../utils/format';
@@ -77,6 +78,37 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
   });
 
   const [isServing, setIsServing] = useState(false);
+
+  // Focus and keyboard management refs
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const previousActiveElementRef = useRef<HTMLElement | null>(null);
+
+  // Manage focus and keyboard Escape when confirmation dialog is open
+  useEffect(() => {
+    if (!confirmDialog.isOpen) return;
+
+    previousActiveElementRef.current = document.activeElement as HTMLElement;
+    const timer = setTimeout(() => {
+      confirmButtonRef.current?.focus();
+    }, 50);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (!isServing) {
+          setConfirmDialog({ isOpen: false, itemIndices: [], isServingAll: false });
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('keydown', handleKeyDown);
+      previousActiveElementRef.current?.focus();
+    };
+  }, [confirmDialog.isOpen, isServing]);
 
   // Sync selected order if orders array updates
   useEffect(() => {
@@ -187,9 +219,23 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
 
   // Serve confirmed action
   const handleExecuteServe = async () => {
-    if (!user?.tenantId || !currentOrder) return;
-    const indicesToServe = confirmDialog.itemIndices;
-    if (indicesToServe.length === 0) return;
+    if (!user?.tenantId || !currentOrder || isServing) return;
+    const rawIndices = confirmDialog.itemIndices;
+    if (rawIndices.length === 0) return;
+
+    // Re-validate that selected items are still eligible (not already served)
+    const eligibleIndicesToServe = rawIndices.filter(idx => {
+      const item = currentOrder.items[idx];
+      if (!item) return false;
+      const isAlreadyServed = (item as any).servingStatus === 'SERVED' || item.status === 'SERVED';
+      return !isAlreadyServed;
+    });
+
+    if (eligibleIndicesToServe.length === 0) {
+      toast.error('The selected item(s) are already marked as served.');
+      setConfirmDialog({ isOpen: false, itemIndices: [], isServingAll: false });
+      return;
+    }
 
     setIsServing(true);
     try {
@@ -198,7 +244,7 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
       const waiterName = user.displayName || 'Floor Waiter';
       const servedDishNames: string[] = [];
 
-      indicesToServe.forEach(idx => {
+      eligibleIndicesToServe.forEach(idx => {
         const item = { ...updatedItems[idx] };
         item.servingStatus = 'SERVED';
         item.status = 'SERVED';
@@ -221,7 +267,7 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
       const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderDocId);
       const timelineEvent = {
         type: 'SERVED' as const,
-        title: `Served ${indicesToServe.length} item(s) to Table ${table.number}`,
+        title: `Served ${eligibleIndicesToServe.length} item(s) to Table ${table.number}`,
         description: `Dishes served: ${servedDishNames.join(', ')}`,
         performedBy: waiterName,
         timestamp,
@@ -248,13 +294,13 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
         performedByRole: 'waiter',
         orderId: currentOrder.orderId,
         title: `Food Served to Table ${table.number}`,
-        description: `Waiter ${waiterName} marked ${indicesToServe.length} dish(es) as SERVED: ${servedDishNames.join(', ')}.`,
+        description: `Waiter ${waiterName} marked ${eligibleIndicesToServe.length} dish(es) as SERVED: ${servedDishNames.join(', ')}.`,
       });
 
       toast.success(
-        indicesToServe.length === 1
+        eligibleIndicesToServe.length === 1
           ? `✓ Served "${servedDishNames[0]}" to Table ${table.number}!`
-          : `✓ Served ${indicesToServe.length} items to Table ${table.number}!`
+          : `✓ Served ${eligibleIndicesToServe.length} items to Table ${table.number}!`
       );
 
       // Clear selection and close confirmation
@@ -271,13 +317,13 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
   if (!isOpen) return null;
 
   if (!currentOrder) {
-    return (
+    const emptyContent = (
       <>
-        <div onClick={onClose} className="fixed inset-0 bg-black/40 backdrop-blur-2xs z-50 transition-opacity" />
-        <aside className="fixed inset-y-0 right-0 z-50 w-full sm:w-[500px] lg:w-[540px] bg-white border-l border-[#E3DED5] shadow-2xl flex flex-col p-6 animate-in slide-in-from-right duration-200">
+        <div onClick={onClose} className="fixed inset-0 bg-black/40 backdrop-blur-2xs z-40 transition-opacity cursor-pointer" />
+        <aside className="fixed inset-y-0 right-0 z-50 w-full sm:w-[500px] lg:w-[540px] bg-white border-l border-[#E3DED5] shadow-2xl flex flex-col p-6 animate-in slide-in-from-right duration-200 pointer-events-auto">
           <div className="flex justify-between items-center pb-4 border-b border-[#F0ECE1]">
             <h3 className="font-extrabold text-base text-[#18201D]">Table {table?.number}</h3>
-            <button onClick={onClose} className="p-1 rounded-full hover:bg-stone-100 transition-colors">
+            <button onClick={onClose} className="p-1 rounded-full hover:bg-stone-100 transition-colors cursor-pointer">
               <X className="w-5 h-5 text-stone-500" />
             </button>
           </div>
@@ -289,6 +335,7 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
         </aside>
       </>
     );
+    return typeof document !== 'undefined' ? createPortal(emptyContent, document.body) : emptyContent;
   }
 
   // Derive order relative timestamp
@@ -306,17 +353,17 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
 
   const totalBill = Number(currentOrder.total || currentOrder.totalAmount || 0);
 
-  return (
+  const drawerContent = (
     <>
-      {/* Backdrop (visible on all screens to click outside and focus on drawer) */}
+      {/* Backdrop (visible on all screens to click outside and focus on drawer, z-40) */}
       <div
         onClick={onClose}
-        className="fixed inset-0 bg-black/40 backdrop-blur-2xs z-50 transition-opacity"
+        className="fixed inset-0 bg-black/40 backdrop-blur-2xs z-40 transition-opacity cursor-pointer"
       />
 
-      {/* Drawer Container (Right-side slide-over) */}
+      {/* Drawer Container (Right-side slide-over, z-50) */}
       <aside
-        className="fixed inset-y-0 right-0 z-50 w-full sm:w-[500px] lg:w-[540px] bg-white border-l border-[#E3DED5] shadow-2xl flex flex-col text-left font-sans animate-in slide-in-from-right duration-200"
+        className="fixed inset-y-0 right-0 z-50 w-full sm:w-[500px] lg:w-[540px] bg-white border-l border-[#E3DED5] shadow-2xl flex flex-col text-left font-sans animate-in slide-in-from-right duration-200 pointer-events-auto"
       >
         {/* ── 1. Drawer Header ────────────────────────────────────── */}
         <div className="p-4 sm:p-5 border-b border-[#F0ECE1] bg-[#FAF8F5] flex flex-col gap-3">
@@ -766,24 +813,45 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
         </div>
       </aside>
 
-      {/* ── Confirmation Modal Before Serving ──────────────────────── */}
+      {/* ── Confirmation Modal Before Serving (z-[100] above drawer z-50) ──────────────────────── */}
       {confirmDialog.isOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50 backdrop-blur-2xs p-4">
-          <div className="bg-white border border-[#E3DED5] rounded-2xl w-full max-w-sm shadow-2xl p-5 text-left space-y-4 animate-in fade-in zoom-in-95 duration-150">
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-modal-title"
+        >
+          {/* Modal Backdrop: z-[90] */}
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs z-[90] transition-opacity cursor-pointer"
+            onClick={() => {
+              if (!isServing) {
+                setConfirmDialog({ isOpen: false, itemIndices: [], isServingAll: false });
+              }
+            }}
+          />
+
+          {/* Modal Dialog Card: z-[100] with stopPropagation to prevent accidental closing */}
+          <div
+            className="relative z-[100] bg-white border border-[#E3DED5] rounded-2xl w-full max-w-sm sm:max-w-md shadow-2xl p-5 sm:p-6 text-left space-y-4 animate-in fade-in zoom-in-95 duration-150 pointer-events-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-start justify-between">
               <div className="w-10 h-10 rounded-xl bg-[#EAF6ED] text-[#16A34A] flex items-center justify-center shrink-0">
                 <Utensils className="w-5 h-5" />
               </div>
               <button
-                onClick={() => setConfirmDialog({ isOpen: false, itemIndices: [], isServingAll: false })}
-                className="w-7 h-7 rounded-lg text-stone-400 hover:text-stone-700 flex items-center justify-center"
+                type="button"
+                onClick={() => !isServing && setConfirmDialog({ isOpen: false, itemIndices: [], isServingAll: false })}
+                className="w-7 h-7 rounded-lg text-stone-400 hover:text-stone-700 flex items-center justify-center transition-colors cursor-pointer"
+                title="Close dialog"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             <div>
-              <h3 className="font-bold text-base text-[#18201D] leading-tight">
+              <h3 id="confirm-modal-title" className="font-bold text-base text-[#18201D] leading-tight">
                 Confirm Food Serving
               </h3>
               <p className="text-xs text-[#71717A] mt-1">
@@ -792,12 +860,12 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
             </div>
 
             {/* List of items being served */}
-            <div className="bg-[#FAF8F5] border border-[#E8E3DA] rounded-xl p-3 max-h-40 overflow-y-auto space-y-1.5">
+            <div className="bg-[#FAF8F5] border border-[#E8E3DA] rounded-xl p-3 max-h-48 overflow-y-auto space-y-1.5">
               {confirmDialog.itemIndices.map(idx => {
                 const item = currentOrder.items[idx];
                 return (
                   <div key={idx} className="flex items-center justify-between text-xs font-semibold text-[#18201D]">
-                    <span className="truncate">{item?.name}</span>
+                    <span className="truncate pr-2">{item?.name}</span>
                     <span className="text-[#71717A] text-[11px] font-mono shrink-0">×{item?.count || 1}</span>
                   </div>
                 );
@@ -807,20 +875,26 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
             <div className="flex items-center space-x-2 pt-2">
               <button
                 type="button"
-                onClick={() => setConfirmDialog({ isOpen: false, itemIndices: [], isServingAll: false })}
+                ref={cancelButtonRef}
+                onClick={() => !isServing && setConfirmDialog({ isOpen: false, itemIndices: [], isServingAll: false })}
                 disabled={isServing}
-                className="flex-1 py-2.5 rounded-xl border border-[#E3DED5] bg-white hover:bg-stone-50 font-bold text-xs text-[#71717A] transition-colors"
+                className="flex-1 py-2.5 rounded-xl border border-[#E3DED5] bg-white hover:bg-stone-50 disabled:opacity-40 font-bold text-xs text-[#71717A] transition-colors cursor-pointer"
               >
                 Cancel
               </button>
 
               <button
                 type="button"
-                onClick={handleExecuteServe}
+                ref={confirmButtonRef}
+                onClick={() => !isServing && handleExecuteServe()}
                 disabled={isServing}
-                className="flex-1 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] text-white font-bold text-xs shadow-xs transition-all flex items-center justify-center space-x-1"
+                className="flex-1 py-2.5 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:scale-98 disabled:opacity-50 text-white font-bold text-xs shadow-xs transition-all flex items-center justify-center space-x-1.5 cursor-pointer"
               >
-                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                {isServing ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                )}
                 <span>{isServing ? 'Serving...' : 'Confirm & Serve'}</span>
               </button>
             </div>
@@ -829,6 +903,8 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
       )}
     </>
   );
+
+  return typeof document !== 'undefined' ? createPortal(drawerContent, document.body) : drawerContent;
 };
 
 export default WaiterOrderDetailsDrawer;
