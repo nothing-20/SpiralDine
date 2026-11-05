@@ -215,34 +215,56 @@ const getNormalizedTableNum = (val?: string | number): string => {
 };
 
 export const findAllActiveOrdersForTable = (table: ITable, orderList: IOrder[]): IOrder[] => {
-  // If the table is explicitly Available or empty in Firestore and has no activeOrderId bound to it,
-  // do NOT resurrect it as 'occupied' using a fallback tableNumber match against historical orders
-  const isTableExplicitlyAvailable = (table.status || '').toLowerCase() === 'available' || (table.status || '').toLowerCase() === 'empty';
-  if (isTableExplicitlyAvailable && !table.activeOrderId && !table.currentOrderId) {
-    return [];
-  }
-
   const tableCleanNum = getNormalizedTableNum(table.number || (table as any).tableNumber || table.tableName || table.name);
-  
+  const isTableExplicitlyAvailable = (table.status || '').toLowerCase() === 'available' || (table.status || '').toLowerCase() === 'empty';
+
   // 1. Direct matched active orders for this table
   const matched = orderList.filter(o => {
     if (!isOrderActive(o)) return false;
-    if (table.activeOrderId && (o.orderId === table.activeOrderId || o.id === table.activeOrderId)) return true;
-    if (table.currentOrderId && (o.orderId === table.currentOrderId || o.id === table.currentOrderId)) return true;
-    if (o.tableId && (o.tableId === table.id || o.tableId === (table as any).tableId)) return true;
 
-    // Direct link to table's bound activeOrderId as primaryOrderId
-    if (table.activeOrderId && (o as any).primaryOrderId === table.activeOrderId) return true;
+    // Direct explicit links to table
+    const isDirectDocMatch = 
+      (table.activeOrderId && (o.orderId === table.activeOrderId || o.id === table.activeOrderId)) ||
+      (table.currentOrderId && (o.orderId === table.currentOrderId || o.id === table.currentOrderId)) ||
+      (o.tableId && (o.tableId === table.id || o.tableId === (table as any).tableId)) ||
+      (table.activeOrderId && (o as any).primaryOrderId === table.activeOrderId);
 
-    // Only match by tableNumber if order was placed recently (within active 18h operational window)
-    if (o.createdAt) {
-      const ageMs = Date.now() - new Date(o.createdAt).getTime();
-      if (ageMs > 18 * 60 * 60 * 1000) return false;
+    if (isDirectDocMatch) return true;
+
+    // Match by table number
+    const orderCleanNum = getNormalizedTableNum(o.tableNumber || (o as any).table);
+    if (!tableCleanNum || !orderCleanNum || tableCleanNum !== orderCleanNum) {
+      return false;
     }
 
-    const orderCleanNum = getNormalizedTableNum(o.tableNumber || (o as any).table);
-    if (tableCleanNum && orderCleanNum && tableCleanNum === orderCleanNum) return true;
-    return false;
+    // Guard: If table was explicitly marked Available or Empty, only match active orders that were placed
+    // recently and are actively in-flight (kitchen prep, food ready, active dining).
+    // Do NOT resurrect an available table if the order is already served/completed or placed before table cleaning.
+    if (isTableExplicitlyAvailable && !table.activeOrderId && !table.currentOrderId) {
+      const oStatus = (o.status || '').toUpperCase();
+      // If order is already completely served/dining-completed, do not resurrect an available table
+      if (oStatus === 'SERVED' || oStatus === 'DELIVERED' || oStatus === 'DINING_COMPLETED') {
+        return false;
+      }
+
+      // If table has a recorded cleaning timestamp, reject orders created before cleaning completed
+      const cleanTime = table.cleaningCompletedAt || (table as any).availableSince;
+      if (cleanTime && o.createdAt) {
+        const orderTime = new Date(o.createdAt).getTime();
+        const cleanedTime = new Date(cleanTime).getTime();
+        if (!isNaN(orderTime) && !isNaN(cleanedTime) && orderTime <= cleanedTime) {
+          return false;
+        }
+      }
+
+      // Reject stale orders older than 12 hours
+      if (o.createdAt) {
+        const ageMs = Date.now() - new Date(o.createdAt).getTime();
+        if (ageMs > 12 * 60 * 60 * 1000) return false;
+      }
+    }
+
+    return true;
   });
 
   // 2. Also link add-on orders that share the primaryOrderId of any matched order
@@ -657,6 +679,43 @@ export const WaiterMatrix: React.FC = () => {
 
     return () => clearInterval(sweepInterval);
   }, [user?.tenantId]);
+
+  // Auto-heal: If an active in-flight kitchen/dining order exists for a table that is still marked 'Available' in Firestore,
+  // synchronize the table document so Firestore stays authoritative and up-to-date across all clients.
+  useEffect(() => {
+    if (!user?.tenantId || tables.length === 0 || orders.length === 0) return;
+
+    tables.forEach(table => {
+      const isAvailable = (table.status || '').toLowerCase() === 'available' || (table.status || '').toLowerCase() === 'empty';
+      if (!isAvailable || table.activeOrderId) return;
+
+      const activeOrders = findAllActiveOrdersForTable(table, orders);
+      if (activeOrders.length > 0) {
+        const primaryOrder = activeOrders[0];
+        const primaryOrderId = primaryOrder.orderId || primaryOrder.id;
+        const oStatus = (primaryOrder.status || '').toUpperCase();
+
+        if (['NEW', 'PLACED', 'ACCEPTED', 'CHEF_ASSIGNED', 'PREPARING', 'READY', 'PARTIALLY_READY', 'PICKED_UP'].includes(oStatus)) {
+          const tableRef = doc(db, 'restaurants', user.tenantId, 'tables', table.id);
+          const nowIso = new Date().toISOString();
+          setDoc(tableRef, {
+            status: 'occupied',
+            tableStatus: 'Occupied',
+            subStatus: 'dining',
+            diningStatus: 'ordered',
+            customerPresent: true,
+            activeOrderId: primaryOrderId,
+            currentOrderId: primaryOrderId,
+            lastOrderAt: primaryOrder.createdAt || nowIso,
+            customerName: primaryOrder.customerName || (primaryOrder as any).userName || 'Guest Diner',
+            updatedAt: nowIso,
+          }, { merge: true }).catch(err => {
+            console.warn('[WaiterMatrix] Auto-sync table status notice:', err);
+          });
+        }
+      }
+    });
+  }, [tables, orders, user?.tenantId]);
 
   useEffect(() => {
     if (isLoading || !user?.tenantId || !shift.isActive) return;

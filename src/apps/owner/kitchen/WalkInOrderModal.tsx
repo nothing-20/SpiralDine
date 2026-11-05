@@ -85,13 +85,28 @@ export const WalkInOrderModal: React.FC<IWalkInOrderModalProps> = ({
 
       const totalAmount = orderItems.reduce((acc, item) => acc + (item.price * item.count), 0);
 
+      let resolvedTableId = `TBL-${tableNumber.trim() || 'Walk-in'}`;
+      let resolvedTableName = `Table ${tableNumber.trim() || 'Walk-in'}`;
+
+      if (customerType === 'dine-in' && tableNumber.trim()) {
+        try {
+          const { tableService } = await import('../../../shared/services/tableService');
+          const tableMatch = await tableService.findTableByNumberOrId(user.tenantId, tableNumber.trim());
+          if (tableMatch) {
+            resolvedTableId = tableMatch.id;
+            resolvedTableName = tableMatch.table.tableName || `Table ${tableMatch.table.number || tableNumber.trim()}`;
+          }
+        } catch (_) {}
+      }
+
       const orderDoc = {
         id: generatedOrderId,
         orderId: generatedOrderId,
         tenantId: user.tenantId,
         branchId: 'main',
         tableNumber: tableNumber.trim() || 'Walk-in',
-        tableId: `TBL-${tableNumber.trim() || 'Walk-in'}`,
+        tableId: resolvedTableId,
+        tableName: resolvedTableName,
         customerName: customerName.trim() || 'Walk-in Guest',
         customerType,
         status: 'PLACED',
@@ -114,6 +129,25 @@ export const WalkInOrderModal: React.FC<IWalkInOrderModalProps> = ({
       };
 
       await setDoc(doc(db, 'restaurants', user.tenantId, 'orders', generatedOrderId), orderDoc);
+
+      // If dine-in, synchronize table occupancy and link active order
+      if (customerType === 'dine-in' && tableNumber.trim()) {
+        try {
+          const { tableService } = await import('../../../shared/services/tableService');
+          await tableService.setTableOccupiedWithOrder(
+            user.tenantId,
+            tableNumber.trim(),
+            generatedOrderId,
+            {
+              total: totalAmount,
+              itemsCount: orderItems.length,
+              customerName: customerName.trim() || 'Walk-in Guest',
+            }
+          );
+        } catch (tableErr) {
+          console.warn('[WalkInOrderModal] Table occupancy update notice:', tableErr);
+        }
+      }
 
       toast.success(`Order #${generatedOrderId} placed successfully for Table ${tableNumber}!`);
       setSelectedItems({});
