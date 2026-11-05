@@ -3525,10 +3525,15 @@ export const WaiterMatrix: React.FC = () => {
                             ) : isOccupiedWithoutOrder ? (
                               <div className="bg-[#FEF7EC] border border-[#FDE6B8] p-3 rounded-xl space-y-2">
                                 <div className="flex items-center justify-between text-xs">
-                                  <span className="font-extrabold text-[#D97706] flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => openSeatingModal(table)}
+                                    className="font-extrabold text-[#D97706] hover:text-[#B45309] flex items-center gap-1.5 hover:underline cursor-pointer transition-colors"
+                                    title="Click to adjust guest seating"
+                                  >
                                     <Users className="w-3.5 h-3.5 text-[#D97706]" />
                                     <span>{table.guestsCount || table.capacity || table.seatingCapacity || 4} Guests Seated</span>
-                                  </span>
+                                  </button>
                                   <span className="text-[10px] font-bold text-[#D97706] bg-white border border-[#FDE6B8] px-2 py-0.5 rounded-md shadow-2xs">
                                     Awaiting Order
                                   </span>
@@ -3540,18 +3545,6 @@ export const WaiterMatrix: React.FC = () => {
                                 <div className="text-[11px] text-[#71717A] flex items-center justify-between pt-0.5">
                                   <span>{seatedElapsedMins !== null ? `Seated ~${seatedElapsedMins}m ago` : 'Just seated'}</span>
                                   <span className="font-semibold text-[#D97706]">Ready for Waiter</span>
-                                </div>
-                                <div className="pt-1.5 flex items-center justify-between border-t border-[#FDE6B8]/70">
-                                  <span className="text-[10.5px] text-[#92400E] font-medium">Customer left or changed table?</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleReleaseTable(table)}
-                                    className="text-[10.5px] font-bold text-red-600 hover:text-red-700 hover:underline flex items-center gap-0.5 cursor-pointer"
-                                    title="Cancel check-in and reset to Available"
-                                  >
-                                    <UserMinus className="w-3 h-3 text-red-600" />
-                                    <span>Reset Table</span>
-                                  </button>
                                 </div>
                                 {table.tableNotes && (
                                   <div className="text-[10.5px] text-[#92400E] bg-white/80 border border-[#FDE6B8] px-2 py-1 rounded-lg truncate">
@@ -3636,27 +3629,18 @@ export const WaiterMatrix: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => openQuickOrderModal(table)}
-                                className="flex-1 py-2.5 px-3 rounded-xl bg-[#183B2B] hover:bg-[#122c20] text-white font-black text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-95 transition-all cursor-pointer"
+                                className="flex-1 py-2 px-3 rounded-xl bg-[#183B2B] hover:bg-[#122c20] text-white font-bold text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shadow-xs active:scale-95 transition-all cursor-pointer"
                               >
-                                <Utensils className="w-3.5 h-3.5 text-white" />
+                                <Utensils className="w-3.5 h-3.5 text-white shrink-0" />
                                 <span>+ Take Order</span>
                               </button>
                               <button
                                 type="button"
-                                onClick={() => openSeatingModal(table)}
-                                className="py-2.5 px-2.5 rounded-xl bg-white hover:bg-stone-50 border border-[#E3DED5] text-[#18201D] font-bold text-xs flex items-center justify-center gap-1 shadow-xs transition-colors cursor-pointer"
-                                title="Adjust seating details"
-                              >
-                                <Users className="w-3.5 h-3.5 text-[#5F6875]" />
-                                <span>{table.guestsCount || table.capacity || table.seatingCapacity || 4}p</span>
-                              </button>
-                              <button
-                                type="button"
                                 onClick={() => handleReleaseTable(table)}
-                                className="py-2.5 px-2.5 rounded-xl bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold text-xs flex items-center justify-center gap-1 shadow-xs transition-colors cursor-pointer"
+                                className="py-2 px-3 rounded-xl bg-white hover:bg-red-50 border border-[#E3DED5] hover:border-red-200 text-stone-700 hover:text-red-600 font-bold text-xs flex items-center justify-center gap-1.5 whitespace-nowrap shadow-xs transition-colors cursor-pointer"
                                 title="Customer left or changed table — Release table to Available"
                               >
-                                <UserMinus className="w-3.5 h-3.5 text-red-600" />
+                                <UserMinus className="w-3.5 h-3.5 text-stone-500 hover:text-red-600 shrink-0" />
                                 <span>Release</span>
                               </button>
                             </>
