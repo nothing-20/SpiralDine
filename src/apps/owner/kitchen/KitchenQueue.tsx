@@ -368,13 +368,28 @@ export const KitchenQueue: React.FC = () => {
     }
   }, [user?.tenantId, menuItems]);
 
+  // ── Helper to Authoritatively Resolve Target Order & Document ID ─────────
+  const resolveTargetOrderAndDocId = useCallback(
+    (orderId: string) => {
+      const targetOrder = allOrders.find(o => o.id === orderId || o.orderId === orderId);
+      if (!targetOrder) return null;
+      const targetDocId = targetOrder.id || targetOrder.orderId || orderId;
+      return { targetOrder, targetDocId };
+    },
+    [allOrders]
+  );
+
   // ── Item-Level Status Update Handler ──────────────────────────────────────
   const handleItemStatusUpdate = useCallback(
     async (orderId: string, itemKeyOrIndex: string | number, nextItemStatus: TItemPreparationStatus) => {
       if (!user?.tenantId) return;
       try {
-        const targetOrder = allOrders.find(o => o.orderId === orderId || o.id === orderId);
-        if (!targetOrder) return;
+        const resolved = resolveTargetOrderAndDocId(orderId);
+        if (!resolved) {
+          console.warn(`[KDS] Order not found for orderId: ${orderId}`);
+          return;
+        }
+        const { targetOrder, targetDocId } = resolved;
 
         const targetKeyStr = String(itemKeyOrIndex);
         const timestamp = new Date().toISOString();
@@ -382,7 +397,14 @@ export const KitchenQueue: React.FC = () => {
 
         const updatedItems = (targetOrder.items || []).map((item, idx) => {
           const itemIdentifier = getOrderItemIdentifier(item, idx, targetOrder.orderId || targetOrder.id);
-          const isTarget = itemIdentifier === targetKeyStr || String(idx) === targetKeyStr;
+          const itemAny = item as any;
+          const isTarget = 
+            itemIdentifier === targetKeyStr || 
+            String(idx) === targetKeyStr ||
+            (item.id && String(item.id) === targetKeyStr) ||
+            (itemAny.orderItemId && String(itemAny.orderItemId) === targetKeyStr) ||
+            getOrderItemIdentifier(item, idx, targetOrder.orderId) === targetKeyStr ||
+            getOrderItemIdentifier(item, idx, targetOrder.id) === targetKeyStr;
           const existingStatus = resolveItemPreparationStatus(item, targetOrder.status);
 
           if (!isTarget) {
@@ -417,14 +439,19 @@ export const KitchenQueue: React.FC = () => {
         });
 
         if (nextItemStatus === 'READY') {
-          const matchedItem = updatedItems.find(it => it.id === targetKeyStr || it.name === targetItemName);
-          if (matchedItem) await deductBatchItemPortion(matchedItem);
+          try {
+            const matchedItem = updatedItems.find(it => it.id === targetKeyStr || it.name === targetItemName);
+            if (matchedItem) await deductBatchItemPortion(matchedItem);
+          } catch (invErr) {
+            console.warn('[KDS] Non-blocking inventory deduction warning:', invErr);
+          }
         }
 
         // Recalculate derived overall order status
         const newOrderStatus = calculateDerivedOrderStatus(updatedItems, targetOrder.status);
 
-        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
+        // Target the actual Firestore doc ID
+        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', targetDocId);
         const timelineEvent: ITimelineEvent = {
           type: (nextItemStatus === 'READY' ? 'READY' : nextItemStatus === 'PREPARING' ? 'PREPARING' : 'ACCEPTED') as any,
           title: `Item "${targetItemName}" → ${nextItemStatus}`,
@@ -432,8 +459,11 @@ export const KitchenQueue: React.FC = () => {
           performedBy: user.displayName || 'Kitchen Chef',
         };
 
+        // Deep sanitize to prevent Firestore "Unsupported field value: undefined" error
+        const cleanItems = JSON.parse(JSON.stringify(updatedItems));
+
         const updateFields: any = {
-          items: updatedItems,
+          items: cleanItems,
           status: newOrderStatus,
           updatedAt: timestamp,
           timeline: arrayUnion(timelineEvent),
@@ -449,11 +479,11 @@ export const KitchenQueue: React.FC = () => {
         await updateDoc(docRef, updateFields);
         toast.success(`${targetItemName} → ${nextItemStatus}`);
       } catch (err) {
-        console.error('Failed to update item status:', err);
+        console.error('[KDS] Failed to update item status:', err);
         toast.error('Failed to update item status.');
       }
     },
-    [user?.tenantId, user?.displayName, allOrders, deductBatchItemPortion]
+    [user?.tenantId, user?.displayName, resolveTargetOrderAndDocId, deductBatchItemPortion]
   );
 
   // ── Bulk Item Status Update Handler ───────────────────────────────────────
@@ -465,8 +495,12 @@ export const KitchenQueue: React.FC = () => {
     ) => {
       if (!user?.tenantId || itemKeysOrIndices.length === 0) return;
       try {
-        const targetOrder = allOrders.find(o => o.orderId === orderId || o.id === orderId);
-        if (!targetOrder) return;
+        const resolved = resolveTargetOrderAndDocId(orderId);
+        if (!resolved) {
+          console.warn(`[KDS] Order not found for orderId: ${orderId}`);
+          return;
+        }
+        const { targetOrder, targetDocId } = resolved;
 
         const targetKeysSet = new Set(itemKeysOrIndices.map(String));
         const timestamp = new Date().toISOString();
@@ -474,7 +508,14 @@ export const KitchenQueue: React.FC = () => {
 
         const updatedItems = (targetOrder.items || []).map((item, idx) => {
           const itemIdentifier = getOrderItemIdentifier(item, idx, targetOrder.orderId || targetOrder.id);
-          const isSelected = targetKeysSet.has(itemIdentifier) || targetKeysSet.has(String(idx));
+          const itemAny = item as any;
+          const isSelected = 
+            targetKeysSet.has(itemIdentifier) || 
+            targetKeysSet.has(String(idx)) ||
+            (item.id && targetKeysSet.has(String(item.id))) ||
+            (itemAny.orderItemId && targetKeysSet.has(String(itemAny.orderItemId))) ||
+            targetKeysSet.has(getOrderItemIdentifier(item, idx, targetOrder.orderId)) ||
+            targetKeysSet.has(getOrderItemIdentifier(item, idx, targetOrder.id));
           const existingStatus = resolveItemPreparationStatus(item, targetOrder.status);
 
           if (!isSelected) {
@@ -511,18 +552,22 @@ export const KitchenQueue: React.FC = () => {
           return updatedItem;
         });
 
-        // Deduct inventory portions for items newly marked READY
+        // Deduct inventory portions for items newly marked READY (non-blocking)
         if (nextStatus === 'READY') {
           for (const item of updatedItems) {
             const key = getOrderItemIdentifier(item, 0, targetOrder.orderId);
             if (targetKeysSet.has(key) || targetKeysSet.has(String(item.id))) {
-              await deductBatchItemPortion(item);
+              try {
+                await deductBatchItemPortion(item);
+              } catch (invErr) {
+                console.warn('[KDS] Non-blocking inventory deduction warning:', invErr);
+              }
             }
           }
         }
 
         const newOrderStatus = calculateDerivedOrderStatus(updatedItems, targetOrder.status);
-        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
+        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', targetDocId);
 
         const summaryNames = affectedItemNames.slice(0, 2).join(', ') + (affectedItemNames.length > 2 ? '...' : '');
         const timelineEvent: ITimelineEvent = {
@@ -532,8 +577,10 @@ export const KitchenQueue: React.FC = () => {
           performedBy: user.displayName || 'Kitchen Chef',
         };
 
+        const cleanItems = JSON.parse(JSON.stringify(updatedItems));
+
         const updateFields: any = {
-          items: updatedItems,
+          items: cleanItems,
           status: newOrderStatus,
           updatedAt: timestamp,
           timeline: arrayUnion(timelineEvent),
@@ -549,11 +596,11 @@ export const KitchenQueue: React.FC = () => {
         await updateDoc(docRef, updateFields);
         toast.success(`Updated ${affectedItemNames.length} items to ${nextStatus}`);
       } catch (err) {
-        console.error('Failed to bulk update items:', err);
+        console.error('[KDS] Failed to bulk update items:', err);
         toast.error('Failed to update items.');
       }
     },
-    [user?.tenantId, user?.displayName, allOrders, deductBatchItemPortion]
+    [user?.tenantId, user?.displayName, resolveTargetOrderAndDocId, deductBatchItemPortion]
   );
 
   // ── Order-Level Status Update Handler ─────────────────────────────────────
@@ -561,7 +608,9 @@ export const KitchenQueue: React.FC = () => {
     async (orderId: string, nextStatus: string) => {
       if (!user?.tenantId) return;
       try {
-        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
+        const resolved = resolveTargetOrderAndDocId(orderId);
+        const targetDocId = resolved?.targetDocId || orderId;
+        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', targetDocId);
         const timestamp = new Date().toISOString();
 
         const updateFields: any = {
@@ -583,11 +632,11 @@ export const KitchenQueue: React.FC = () => {
         await updateDoc(docRef, updateFields);
         toast.success(`Order → ${nextStatus}`);
       } catch (err) {
-        console.error('Order status update failed:', err);
+        console.error('[KDS] Order status update failed:', err);
         toast.error('Failed to update order status.');
       }
     },
-    [user?.tenantId, user?.displayName]
+    [user?.tenantId, user?.displayName, resolveTargetOrderAndDocId]
   );
 
   // ── Chef & Priority Actions ───────────────────────────────────────────────
@@ -595,7 +644,9 @@ export const KitchenQueue: React.FC = () => {
     async (orderId: string, chefId: string, chefName: string) => {
       if (!user?.tenantId) return;
       try {
-        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
+        const resolved = resolveTargetOrderAndDocId(orderId);
+        const targetDocId = resolved?.targetDocId || orderId;
+        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', targetDocId);
         await updateDoc(docRef, {
           assignedChefId: chefId,
           assignedChefName: chefName,
@@ -603,34 +654,40 @@ export const KitchenQueue: React.FC = () => {
         });
         toast.success(`Chef ${chefName} assigned.`);
       } catch (e) {
+        console.error('[KDS] Failed to assign chef:', e);
         toast.error('Failed to assign chef.');
       }
     },
-    [user?.tenantId]
+    [user?.tenantId, resolveTargetOrderAndDocId]
   );
 
   const handleUnassignChef = useCallback(
     async (orderId: string) => {
       if (!user?.tenantId) return;
       try {
-        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
+        const resolved = resolveTargetOrderAndDocId(orderId);
+        const targetDocId = resolved?.targetDocId || orderId;
+        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', targetDocId);
         await updateDoc(docRef, {
           assignedChefId: '',
           assignedChefName: '',
         });
         toast.success('Chef unassigned.');
       } catch (e) {
+        console.error('[KDS] Failed to unassign chef:', e);
         toast.error('Failed to unassign chef.');
       }
     },
-    [user?.tenantId]
+    [user?.tenantId, resolveTargetOrderAndDocId]
   );
 
   const handlePauseOrder = useCallback(
     async (orderId: string, reason: string) => {
       if (!user?.tenantId) return;
       try {
-        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
+        const resolved = resolveTargetOrderAndDocId(orderId);
+        const targetDocId = resolved?.targetDocId || orderId;
+        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', targetDocId);
         await updateDoc(docRef, {
           status: 'PAUSED',
           pauseReason: reason,
@@ -638,34 +695,40 @@ export const KitchenQueue: React.FC = () => {
         });
         toast.success('Order paused.');
       } catch (e) {
+        console.error('[KDS] Failed to pause order:', e);
         toast.error('Failed to pause order.');
       }
     },
-    [user?.tenantId]
+    [user?.tenantId, resolveTargetOrderAndDocId]
   );
 
   const handleResumeOrder = useCallback(
     async (orderId: string) => {
       if (!user?.tenantId) return;
       try {
-        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
+        const resolved = resolveTargetOrderAndDocId(orderId);
+        const targetDocId = resolved?.targetDocId || orderId;
+        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', targetDocId);
         await updateDoc(docRef, {
           status: 'PREPARING',
           resumedAt: new Date().toISOString(),
         });
         toast.success('Order resumed.');
       } catch (e) {
+        console.error('[KDS] Failed to resume order:', e);
         toast.error('Failed to resume order.');
       }
     },
-    [user?.tenantId]
+    [user?.tenantId, resolveTargetOrderAndDocId]
   );
 
   const handleRecallOrder = useCallback(
     async (orderId: string, reason: string) => {
       if (!user?.tenantId) return;
       try {
-        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
+        const resolved = resolveTargetOrderAndDocId(orderId);
+        const targetDocId = resolved?.targetDocId || orderId;
+        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', targetDocId);
         await updateDoc(docRef, {
           status: 'PREPARING',
           recallReason: reason,
@@ -673,39 +736,46 @@ export const KitchenQueue: React.FC = () => {
         });
         toast.success('Order recalled to Preparing.');
       } catch (e) {
+        console.error('[KDS] Failed to recall order:', e);
         toast.error('Failed to recall order.');
       }
     },
-    [user?.tenantId]
+    [user?.tenantId, resolveTargetOrderAndDocId]
   );
 
   const handleUpdateNotes = useCallback(
     async (orderId: string, noteType: 'kitchen' | 'chef', noteValue: string) => {
       if (!user?.tenantId) return;
       try {
-        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
+        const resolved = resolveTargetOrderAndDocId(orderId);
+        const targetDocId = resolved?.targetDocId || orderId;
+        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', targetDocId);
         const updateField = noteType === 'kitchen' ? { kitchenNotes: noteValue } : { chefNotes: noteValue };
         await updateDoc(docRef, updateField);
         toast.success('Note updated.');
       } catch (e) {
+        console.error('[KDS] Failed to update note:', e);
         toast.error('Failed to update note.');
       }
     },
-    [user?.tenantId]
+    [user?.tenantId, resolveTargetOrderAndDocId]
   );
 
   const handleUpdatePriority = useCallback(
     async (orderId: string, priority: TPriority) => {
       if (!user?.tenantId) return;
       try {
-        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', orderId);
+        const resolved = resolveTargetOrderAndDocId(orderId);
+        const targetDocId = resolved?.targetDocId || orderId;
+        const docRef = doc(db, 'restaurants', user.tenantId, 'orders', targetDocId);
         await updateDoc(docRef, { priority, priorityOverride: true });
         toast.success(`Priority updated to ${priority}.`);
       } catch (e) {
+        console.error('[KDS] Failed to update priority:', e);
         toast.error('Failed to update priority.');
       }
     },
-    [user?.tenantId]
+    [user?.tenantId, resolveTargetOrderAndDocId]
   );
 
   // ── Batch Inventory Preparation ───────────────────────────────────────────
@@ -791,7 +861,7 @@ export const KitchenQueue: React.FC = () => {
               const assignedStation = (item as any).station || inferStationForItem(item.name, (item as any).category);
               if (assignedStation.toLowerCase() === station.name.toLowerCase()) {
                 stationItems.push({
-                  orderId: order.orderId,
+                  orderId: order.id || order.orderId,
                   tableNumber: order.tableNumber || 'Walk-in',
                   itemIndex: idx,
                   item,
@@ -902,7 +972,7 @@ export const KitchenQueue: React.FC = () => {
               const assignedCourse = (item as any).course || inferCourseForItem(item.name, (item as any).category);
               if (assignedCourse.toLowerCase() === courseName.toLowerCase()) {
                 courseItems.push({
-                  orderId: order.orderId,
+                  orderId: order.id || order.orderId,
                   tableNumber: order.tableNumber || 'Walk-in',
                   itemIndex: idx,
                   item,
@@ -1066,7 +1136,7 @@ export const KitchenQueue: React.FC = () => {
                       ⏱ {elapsed} min elapsed
                     </div>
                     <button
-                      onClick={() => handleOrderStatusUpdate(order.orderId, 'READY')}
+                      onClick={() => handleOrderStatusUpdate(order.id || order.orderId, 'READY')}
                       className="mt-1 px-3 py-1 bg-[#183B2B] hover:bg-[#132E22] text-white rounded-lg text-xs font-bold transition-all"
                     >
                       Mark Ready
@@ -1123,7 +1193,7 @@ export const KitchenQueue: React.FC = () => {
                   </span>
                   <div className="mt-1">
                     <button
-                      onClick={() => handleRecallOrder(order.orderId, 'Kitchen Recall')}
+                      onClick={() => handleRecallOrder(order.id || order.orderId, 'Kitchen Recall')}
                       className="text-xs font-bold text-amber-700 hover:underline flex items-center space-x-1"
                     >
                       <RotateCcw className="w-3 h-3" />

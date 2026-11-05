@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { db } from '../../../config/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 import { useAuth } from '../../../context/AuthContext';
 import { inferCourseForItem, inferStationForItem } from '../../../shared/services/kitchenService';
 import { X, Plus, Minus, Utensils, Check } from 'lucide-react';
@@ -59,14 +59,17 @@ export const WalkInOrderModal: React.FC<IWalkInOrderModalProps> = ({
       const nowIso = new Date().toISOString();
       const generatedOrderId = `ORD-${Date.now().toString().slice(-8)}`;
 
-      const orderItems = itemEntries.map(([itemId, count]) => {
+      const orderItems = itemEntries.map(([itemId, count], idx) => {
         const menuItem = menuItems.find(m => m.id === itemId);
         const name = menuItem?.name || 'Dish';
         const price = Number(menuItem?.price || 0);
         const course = inferCourseForItem(name, menuItem?.category);
         const station = inferStationForItem(name, menuItem?.category);
+        const itemUniqueId = `${generatedOrderId}-item-${idx}`;
 
         return {
+          id: itemUniqueId,
+          orderItemId: itemUniqueId,
           itemId,
           name,
           count,
@@ -83,6 +86,7 @@ export const WalkInOrderModal: React.FC<IWalkInOrderModalProps> = ({
       const totalAmount = orderItems.reduce((acc, item) => acc + (item.price * item.count), 0);
 
       const orderDoc = {
+        id: generatedOrderId,
         orderId: generatedOrderId,
         tenantId: user.tenantId,
         branchId: 'main',
@@ -109,7 +113,7 @@ export const WalkInOrderModal: React.FC<IWalkInOrderModalProps> = ({
         ],
       };
 
-      await addDoc(collection(db, 'restaurants', user.tenantId, 'orders'), orderDoc);
+      await setDoc(doc(db, 'restaurants', user.tenantId, 'orders', generatedOrderId), orderDoc);
 
       toast.success(`Order #${generatedOrderId} placed successfully for Table ${tableNumber}!`);
       setSelectedItems({});

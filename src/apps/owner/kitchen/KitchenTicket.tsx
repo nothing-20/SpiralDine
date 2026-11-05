@@ -91,6 +91,8 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
   menuItems = [],
 }) => {
   const { user } = useAuth();
+  const effectiveOrderId = order.id || order.orderId;
+
   // Multi-item selection tracked by unique, stable order item identifiers (isolated per card)
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [showMoreMenu, setShowMoreMenu] = useState(false);
@@ -109,7 +111,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
   // Derive status for each item (strictly maintaining item independence)
   const itemsWithMeta = useMemo(() => {
     return (order.items || []).map((item, idx) => {
-      const itemIdentifier = getOrderItemIdentifier(item, idx, order.orderId);
+      const itemIdentifier = getOrderItemIdentifier(item, idx, effectiveOrderId);
       const rawStatus = resolveItemPreparationStatus(item, order.status);
 
       const course = (item as any).course || inferCourseForItem(item.name, (item as any).category);
@@ -134,7 +136,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
         originalIndex: idx,
       };
     });
-  }, [order.items, order.status, order.orderId, elapsedMins]);
+  }, [order.items, order.status, effectiveOrderId, elapsedMins]);
 
   // Group items by course for the header pills
   const courseCounts = useMemo(() => {
@@ -213,7 +215,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
           readyCount: eligibleToReady.length,
           onStart: () => {
             const idsToStart = eligibleToStart.map(i => i.itemIdentifier);
-            onBulkItemStatusUpdate(order.orderId, idsToStart, 'PREPARING');
+            onBulkItemStatusUpdate(effectiveOrderId, idsToStart, 'PREPARING');
             setSelectedItemIds(prev => {
               const next = new Set(prev);
               idsToStart.forEach(id => next.delete(id));
@@ -222,7 +224,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
           },
           onReady: () => {
             const idsToReady = eligibleToReady.map(i => i.itemIdentifier);
-            onBulkItemStatusUpdate(order.orderId, idsToReady, 'READY');
+            onBulkItemStatusUpdate(effectiveOrderId, idsToReady, 'READY');
             setSelectedItemIds(prev => {
               const next = new Set(prev);
               idsToReady.forEach(id => next.delete(id));
@@ -240,7 +242,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
           disabled: false,
           action: () => {
             const idsToReady = eligibleToReady.map(i => i.itemIdentifier);
-            onBulkItemStatusUpdate(order.orderId, idsToReady, 'READY');
+            onBulkItemStatusUpdate(effectiveOrderId, idsToReady, 'READY');
             clearSelection();
           },
         };
@@ -254,7 +256,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
           disabled: false,
           action: () => {
             const idsToStart = eligibleToStart.map(i => i.itemIdentifier);
-            onBulkItemStatusUpdate(order.orderId, idsToStart, 'PREPARING');
+            onBulkItemStatusUpdate(effectiveOrderId, idsToStart, 'PREPARING');
             clearSelection();
           },
         };
@@ -276,7 +278,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
         label: '✓ Mark Order Served',
         disabled: false,
         action: () => {
-          onStatusUpdate(order.orderId, 'SERVED');
+          onStatusUpdate(effectiveOrderId, 'SERVED');
         },
       };
     }
@@ -288,7 +290,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
         disabled: false,
         action: () => {
           const firstPending = notStartedItems[0];
-          onItemStatusUpdate(order.orderId, firstPending.itemIdentifier, 'PREPARING');
+          onItemStatusUpdate(effectiveOrderId, firstPending.itemIdentifier, 'PREPARING');
         },
       };
     }
@@ -306,7 +308,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
       type: 'single' as const,
       label: '✓ Mark Order Served',
       disabled: false,
-      action: () => onStatusUpdate(order.orderId, 'SERVED'),
+      action: () => onStatusUpdate(effectiveOrderId, 'SERVED'),
     };
   }, [
     selectedList,
@@ -318,7 +320,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
     onBulkItemStatusUpdate,
     onItemStatusUpdate,
     onStatusUpdate,
-    order.orderId,
+    effectiveOrderId,
   ]);
 
   // Thermal Print Handler
@@ -573,7 +575,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
                   {isItemPreparing ? (
                     <button
                       type="button"
-                      onClick={() => onItemStatusUpdate(order.orderId, item.itemIdentifier, 'READY')}
+                      onClick={() => onItemStatusUpdate(effectiveOrderId, item.itemIdentifier, 'READY')}
                       title="Click to mark Ready"
                       className="bg-[#EAF3FD] hover:bg-[#DCEBFC] text-[#2563EB] text-[10.5px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors cursor-pointer border border-blue-200/50"
                     >
@@ -585,7 +587,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
                   ) : isItemReady ? (
                     <button
                       type="button"
-                      onClick={() => onItemStatusUpdate(order.orderId, item.itemIdentifier, 'PREPARING')}
+                      onClick={() => onItemStatusUpdate(effectiveOrderId, item.itemIdentifier, 'PREPARING')}
                       title="Click to recall to Preparing"
                       className="bg-[#EAF7EE] hover:bg-[#D5F2DD] text-[#16A34A] text-[10.5px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors cursor-pointer border border-green-200/50"
                     >
@@ -595,7 +597,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
                   ) : isItemOnHold ? (
                     <button
                       type="button"
-                      onClick={() => onItemStatusUpdate(order.orderId, item.itemIdentifier, 'PREPARING')}
+                      onClick={() => onItemStatusUpdate(effectiveOrderId, item.itemIdentifier, 'PREPARING')}
                       title="Click to release and start"
                       className="bg-[#FEF5E7] hover:bg-[#FDECC8] text-[#D97706] text-[10.5px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors cursor-pointer border border-amber-200/50"
                     >
@@ -614,7 +616,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
                   ) : (
                     <button
                       type="button"
-                      onClick={() => onItemStatusUpdate(order.orderId, item.itemIdentifier, 'PREPARING')}
+                      onClick={() => onItemStatusUpdate(effectiveOrderId, item.itemIdentifier, 'PREPARING')}
                       title="Click to start preparing"
                       className="bg-[#F4F4F5] hover:bg-[#E4E4E7] text-[#71717A] text-[10.5px] font-medium px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors cursor-pointer border border-stone-200/60"
                     >
@@ -769,7 +771,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
                 type="button"
                 onClick={() => {
                   const note = prompt('Add kitchen internal note:', order.kitchenNotes || '');
-                  if (note !== null) onUpdateNotes(order.orderId, 'kitchen', note);
+                  if (note !== null) onUpdateNotes(effectiveOrderId, 'kitchen', note);
                   setShowMoreMenu(false);
                 }}
                 className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#FAF8F5] flex items-center space-x-2 text-[#18201D] font-medium"
@@ -782,7 +784,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
                 type="button"
                 onClick={() => {
                   const nextPrio = order.priority === 'critical' ? 'normal' : 'critical';
-                  onUpdatePriority(order.orderId, nextPrio);
+                  onUpdatePriority(effectiveOrderId, nextPrio);
                   setShowMoreMenu(false);
                 }}
                 className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-[#FAF8F5] flex items-center space-x-2 text-[#18201D] font-medium"
@@ -795,7 +797,7 @@ export const KitchenTicket: React.FC<IKitchenTicketProps> = React.memo(({
                 type="button"
                 onClick={() => {
                   if (confirm('Cancel this entire order?')) {
-                    onStatusUpdate(order.orderId, 'CANCELLED');
+                    onStatusUpdate(effectiveOrderId, 'CANCELLED');
                   }
                   setShowMoreMenu(false);
                 }}
