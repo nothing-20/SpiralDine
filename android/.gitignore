@@ -12,4 +12,6 @@ build/
 **/build/
 .gradle/
 **/.gradle/
+.kotlin/
+**/.kotlin/
 local.properties

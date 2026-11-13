@@ -1,19 +1,21 @@
-import { User, UserCredential, ActionCodeSettings } from 'firebase/auth';
+import { 
+  User, 
+  UserCredential, 
+  ConfirmationResult, 
+  ApplicationVerifier, 
+  RecaptchaVerifier, 
+  ActionCodeSettings 
+} from 'firebase/auth';
 import { TUserRole } from '../types';
 import * as firebaseAuth from '../firebase/auth';
 
 /**
- * Service for handling Firebase Authentication operations.
+ * Authoritative central service for handling Firebase Authentication operations.
  * Wraps direct Firebase calls with domain-specific operations for RestaurantOS.
  */
 export const authService = {
   /**
    * Signs in a user using their email and password.
-   * 
-   * @param email - The email address of the user.
-   * @param password - The password of the user.
-   * @param rememberMe - Whether to persist the session.
-   * @returns A promise resolving to the user credential.
    */
   async signInWithEmail(email: string, password: string, rememberMe: boolean): Promise<UserCredential> {
     return firebaseAuth.signIn(email, password, rememberMe);
@@ -22,8 +24,6 @@ export const authService = {
   /**
    * Signs in a guest diner anonymously in the background.
    * Generates a unique, non-colliding Firebase Auth UID without requiring credentials.
-   * 
-   * @returns A promise resolving to the user credential.
    */
   async signInAnonymous(): Promise<UserCredential> {
     return firebaseAuth.signInAnonymousUser();
@@ -32,12 +32,6 @@ export const authService = {
   /**
    * Registers a new restaurant owner with an empty, production-ready tenant.
    * Does NOT seed mock data.
-   * 
-   * @param email - The owner's email address.
-   * @param password - The owner's password.
-   * @param displayName - The owner's full name.
-   * @param restaurantName - The name of the restaurant.
-   * @returns A promise resolving to the user credential.
    */
   async signUpOwner(
     email: string, 
@@ -53,12 +47,6 @@ export const authService = {
 
   /**
    * Registers a new customer user.
-   * 
-   * @param email - The customer's email address.
-   * @param password - The customer's password.
-   * @param fullName - The customer's full name.
-   * @param phoneNumber - Optional contact phone number.
-   * @returns A promise resolving to the user credential.
    */
   async signUpCustomer(
     email: string,
@@ -71,9 +59,6 @@ export const authService = {
 
   /**
    * Triggers a password reset email for the given email address.
-   * 
-   * @param email - The email address to reset the password for.
-   * @returns A promise that resolves when the reset email is sent.
    */
   async resetPassword(email: string, actionCodeSettings?: ActionCodeSettings): Promise<void> {
     return firebaseAuth.resetPassword(email, actionCodeSettings);
@@ -81,9 +66,6 @@ export const authService = {
 
   /**
    * Verifies a password reset oobCode and retrieves the associated email.
-   * 
-   * @param actionCode - The oobCode from the reset link.
-   * @returns A promise resolving to the user's email address.
    */
   async verifyPasswordResetCode(actionCode: string): Promise<string> {
     return firebaseAuth.verifyPasswordResetCode(actionCode);
@@ -91,10 +73,6 @@ export const authService = {
 
   /**
    * Confirms a password reset with the valid oobCode and new password.
-   * 
-   * @param actionCode - The oobCode from the reset link.
-   * @param newPassword - The new password.
-   * @returns A promise that resolves when the password is confirmed.
    */
   async confirmPasswordReset(actionCode: string, newPassword: string): Promise<void> {
     return firebaseAuth.confirmPasswordReset(actionCode, newPassword);
@@ -102,8 +80,6 @@ export const authService = {
 
   /**
    * Signs out the currently authenticated user.
-   * 
-   * @returns A promise that resolves when the user is signed out.
    */
   async signOutUser(): Promise<void> {
     return firebaseAuth.signOut();
@@ -111,9 +87,6 @@ export const authService = {
 
   /**
    * Sends an email verification link to the logged-in user.
-   * 
-   * @param user - The Firebase User object to send the verification to.
-   * @returns A promise that resolves when the email is sent.
    */
   async sendEmailVerificationLink(user: User): Promise<void> {
     return firebaseAuth.sendEmailVerificationLink(user);
@@ -121,13 +94,57 @@ export const authService = {
 
   /**
    * Fetches custom claims from the user's ID token, extracting the role and tenantId.
-   * 
-   * @param user - The Firebase User object.
-   * @returns A promise resolving to the user's role and tenantId claims.
    */
   async getUserClaims(user: User): Promise<{ role?: TUserRole; tenantId?: string }> {
     return firebaseAuth.getUserClaims(user);
+  },
+
+  /**
+   * Creates a reCAPTCHA verifier for phone authentication.
+   */
+  createRecaptchaVerifier(
+    containerIdOrElement: string | HTMLElement,
+    options?: {
+      size?: 'invisible' | 'normal' | 'compact';
+      callback?: (response: any) => void;
+      'expired-callback'?: () => void;
+    }
+  ): RecaptchaVerifier {
+    return firebaseAuth.createRecaptchaVerifier(containerIdOrElement, options);
+  },
+
+  /**
+   * Initiates phone authentication by dispatching an SMS OTP.
+   */
+  async signInWithPhone(phoneNumber: string, appVerifier: ApplicationVerifier): Promise<ConfirmationResult> {
+    return firebaseAuth.signInWithPhone(phoneNumber, appVerifier);
+  },
+
+  /**
+   * Confirms a received phone OTP and signs in or completes authentication.
+   */
+  async confirmPhoneOtp(confirmationResult: ConfirmationResult, verificationCode: string): Promise<UserCredential> {
+    return firebaseAuth.confirmPhoneOtp(confirmationResult, verificationCode);
+  },
+
+  /**
+   * Links a phone number to an existing user via SMS verification.
+   */
+  async linkPhone(user: User, phoneNumber: string, appVerifier: ApplicationVerifier): Promise<ConfirmationResult> {
+    return firebaseAuth.linkPhone(user, phoneNumber, appVerifier);
+  },
+
+  /**
+   * Links a phone credential directly to an existing user (such as an anonymous guest diner)
+   * preserving their existing Firebase Auth UID and attached order history.
+   */
+  async linkPhoneWithCredential(
+    user: User, 
+    verificationId: string, 
+    verificationCode: string
+  ): Promise<UserCredential> {
+    return firebaseAuth.linkPhoneWithCredential(user, verificationId, verificationCode);
   }
 };
-export default authService;
 
+export default authService;

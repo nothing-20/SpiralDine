@@ -1,3 +1,3 @@
 <resources>
-    <string name="app_name">SpiralDine Print Bridge</string>
+    <!-- app_name is injected per build flavor (dev, staging, prod) in android/build.gradle.kts -->
 </resources>

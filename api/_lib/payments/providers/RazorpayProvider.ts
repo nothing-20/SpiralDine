@@ -124,6 +124,34 @@ export class RazorpayPaymentProvider implements IPaymentProvider {
       };
     }
 
+    if (!this.keySecret) {
+      return {
+        success: false,
+        provider: 'razorpay',
+        providerOrderId: expectedServerOrderId || providerOrderId,
+        providerPaymentId: paymentId,
+        status: 'FAILED',
+        amountInCents: 0,
+        currency: 'INR',
+        paymentMethod: 'online',
+        failureReason: 'RAZORPAY_KEY_SECRET is not configured on the server.'
+      };
+    }
+
+    if (expectedServerOrderId && providerOrderId && expectedServerOrderId !== providerOrderId) {
+      return {
+        success: false,
+        provider: 'razorpay',
+        providerOrderId: expectedServerOrderId,
+        providerPaymentId: paymentId,
+        status: 'FAILED',
+        amountInCents: 0,
+        currency: 'INR',
+        paymentMethod: 'online',
+        failureReason: 'Provider order ID mismatch against expected server order.'
+      };
+    }
+
     // Security check: Verify that the expected server order ID matches
     const authoritativeOrderId = expectedServerOrderId || providerOrderId;
 
@@ -188,9 +216,24 @@ export class RazorpayPaymentProvider implements IPaymentProvider {
       }
 
       const paymentData = await paymentRes.json();
+      if (paymentData.order_id && String(paymentData.order_id) !== authoritativeOrderId) {
+        return {
+          success: false,
+          provider: 'razorpay',
+          providerOrderId: authoritativeOrderId,
+          providerPaymentId: paymentId,
+          status: 'FAILED',
+          amountInCents: 0,
+          currency: String(paymentData.currency || 'INR').toUpperCase(),
+          paymentMethod: 'online',
+          failureReason: `Payment order_id mismatch (${String(paymentData.order_id)} !== ${authoritativeOrderId}).`,
+          rawResponse: paymentData
+        };
+      }
+
       const rawStatus = (paymentData.status || '').toLowerCase();
       const amountInCents = Number(paymentData.amount || 0);
-      const currency = paymentData.currency || 'INR';
+      const currency = String(paymentData.currency || 'INR').toUpperCase();
       const normalizedMethod = this.normalizePaymentMethod(paymentData.method);
       const paymentReference = paymentData.acquirer_data?.rrn || paymentData.acquirer_data?.bank_transaction_id || paymentId;
 
@@ -240,12 +283,16 @@ export class RazorpayPaymentProvider implements IPaymentProvider {
               rawResponse: capturedData
             };
           }
-        } catch (_capErr) {}
+        } catch (capErr) {
+          console.warn('[RazorpayProvider] Non-blocking auto-capture fetch note:', capErr);
+        }
       }
 
       let mappedStatus: PaymentStatus = 'FAILED';
       if (rawStatus === 'created' || rawStatus === 'authorized') {
         mappedStatus = 'PROCESSING';
+      } else if (rawStatus === 'refunded') {
+        mappedStatus = 'REFUNDED';
       }
 
       return {
@@ -261,7 +308,8 @@ export class RazorpayPaymentProvider implements IPaymentProvider {
         failureReason: `Payment status is ${rawStatus}, expected captured.`,
         rawResponse: paymentData
       };
-    } catch (apiErr: any) {
+    } catch (apiErr: unknown) {
+      const apiErrMsg = apiErr instanceof Error ? apiErr.message : 'Razorpay payment lookup error.';
       console.error('[RazorpayProvider] Verification API error:', apiErr);
       return {
         success: false,
@@ -272,7 +320,7 @@ export class RazorpayPaymentProvider implements IPaymentProvider {
         amountInCents: 0,
         currency: 'INR',
         paymentMethod: 'online',
-        failureReason: apiErr.message || 'Razorpay payment lookup error.'
+        failureReason: apiErrMsg
       };
     }
   }
@@ -340,9 +388,33 @@ export class RazorpayPaymentProvider implements IPaymentProvider {
       };
     }
 
-    let parsedPayload: any;
+    interface RazorpayPaymentEntity {
+      id?: string;
+      order_id?: string;
+      amount?: number | string;
+      currency?: string;
+      method?: string;
+      created_at?: number;
+      acquirer_data?: {
+        rrn?: string;
+        bank_transaction_id?: string;
+      };
+    }
+    interface RazorpayOrderEntity {
+      id?: string;
+      amount?: number | string;
+      currency?: string;
+    }
+    interface RazorpayWebhookPayload {
+      event?: string;
+      payload?: {
+        payment?: { entity?: RazorpayPaymentEntity };
+        order?: { entity?: RazorpayOrderEntity };
+      };
+    }
+    let parsedPayload: RazorpayWebhookPayload;
     try {
-      parsedPayload = JSON.parse(rawBody);
+      parsedPayload = JSON.parse(rawBody) as RazorpayWebhookPayload;
     } catch {
       return {
         success: false,
@@ -358,8 +430,8 @@ export class RazorpayPaymentProvider implements IPaymentProvider {
 
     const event = parsedPayload.event || '';
     const payloadData = parsedPayload.payload || {};
-    const paymentEntity = payloadData.payment?.entity || {};
-    const orderEntity = payloadData.order?.entity || {};
+    const paymentEntity: RazorpayPaymentEntity = payloadData.payment?.entity || {};
+    const orderEntity: RazorpayOrderEntity = payloadData.order?.entity || {};
 
     const providerOrderId = paymentEntity.order_id || orderEntity.id || '';
     const paymentId = paymentEntity.id ? String(paymentEntity.id) : undefined;
@@ -371,6 +443,14 @@ export class RazorpayPaymentProvider implements IPaymentProvider {
     const paymentReference = paymentEntity.acquirer_data?.rrn || paymentEntity.acquirer_data?.bank_transaction_id || paymentId;
 
     const isSuccess = event === 'payment.captured' || event === 'order.paid';
+    let mappedStatus: PaymentStatus = 'PROCESSING';
+    if (isSuccess) {
+      mappedStatus = 'SUCCESS';
+    } else if (event === 'payment.failed') {
+      mappedStatus = 'FAILED';
+    } else if (event === 'refund.processed' || event === 'payment.refunded') {
+      mappedStatus = 'REFUNDED';
+    }
 
     return {
       success: isSuccess,
@@ -378,9 +458,9 @@ export class RazorpayPaymentProvider implements IPaymentProvider {
       providerOrderId,
       providerPaymentId: paymentId,
       paymentReference,
-      status: isSuccess ? 'SUCCESS' : (event === 'payment.failed' ? 'FAILED' : 'PROCESSING'),
+      status: mappedStatus,
       amountInCents,
-      currency,
+      currency: String(currency || 'INR').toUpperCase(),
       paymentMethod: normalizedMethod,
       verifiedAt: paymentEntity.created_at ? new Date(paymentEntity.created_at * 1000).toISOString() : new Date().toISOString(),
       failureReason: isSuccess ? undefined : `Razorpay event: ${event}`,

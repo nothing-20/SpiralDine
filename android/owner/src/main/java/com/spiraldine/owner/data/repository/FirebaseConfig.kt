@@ -6,16 +6,85 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.spiraldine.owner.BuildConfig
+
+data class ValidatedOwnerFirebaseConfig(
+    val appEnv: String,
+    val apiKey: String,
+    val projectId: String,
+    val applicationId: String,
+    val storageBucket: String,
+    val gcmSenderId: String
+)
 
 object FirebaseConfig {
-    const val API_KEY = "AIzaSyCKE7c57Boi_5dpK53FaZOtTu6m6Kz1vHg"
-    const val PROJECT_ID = "spiral-restaurant-saas-v1"
-    const val APPLICATION_ID = "com.spiraldine.owner"
-    const val STORAGE_BUCKET = "spiral-restaurant-saas-v1.firebasestorage.app"
-    const val GCM_SENDER_ID = "917630391162"
+    private const val PRODUCTION_PROJECT_ID = "spiral-restaurant-saas-v1"
+
+    val APP_ENV: String get() = BuildConfig.APP_ENV
+    val IS_CONFIGURED: Boolean get() = BuildConfig.FIREBASE_CONFIGURED
+    val API_KEY: String get() = BuildConfig.FIREBASE_API_KEY
+    val PROJECT_ID: String get() = BuildConfig.FIREBASE_PROJECT_ID
+    val APPLICATION_ID: String get() = BuildConfig.FIREBASE_APPLICATION_ID
+    val STORAGE_BUCKET: String get() = BuildConfig.FIREBASE_STORAGE_BUCKET
+    val GCM_SENDER_ID: String get() = BuildConfig.FIREBASE_GCM_SENDER_ID
+
+    private fun isInvalidOrPlaceholder(value: String): Boolean {
+        val trimmed = value.trim()
+        if (trimmed.isEmpty()) return true
+        val lower = trimmed.lowercase()
+        return lower.startsWith("your_") ||
+            lower.startsWith("<") ||
+            lower.startsWith("placeholder") ||
+            lower.startsWith("changeme") ||
+            lower.startsWith("replace")
+    }
+
+    internal fun resolveValidatedConfig(
+        appEnv: String = APP_ENV,
+        configured: Boolean = IS_CONFIGURED,
+        apiKey: String = API_KEY,
+        projectId: String = PROJECT_ID,
+        applicationId: String = APPLICATION_ID,
+        storageBucket: String = STORAGE_BUCKET,
+        gcmSenderId: String = GCM_SENDER_ID
+    ): ValidatedOwnerFirebaseConfig {
+        if (
+            !configured ||
+            isInvalidOrPlaceholder(apiKey) ||
+            isInvalidOrPlaceholder(projectId) ||
+            isInvalidOrPlaceholder(applicationId) ||
+            isInvalidOrPlaceholder(storageBucket)
+        ) {
+            throw IllegalStateException(
+                "[Owner FirebaseConfig] Firebase is not configured for flavor '$appEnv'. " +
+                    "Provide android/config/firebase-$appEnv.properties or src/$appEnv/google-services.json."
+            )
+        }
+
+        if (
+            !appEnv.equals("prod", ignoreCase = true) &&
+            (projectId.trim().equals(PRODUCTION_PROJECT_ID, ignoreCase = true) ||
+                storageBucket.lowercase().contains(PRODUCTION_PROJECT_ID))
+        ) {
+            throw IllegalStateException(
+                "[Owner FirebaseConfig] Environment '$appEnv' refuses to connect to production Firebase project '$PRODUCTION_PROJECT_ID'."
+            )
+        }
+
+        return ValidatedOwnerFirebaseConfig(
+            appEnv = appEnv.trim(),
+            apiKey = apiKey.trim(),
+            projectId = projectId.trim(),
+            applicationId = applicationId.trim(),
+            storageBucket = storageBucket.trim(),
+            gcmSenderId = gcmSenderId.trim()
+        )
+    }
 
     @Synchronized
     fun initialize(context: Context): FirebaseApp {
+        val validated = resolveValidatedConfig()
+
         try {
             val existing = FirebaseApp.getApps(context).firstOrNull()
             if (existing != null) {
@@ -27,14 +96,15 @@ object FirebaseConfig {
             FirebaseApp.getInstance()
         } catch (_: Exception) {
             try {
-                val options = FirebaseOptions.Builder()
-                    .setApiKey(API_KEY)
-                    .setProjectId(PROJECT_ID)
-                    .setApplicationId(APPLICATION_ID)
-                    .setStorageBucket(STORAGE_BUCKET)
-                    .setGcmSenderId(GCM_SENDER_ID)
-                    .build()
-                FirebaseApp.initializeApp(context.applicationContext, options)
+                val builder = FirebaseOptions.Builder()
+                    .setApiKey(validated.apiKey)
+                    .setProjectId(validated.projectId)
+                    .setApplicationId(validated.applicationId)
+                    .setStorageBucket(validated.storageBucket)
+                if (validated.gcmSenderId.isNotEmpty()) {
+                    builder.setGcmSenderId(validated.gcmSenderId)
+                }
+                FirebaseApp.initializeApp(context.applicationContext, builder.build())
             } catch (e: Exception) {
                 Log.w("FirebaseConfig", "Concurrent fallback: ${e.message}")
                 try {

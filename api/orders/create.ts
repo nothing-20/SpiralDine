@@ -1,235 +1,288 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { db, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, ensureServerAuth } from '../_lib/firebaseServer.js';
+import {
+  adminDb,
+  FieldValue,
+  FirebaseAdminInitError,
+} from '../_lib/firebaseAdmin.js';
+import {
+  handleAuthError,
+  requireAuthenticatedUser,
+  VerifiedAuthContext,
+} from '../_lib/authMiddleware.js';
 
-interface ITokenUser {
-  uid: string;
-  isAnonymous?: boolean;
+interface OrderItemInput {
+  itemId?: unknown;
+  tenantId?: unknown;
+  count?: unknown;
+  notes?: unknown;
 }
 
-/**
- * Verify Firebase ID token independently on server side.
- * Supports production Google Identity Toolkit validation and emulator token decoding.
- */
-async function verifyAuthToken(token: string): Promise<ITokenUser | null> {
-  if (!token) return null;
+interface VerifiedOrderItem {
+  itemId: string;
+  name: string;
+  count: number;
+  notes: string;
+  pricePerUnit: number;
+  image: string;
+  isVeg: boolean;
+  category: string;
+  categoryId?: string;
+}
 
-  // 1. Emulator environment: decode synthetic/emulator JWT payload
-  if (process.env.FIRESTORE_EMULATOR_HOST) {
-    try {
-      const parts = token.split('.');
-      if (parts.length >= 2) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
-        const uid = payload.user_id || payload.sub || payload.uid;
-        if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
-          return null;
-        }
-        if (uid) {
-          return {
-            uid,
-            isAnonymous: payload.firebase?.sign_in_provider === 'anonymous'
-          };
-        }
-      }
-    } catch (_) {}
-  }
-
-  // 2. Production: Verify via Google Identity Toolkit API
-  const apiKey = process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY;
-  if (!apiKey) {
-    console.warn('[api/orders/create] Warning: No Firebase API Key configured for token verification.');
-    try {
-      const parts = token.split('.');
-      if (parts.length >= 2) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
-        const uid = payload.user_id || payload.sub || payload.uid;
-        if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
-        if (uid) return { uid, isAnonymous: payload.firebase?.sign_in_provider === 'anonymous' };
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  try {
-    const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken: token })
-    });
-
-    if (!res.ok) {
-      return null;
-    }
-
-    const data = await res.json();
-    const user = data.users?.[0];
-    if (!user) return null;
-
-    return {
-      uid: user.localId,
-      isAnonymous: !user.email && !user.phoneNumber
-    };
-  } catch (err) {
-    console.warn('[api/orders/create] Google Identity Toolkit verification warning:', err);
-    return null;
-  }
+interface OrderCreateBody {
+  tenantId?: unknown;
+  tableNumber?: unknown;
+  items?: unknown;
+  customerId?: unknown;
+  tableRestaurantId?: unknown;
+  tableId?: unknown;
+  orderId?: unknown;
+  idempotencyKey?: unknown;
+  sessionId?: unknown;
+  discount?: unknown;
+  couponCode?: unknown;
+  orderType?: unknown;
+  isAdditionalOrder?: unknown;
+  orderSequence?: unknown;
+  primaryOrderId?: unknown;
+  customerName?: unknown;
+  phone?: unknown;
+  branchId?: unknown;
+  tableName?: unknown;
+  orderSource?: unknown;
+  specialInstructions?: unknown;
 }
 
 /**
  * Serverless API endpoint: POST /api/orders/create
- * Provides trusted server-side order validation, canonical pricing recalculation,
- * and persistence.
+ * Provides trusted server-side Firebase Admin ID token verification,
+ * canonical pricing recalculation, and persistence via Admin SDK.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed. Only POST is permitted.' });
   }
 
-  const { tenantId, tableNumber, items, customerId } = req.body || {};
+  const body = (req.body || {}) as OrderCreateBody;
+  const { tenantId, tableNumber, items, customerId } = body;
 
   // 1. Structural argument validation
-  if (!tenantId || !tableNumber || !items || !Array.isArray(items) || items.length === 0) {
+  if (
+    typeof tenantId !== 'string' ||
+    !tenantId.trim() ||
+    !tableNumber ||
+    !items ||
+    !Array.isArray(items) ||
+    items.length === 0
+  ) {
     return res.status(400).json({
-      error: 'Missing required order fields: tenantId, tableNumber, and a non-empty items array are required.'
+      error:
+        'Missing required order fields: tenantId, tableNumber, and a non-empty items array are required.',
     });
   }
 
-  // 2. Authentication & Authorization Verification
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  const cleanTenantId = tenantId.trim();
 
-  if (!token) {
-    return res.status(401).json({
-      error: 'Unauthorized: Missing Authorization header or Bearer token.'
-    });
+  // 2. Cryptographic Authentication & Authorization Verification
+  // Guest QR diners authenticate via Firebase Anonymous Auth; allowAnonymous=true is intentional.
+  let authUser: VerifiedAuthContext;
+  try {
+    authUser = await requireAuthenticatedUser(req, { allowAnonymous: true });
+  } catch (authErr: unknown) {
+    return handleAuthError(res, authErr);
   }
 
-  const tokenUser = await verifyAuthToken(token);
-  if (!tokenUser || !tokenUser.uid) {
-    return res.status(401).json({
-      error: 'Unauthorized: Invalid or expired Firebase authentication token.'
-    });
-  }
-
-  // Verify caller UID matches claimed customerId
-  if (customerId && customerId !== tokenUser.uid) {
+  if (typeof customerId === 'string' && customerId.trim() && customerId.trim() !== authUser.uid) {
     return res.status(403).json({
-      error: `Forbidden: Authenticated UID (${tokenUser.uid}) does not match requested customerId (${customerId}).`
+      error: `Forbidden: Authenticated UID (${authUser.uid}) does not match requested customerId (${customerId}).`,
     });
   }
 
-  const verifiedUid = tokenUser.uid;
+  const verifiedUid = authUser.uid;
 
   try {
-    await ensureServerAuth();
-
     // 3. Restaurant & Settings Validation
-    const restDocRef = doc(db, 'restaurants', tenantId);
-    const restDocSnap = await getDoc(restDocRef);
-    let restaurantSettings: any = {};
+    const restDocRef = adminDb.collection('restaurants').doc(cleanTenantId);
+    const restDocSnap = await restDocRef.get();
+    let restaurantSettings: Record<string, unknown> = {};
 
-    if (!restDocSnap.exists()) {
-      const tenantDocRef = doc(db, 'tenants', tenantId);
-      const tenantDocSnap = await getDoc(tenantDocRef);
-      if (!tenantDocSnap.exists()) {
-        return res.status(400).json({ error: `Order creation rejected: Restaurant "${tenantId}" does not exist.` });
+    if (!restDocSnap.exists) {
+      const tenantDocRef = adminDb.collection('tenants').doc(cleanTenantId);
+      const tenantDocSnap = await tenantDocRef.get();
+      if (!tenantDocSnap.exists) {
+        return res
+          .status(400)
+          .json({ error: `Order creation rejected: Restaurant "${cleanTenantId}" does not exist.` });
       }
-      const tenantData = tenantDocSnap.data() || {};
+      const tenantData = (tenantDocSnap.data() as Record<string, unknown>) || {};
       if (tenantData.status === 'inactive' || tenantData.status === 'suspended') {
-        return res.status(400).json({ error: `Order creation rejected: Restaurant "${tenantId}" is currently inactive.` });
+        return res.status(400).json({
+          error: `Order creation rejected: Restaurant "${cleanTenantId}" is currently inactive.`,
+        });
       }
-      restaurantSettings = tenantData.settings || tenantData;
+      restaurantSettings =
+        (tenantData.settings as Record<string, unknown> | undefined) || tenantData;
     } else {
-      const restData = restDocSnap.data() || {};
+      const restData = (restDocSnap.data() as Record<string, unknown>) || {};
       if (restData.status === 'inactive' || restData.isActive === false) {
-        return res.status(400).json({ error: `Order creation rejected: Restaurant "${tenantId}" is currently inactive.` });
+        return res.status(400).json({
+          error: `Order creation rejected: Restaurant "${cleanTenantId}" is currently inactive.`,
+        });
       }
-      restaurantSettings = restData.settings || restData;
+      restaurantSettings = (restData.settings as Record<string, unknown> | undefined) || restData;
     }
 
     // 4. Table Ownership & Status Validation
-    if (req.body.tableRestaurantId && req.body.tableRestaurantId !== tenantId) {
-      return res.status(400).json({ error: `Order creation rejected: Table does not belong to restaurant "${tenantId}".` });
+    if (
+      typeof body.tableRestaurantId === 'string' &&
+      body.tableRestaurantId &&
+      body.tableRestaurantId !== cleanTenantId
+    ) {
+      return res.status(400).json({
+        error: `Order creation rejected: Table does not belong to restaurant "${cleanTenantId}".`,
+      });
     }
 
     const rawTableNum = String(tableNumber || '').trim();
     const cleanTableNum = rawTableNum.replace(/^TBL-/i, '').trim();
-    const resolvedTableId = req.body.tableId || `TBL-${cleanTableNum}`;
+    const resolvedTableId =
+      typeof body.tableId === 'string' && body.tableId.trim()
+        ? body.tableId.trim()
+        : `TBL-${cleanTableNum}`;
 
-    try {
-      const tableDocRef = doc(db, 'restaurants', tenantId, 'tables', resolvedTableId);
-      const tableSnap = await getDoc(tableDocRef);
-      if (tableSnap.exists()) {
-        const tableData = tableSnap.data() || {};
-        if (tableData.restaurantId && tableData.restaurantId !== tenantId) {
-          return res.status(400).json({ error: `Order creation rejected: Table does not belong to restaurant "${tenantId}".` });
-        }
-        if (tableData.isActive === false || String(tableData.status).toLowerCase() === 'disabled') {
-          return res.status(400).json({ error: `Order creation rejected: Table "${cleanTableNum}" is currently disabled.` });
-        }
+    const tableDocRef = adminDb
+      .collection('restaurants')
+      .doc(cleanTenantId)
+      .collection('tables')
+      .doc(resolvedTableId);
+    const tableSnap = await tableDocRef.get();
+    if (tableSnap.exists) {
+      const tableData = (tableSnap.data() as Record<string, unknown>) || {};
+      if (tableData.restaurantId && tableData.restaurantId !== cleanTenantId) {
+        return res.status(400).json({
+          error: `Order creation rejected: Table does not belong to restaurant "${cleanTenantId}".`,
+        });
       }
-    } catch (tblErr: any) {
-      if (tblErr.message?.includes('rejected')) throw tblErr;
+      if (tableData.isActive === false || String(tableData.status).toLowerCase() === 'disabled') {
+        return res.status(400).json({
+          error: `Order creation rejected: Table "${cleanTableNum}" is currently disabled.`,
+        });
+      }
     }
 
     // 5. Idempotency Check
-    const targetOrderId = (req.body.orderId || req.body.idempotencyKey || '').trim() ||
-      `ORD-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    const rawOrderId =
+      (typeof body.orderId === 'string' ? body.orderId.trim() : '') ||
+      (typeof body.idempotencyKey === 'string' ? body.idempotencyKey.trim() : '');
+    const targetOrderId =
+      rawOrderId ||
+      `ORD-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random()
+        .toString(36)
+        .substring(2, 8)
+        .toUpperCase()}`;
 
-    const existingOrderRef = doc(db, 'restaurants', tenantId, 'orders', targetOrderId);
-    const existingOrderSnap = await getDoc(existingOrderRef);
+    const existingOrderRef = adminDb
+      .collection('restaurants')
+      .doc(cleanTenantId)
+      .collection('orders')
+      .doc(targetOrderId);
+    const existingOrderSnap = await existingOrderRef.get();
 
-    if (existingOrderSnap.exists()) {
-      const existingData = existingOrderSnap.data();
+    if (existingOrderSnap.exists) {
+      const existingData = (existingOrderSnap.data() as Record<string, unknown>) || {};
       return res.status(200).json({
         success: true,
         orderId: targetOrderId,
         order: { ...existingData, id: targetOrderId, orderId: targetOrderId },
-        primaryOrderId: (existingData as any)?.primaryOrderId || targetOrderId,
-        sessionId: (existingData as any)?.sessionId || req.body.sessionId || '',
-        isDuplicate: true
+        primaryOrderId:
+          (typeof existingData.primaryOrderId === 'string' && existingData.primaryOrderId) ||
+          targetOrderId,
+        sessionId:
+          (typeof existingData.sessionId === 'string' && existingData.sessionId) ||
+          (typeof body.sessionId === 'string' ? body.sessionId : ''),
+        isDuplicate: true,
       });
     }
 
     // 6. Retrieve Canonical Menu Items & Recalculate Subtotal
     let authoritativeSubtotal = 0;
-    const verifiedItems: any[] = [];
+    const verifiedItems: VerifiedOrderItem[] = [];
 
-    for (const itemReq of items) {
-      if (!itemReq.itemId || typeof itemReq.itemId !== 'string') {
-        return res.status(400).json({ error: 'Order creation rejected: Each item must contain a valid itemId.' });
+    for (const rawItem of items) {
+      const itemReq = (rawItem || {}) as OrderItemInput;
+      if (typeof itemReq.itemId !== 'string' || !itemReq.itemId.trim()) {
+        return res
+          .status(400)
+          .json({ error: 'Order creation rejected: Each item must contain a valid itemId.' });
       }
+      const itemId = itemReq.itemId.trim();
 
-      if (itemReq.tenantId && itemReq.tenantId !== tenantId) {
-        return res.status(400).json({ error: `Order creation rejected: Cross-tenant item injection detected. Item "${itemReq.itemId}" belongs to another restaurant.` });
+      if (typeof itemReq.tenantId === 'string' && itemReq.tenantId && itemReq.tenantId !== cleanTenantId) {
+        return res.status(400).json({
+          error: `Order creation rejected: Cross-tenant item injection detected. Item "${itemId}" belongs to another restaurant.`,
+        });
       }
 
       const count = Number(itemReq.count);
       if (!count || !Number.isInteger(count) || count <= 0) {
-        return res.status(400).json({ error: `Order creation rejected: Invalid quantity (${itemReq.count}) for item "${itemReq.itemId}". Quantity must be a positive integer.` });
+        return res.status(400).json({
+          error: `Order creation rejected: Invalid quantity (${String(
+            itemReq.count
+          )}) for item "${itemId}". Quantity must be a positive integer.`,
+        });
       }
       if (count > 100) {
-        return res.status(400).json({ error: `Order creation rejected: Quantity exceeds maximum allowable order limit (100) for item "${itemReq.itemId}".` });
+        return res.status(400).json({
+          error: `Order creation rejected: Quantity exceeds maximum allowable order limit (100) for item "${itemId}".`,
+        });
       }
 
-      const itemRef = doc(db, 'restaurants', tenantId, 'menu', 'default', 'items', itemReq.itemId);
-      const itemSnap = await getDoc(itemRef);
+      const itemRef = adminDb
+        .collection('restaurants')
+        .doc(cleanTenantId)
+        .collection('menu')
+        .doc('default')
+        .collection('items')
+        .doc(itemId);
+      const itemSnap = await itemRef.get();
 
-      if (!itemSnap.exists()) {
-        return res.status(400).json({ error: `Order creation rejected: Menu item "${itemReq.itemId}" does not exist in the restaurant menu.` });
+      if (!itemSnap.exists) {
+        return res.status(400).json({
+          error: `Order creation rejected: Menu item "${itemId}" does not exist in the restaurant menu.`,
+        });
       }
 
-      const canonicalItem = itemSnap.data() || {};
+      const canonicalItem = (itemSnap.data() as Record<string, unknown>) || {};
+      const itemName = String(canonicalItem.name || itemId);
 
-      if (canonicalItem.tenantId && canonicalItem.tenantId !== tenantId) {
-        return res.status(400).json({ error: `Order creation rejected: Cross-tenant item injection detected. Item "${itemReq.itemId}" belongs to another restaurant.` });
+      if (canonicalItem.tenantId && canonicalItem.tenantId !== cleanTenantId) {
+        return res.status(400).json({
+          error: `Order creation rejected: Cross-tenant item injection detected. Item "${itemId}" belongs to another restaurant.`,
+        });
       }
 
-      if (canonicalItem.isAvailable === false || canonicalItem.available === false || canonicalItem.availability === false) {
-        return res.status(400).json({ error: `Order creation rejected: Menu item "${canonicalItem.name || itemReq.itemId}" is currently sold out.` });
+      if (
+        canonicalItem.isAvailable === false ||
+        canonicalItem.available === false ||
+        canonicalItem.availability === false
+      ) {
+        return res.status(400).json({
+          error: `Order creation rejected: Menu item "${itemName}" is currently sold out.`,
+        });
       }
 
-      if (canonicalItem.isPublished === false || canonicalItem.published === false || canonicalItem.status === 'unpublished') {
-        return res.status(400).json({ error: `Order creation rejected: Menu item "${canonicalItem.name || itemReq.itemId}" is currently unpublished and cannot be ordered.` });
+      if (
+        canonicalItem.isPublished === false ||
+        canonicalItem.published === false ||
+        canonicalItem.status === 'unpublished'
+      ) {
+        return res.status(400).json({
+          error: `Order creation rejected: Menu item "${itemName}" is currently unpublished and cannot be ordered.`,
+        });
       }
 
       let unitPrice = Number(canonicalItem.discountPrice || canonicalItem.price || 0);
@@ -237,122 +290,163 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         unitPrice = Number(canonicalItem.price || 0);
       }
       if (unitPrice <= 0) {
-        return res.status(400).json({ error: `Order creation rejected: Canonical price for "${canonicalItem.name || itemReq.itemId}" is invalid.` });
+        return res.status(400).json({
+          error: `Order creation rejected: Canonical price for "${itemName}" is invalid.`,
+        });
       }
 
       const lineTotal = unitPrice * count;
       authoritativeSubtotal += lineTotal;
 
       verifiedItems.push({
-        itemId: itemReq.itemId,
-        name: String(canonicalItem.name || itemReq.itemId),
+        itemId,
+        name: itemName,
         count,
-        notes: (itemReq.notes || '').slice(0, 200),
+        notes: typeof itemReq.notes === 'string' ? itemReq.notes.slice(0, 200) : '',
         pricePerUnit: unitPrice,
-        image: canonicalItem.image || canonicalItem.imageUrl || '',
-        isVeg: canonicalItem.isVeg ?? canonicalItem.veg ?? false,
-        category: canonicalItem.category || canonicalItem.categoryId || ''
+        image: String(canonicalItem.image || canonicalItem.imageUrl || ''),
+        isVeg: Boolean(canonicalItem.isVeg ?? canonicalItem.veg ?? false),
+        category: String(canonicalItem.category || canonicalItem.categoryId || ''),
+        categoryId:
+          typeof canonicalItem.categoryId === 'string' ? canonicalItem.categoryId : undefined,
       });
     }
 
     if (authoritativeSubtotal <= 0) {
-      return res.status(400).json({ error: 'Order creation rejected: Authoritative order subtotal must be greater than 0.' });
+      return res.status(400).json({
+        error: 'Order creation rejected: Authoritative order subtotal must be greater than 0.',
+      });
     }
 
     // 7. Authoritative Tax, Service Charge, and Total
     let authoritativeDiscount = 0;
     let matchedPromotionId: string | null = null;
+    const rawDiscount = Number(body.discount || 0);
+    const hasCouponCode = typeof body.couponCode === 'string' && body.couponCode.trim().length > 0;
 
-    if ((req.body.discount && req.body.discount > 0) || req.body.couponCode) {
-      if (!req.body.couponCode) {
-        return res.status(400).json({ error: 'Order creation rejected: Custom discount without a valid coupon code is not allowed.' });
+    if (rawDiscount > 0 || hasCouponCode) {
+      if (!hasCouponCode) {
+        return res.status(400).json({
+          error: 'Order creation rejected: Custom discount without a valid coupon code is not allowed.',
+        });
       }
-      const rawCode = String(req.body.couponCode).trim().toUpperCase();
+      const rawCode = String(body.couponCode).trim().toUpperCase();
 
-      // Look up in canonical promotions collection first
-      const promoCol = collection(db, 'restaurants', tenantId, 'promotions');
-      const qPromo = query(promoCol, where('code', '==', rawCode));
-      let promoSnap = await getDocs(qPromo);
+      const promoCol = adminDb
+        .collection('restaurants')
+        .doc(cleanTenantId)
+        .collection('promotions');
+      const promoSnap = await promoCol.where('code', '==', rawCode).get();
 
-      let promoData: any = null;
+      let promoData: Record<string, unknown> | null = null;
       if (!promoSnap.empty) {
-        promoData = promoSnap.docs[0].data();
+        promoData = promoSnap.docs[0].data() as Record<string, unknown>;
         matchedPromotionId = promoSnap.docs[0].id;
       } else {
-        const qPromoAlt = query(promoCol, where('couponCode', '==', rawCode));
-        const promoSnapAlt = await getDocs(qPromoAlt);
+        const promoSnapAlt = await promoCol.where('couponCode', '==', rawCode).get();
         if (!promoSnapAlt.empty) {
-          promoData = promoSnapAlt.docs[0].data();
+          promoData = promoSnapAlt.docs[0].data() as Record<string, unknown>;
           matchedPromotionId = promoSnapAlt.docs[0].id;
         } else {
-          const couponRef = doc(db, 'restaurants', tenantId, 'coupons', rawCode);
-          const couponSnap = await getDoc(couponRef);
-          if (couponSnap.exists()) {
-            promoData = couponSnap.data() || {};
+          const couponRef = adminDb
+            .collection('restaurants')
+            .doc(cleanTenantId)
+            .collection('coupons')
+            .doc(rawCode);
+          const couponSnap = await couponRef.get();
+          if (couponSnap.exists) {
+            promoData = (couponSnap.data() as Record<string, unknown>) || {};
           }
         }
       }
 
       if (!promoData) {
-        return res.status(400).json({ error: `Order creation rejected: Coupon code "${rawCode}" is invalid or expired.` });
+        return res.status(400).json({
+          error: `Order creation rejected: Coupon code "${rawCode}" is invalid or expired.`,
+        });
       }
 
       const nowMs = Date.now();
       const isStatusActive = promoData.status === 'active' || promoData.isActive === true;
       if (!isStatusActive) {
-        return res.status(400).json({ error: `Order creation rejected: Coupon code "${rawCode}" is currently inactive or paused.` });
+        return res.status(400).json({
+          error: `Order creation rejected: Coupon code "${rawCode}" is currently inactive or paused.`,
+        });
       }
 
       if (promoData.startDate) {
-        const startMs = new Date(promoData.startDate).getTime();
-        if (!isNaN(startMs) && nowMs < startMs) {
-          return res.status(400).json({ error: `Order creation rejected: Coupon code "${rawCode}" is not yet active.` });
+        const startMs = new Date(String(promoData.startDate)).getTime();
+        if (!Number.isNaN(startMs) && nowMs < startMs) {
+          return res.status(400).json({
+            error: `Order creation rejected: Coupon code "${rawCode}" is not yet active.`,
+          });
         }
       }
 
       if (promoData.endDate) {
-        const endMs = new Date(promoData.endDate).getTime();
-        if (!isNaN(endMs) && nowMs > endMs) {
-          return res.status(400).json({ error: `Order creation rejected: Coupon code "${rawCode}" has expired.` });
+        const endMs = new Date(String(promoData.endDate)).getTime();
+        if (!Number.isNaN(endMs) && nowMs > endMs) {
+          return res.status(400).json({
+            error: `Order creation rejected: Coupon code "${rawCode}" has expired.`,
+          });
         }
       }
 
       if (typeof promoData.globalUsageLimit === 'number' && promoData.globalUsageLimit > 0) {
-        if ((promoData.redemptionCount || 0) >= promoData.globalUsageLimit) {
-          return res.status(400).json({ error: `Order creation rejected: Coupon code "${rawCode}" has reached its maximum global redemptions.` });
+        if (Number(promoData.redemptionCount || 0) >= promoData.globalUsageLimit) {
+          return res.status(400).json({
+            error: `Order creation rejected: Coupon code "${rawCode}" has reached its maximum global redemptions.`,
+          });
         }
       }
 
-      const minOrder = Number(promoData.minOrderSubtotal || promoData.minOrderValue || promoData.minOrder || 0);
+      const minOrder = Number(
+        promoData.minOrderSubtotal || promoData.minOrderValue || promoData.minOrder || 0
+      );
       if (minOrder > 0 && authoritativeSubtotal < minOrder) {
-        return res.status(400).json({ error: `Order creation rejected: Minimum order subtotal of ₹${minOrder} is required for coupon "${rawCode}".` });
+        return res.status(400).json({
+          error: `Order creation rejected: Minimum order subtotal of ₹${minOrder} is required for coupon "${rawCode}".`,
+        });
       }
 
-      // Calculate authoritative discount scoped to eligible items if specified
       let eligibleSubtotal = authoritativeSubtotal;
-      const hasItemScope = Array.isArray(promoData.applicableItemIds) && promoData.applicableItemIds.length > 0;
-      const hasCategoryScope = Array.isArray(promoData.applicableCategoryIds) && promoData.applicableCategoryIds.length > 0;
+      const applicableItemIds = Array.isArray(promoData.applicableItemIds)
+        ? (promoData.applicableItemIds as string[])
+        : [];
+      const applicableCategoryIds = Array.isArray(promoData.applicableCategoryIds)
+        ? (promoData.applicableCategoryIds as string[])
+        : [];
+
+      const hasItemScope = applicableItemIds.length > 0;
+      const hasCategoryScope = applicableCategoryIds.length > 0;
 
       if (hasItemScope || hasCategoryScope) {
         eligibleSubtotal = verifiedItems.reduce((acc, item) => {
-          const itemMatch = hasItemScope && promoData.applicableItemIds.includes(item.itemId);
-          const catMatch = hasCategoryScope && (
-            (item.category && promoData.applicableCategoryIds.includes(item.category)) ||
-            (item.categoryId && promoData.applicableCategoryIds.includes(item.categoryId))
-          );
+          const itemMatch = hasItemScope && applicableItemIds.includes(item.itemId);
+          const catMatch =
+            hasCategoryScope &&
+            ((item.category && applicableCategoryIds.includes(item.category)) ||
+              (item.categoryId && applicableCategoryIds.includes(item.categoryId)));
           if (itemMatch || catMatch) {
-            return acc + (item.pricePerUnit * item.count);
+            return acc + item.pricePerUnit * item.count;
           }
           return acc;
         }, 0);
 
         if (eligibleSubtotal <= 0) {
-          return res.status(400).json({ error: `Order creation rejected: Coupon code "${rawCode}" is only applicable to selected items or categories.` });
+          return res.status(400).json({
+            error: `Order creation rejected: Coupon code "${rawCode}" is only applicable to selected items or categories.`,
+          });
         }
       }
 
-      const isPercent = promoData.discountType === 'percentage' || promoData.type === 'percentage' || Boolean(promoData.percentage);
-      const discountVal = Number(promoData.discountValue || promoData.value || promoData.percentage || promoData.amount || 0);
+      const isPercent =
+        promoData.discountType === 'percentage' ||
+        promoData.type === 'percentage' ||
+        Boolean(promoData.percentage);
+      const discountVal = Number(
+        promoData.discountValue || promoData.value || promoData.percentage || promoData.amount || 0
+      );
 
       if (isPercent) {
         authoritativeDiscount = Math.round(eligibleSubtotal * (discountVal / 100));
@@ -366,28 +460,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    const configuredTaxPercent = restaurantSettings.taxPercent !== undefined 
-      ? Number(restaurantSettings.taxPercent) 
-      : (restaurantSettings.taxRate !== undefined ? Number(restaurantSettings.taxRate) : 5);
-      
-    const configuredServiceChargePercent = (req.body.orderType === 'dine_in' || !req.body.orderType)
-      ? (restaurantSettings.serviceCharge !== undefined 
-          ? Number(restaurantSettings.serviceCharge) 
-          : (restaurantSettings.serviceChargePercent !== undefined ? Number(restaurantSettings.serviceChargePercent) : 5))
-      : 0;
+    const configuredTaxPercent =
+      restaurantSettings.taxPercent !== undefined
+        ? Number(restaurantSettings.taxPercent)
+        : restaurantSettings.taxRate !== undefined
+          ? Number(restaurantSettings.taxRate)
+          : 5;
+
+    const configuredServiceChargePercent =
+      body.orderType === 'dine_in' || !body.orderType
+        ? restaurantSettings.serviceCharge !== undefined
+          ? Number(restaurantSettings.serviceCharge)
+          : restaurantSettings.serviceChargePercent !== undefined
+            ? Number(restaurantSettings.serviceChargePercent)
+            : 5
+        : 0;
 
     const taxableBase = Math.max(0, authoritativeSubtotal - authoritativeDiscount);
     const authoritativeTax = Math.round(taxableBase * (configuredTaxPercent / 100));
-    const authoritativeServiceCharge = Math.round(taxableBase * (configuredServiceChargePercent / 100));
+    const authoritativeServiceCharge = Math.round(
+      taxableBase * (configuredServiceChargePercent / 100)
+    );
     const authoritativeTotal = taxableBase + authoritativeTax + authoritativeServiceCharge;
 
-    const sessionId = (req.body.sessionId || '').trim() || 
-      `SES-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    const sessionId =
+      (typeof body.sessionId === 'string' && body.sessionId.trim()) ||
+      `SES-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.random()
+        .toString(36)
+        .substring(2, 8)
+        .toUpperCase()}`;
 
-    const isAdditional = Boolean(req.body.isAdditionalOrder || (req.body.orderSequence && req.body.orderSequence > 1));
-    const primaryOrderId = (req.body.primaryOrderId || '').trim() || targetOrderId;
-    const orderSequence = req.body.orderSequence || (isAdditional ? 2 : 1);
+    const seqNum = typeof body.orderSequence === 'number' ? body.orderSequence : 0;
+    const isAdditional = Boolean(body.isAdditionalOrder || seqNum > 1);
+    const primaryOrderId =
+      (typeof body.primaryOrderId === 'string' && body.primaryOrderId.trim()) || targetOrderId;
+    const orderSequence = seqNum || (isAdditional ? 2 : 1);
     const nowIso = new Date().toISOString();
+
+    const cleanCouponCode = hasCouponCode ? String(body.couponCode).trim().toUpperCase() : undefined;
+
+    const cleanedItems = verifiedItems.map((item) => ({
+      itemId: item.itemId,
+      name: item.name,
+      count: item.count,
+      notes: item.notes,
+      pricePerUnit: item.pricePerUnit,
+      image: item.image,
+      isVeg: item.isVeg,
+      category: item.category,
+    }));
 
     const validatedOrder = {
       id: targetOrderId,
@@ -397,37 +518,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       orderSequence,
       isAdditionalOrder: isAdditional,
       customerId: verifiedUid,
-      customerName: (req.body.customerName || 'Guest Diner').trim(),
-      phone: (req.body.phone || '+91 98765 43210').trim(),
-      tenantId,
-      restaurantId: tenantId,
-      branchId: req.body.branchId || 'main',
+      customerName:
+        typeof body.customerName === 'string' && body.customerName.trim()
+          ? body.customerName.trim()
+          : 'Guest Diner',
+      phone:
+        typeof body.phone === 'string' && body.phone.trim()
+          ? body.phone.trim()
+          : '+91 98765 43210',
+      tenantId: cleanTenantId,
+      restaurantId: cleanTenantId,
+      branchId: typeof body.branchId === 'string' && body.branchId ? body.branchId : 'main',
       tableId: resolvedTableId,
       tableNumber: cleanTableNum,
-      tableName: req.body.tableName || `Table ${cleanTableNum}`,
-      orderType: req.body.orderType || 'dine_in',
-      orderSource: req.body.orderSource || 'qr',
-      items: verifiedItems,
+      tableName:
+        typeof body.tableName === 'string' && body.tableName
+          ? body.tableName
+          : `Table ${cleanTableNum}`,
+      orderType: typeof body.orderType === 'string' && body.orderType ? body.orderType : 'dine_in',
+      orderSource:
+        typeof body.orderSource === 'string' && body.orderSource ? body.orderSource : 'qr',
+      items: cleanedItems,
       subtotal: authoritativeSubtotal,
       tax: authoritativeTax,
       taxPercent: configuredTaxPercent,
       serviceCharge: authoritativeServiceCharge,
       serviceChargePercent: configuredServiceChargePercent,
       discount: authoritativeDiscount,
-      discountLabel: req.body.couponCode ? `Coupon ${String(req.body.couponCode).trim().toUpperCase()}` : undefined,
-      couponCode: req.body.couponCode ? String(req.body.couponCode).trim().toUpperCase() : undefined,
+      discountLabel: cleanCouponCode ? `Coupon ${cleanCouponCode}` : undefined,
+      couponCode: cleanCouponCode,
       appliedPromotionId: matchedPromotionId || undefined,
       total: authoritativeTotal,
       totalAmount: authoritativeTotal,
       status: 'NEW',
       paymentStatus: 'pending',
-      specialInstructions: (req.body.specialInstructions || '').slice(0, 300),
+      specialInstructions:
+        typeof body.specialInstructions === 'string' ? body.specialInstructions.slice(0, 300) : '',
       createdAt: nowIso,
-      updatedAt: nowIso
+      updatedAt: nowIso,
     };
 
-    // Sanitize validatedOrder to remove any undefined fields before Firestore write
-    const sanitizedOrder: Record<string, any> = {};
+    const sanitizedOrder: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(validatedOrder)) {
       if (value !== undefined) {
         sanitizedOrder[key] = value;
@@ -435,58 +566,70 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 8. Persist Order to Firestore
-    await setDoc(existingOrderRef, sanitizedOrder);
+    await existingOrderRef.set(sanitizedOrder);
 
     // 8b. Record promotion redemption metric
     if (matchedPromotionId) {
       try {
-        const promoRef = doc(db, 'restaurants', tenantId, 'promotions', matchedPromotionId);
-        const promoDoc = await getDoc(promoRef);
-        if (promoDoc.exists()) {
-          const pData = promoDoc.data() || {};
-          const currentCount = Number(pData.redemptionCount || 0);
-          await updateDoc(promoRef, {
-            redemptionCount: currentCount + 1,
-            'metrics.redemptions': (pData.metrics?.redemptions || 0) + 1,
-            'metrics.totalDiscountGiven': (pData.metrics?.totalDiscountGiven || 0) + authoritativeDiscount,
-            'metrics.totalRevenueGenerated': (pData.metrics?.totalRevenueGenerated || 0) + authoritativeTotal,
-            updatedAt: nowIso
-          });
-        }
+        const promoRef = adminDb
+          .collection('restaurants')
+          .doc(cleanTenantId)
+          .collection('promotions')
+          .doc(matchedPromotionId);
+        await promoRef.update({
+          redemptionCount: FieldValue.increment(1),
+          'metrics.redemptions': FieldValue.increment(1),
+          'metrics.totalDiscountGiven': FieldValue.increment(authoritativeDiscount),
+          'metrics.totalRevenueGenerated': FieldValue.increment(authoritativeTotal),
+          updatedAt: nowIso,
+        });
       } catch (promoRedeemErr) {
-        console.warn('[api/orders/create] Promotion redemption metric update notice:', promoRedeemErr);
+        console.warn(
+          '[api/orders/create] Promotion redemption metric update notice:',
+          promoRedeemErr
+        );
       }
     }
 
     // 9. Persist KOT Ticket
-    const kotRef = doc(db, 'restaurants', tenantId, 'kitchenTickets', `KOT-${targetOrderId}`);
-    await setDoc(kotRef, {
-      id: `KOT-${targetOrderId}`,
-      orderId: targetOrderId,
-      tenantId,
-      tableNumber: cleanTableNum,
-      round: orderSequence,
-      status: 'NEW',
-      items: verifiedItems,
-      customerName: validatedOrder.customerName,
-      createdAt: nowIso,
-      updatedAt: nowIso
-    }).catch(err => console.warn('[api/orders/create] KOT write warning:', err));
+    const kotRef = adminDb
+      .collection('restaurants')
+      .doc(cleanTenantId)
+      .collection('kitchenTickets')
+      .doc(`KOT-${targetOrderId}`);
+    await kotRef
+      .set({
+        id: `KOT-${targetOrderId}`,
+        orderId: targetOrderId,
+        tenantId: cleanTenantId,
+        tableNumber: cleanTableNum,
+        round: orderSequence,
+        status: 'NEW',
+        items: cleanedItems,
+        customerName: validatedOrder.customerName,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      })
+      .catch((err) => console.warn('[api/orders/create] KOT write warning:', err));
 
     return res.status(200).json({
       success: true,
       orderId: targetOrderId,
-      order: validatedOrder,
+      order: sanitizedOrder,
       primaryOrderId,
       sessionId,
       isDuplicate: false,
-      kotTicketId: `KOT-${targetOrderId}`
+      kotTicketId: `KOT-${targetOrderId}`,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    if (err instanceof FirebaseAdminInitError) {
+      return handleAuthError(res, err);
+    }
+    const message = err instanceof Error ? err.message : 'Order validation failed.';
     console.error('[API /api/orders/create] Validation failed:', err);
     return res.status(400).json({
       success: false,
-      error: err.message || 'Order validation failed.'
+      error: message,
     });
   }
 }

@@ -1,75 +1,108 @@
+#!/usr/bin/env node
+
 import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword 
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  getDocs, 
-  deleteDoc,
-  doc
-} from 'firebase/firestore';
+import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
+import { getFirestore, collection, getDocs, deleteDoc } from 'firebase/firestore';
+import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
-import fs from 'fs';
+
+const require = createRequire(import.meta.url);
+const {
+  PRODUCTION_PROJECT_ID,
+  normalizeEnvName,
+  parseCliFlags,
+  loadScriptEnvironment,
+  assertNotProductionProject,
+  resolveScriptFirebaseConfig,
+  resolveRunnerCredentials,
+} = require('./_lib/envGuard.cjs');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const rootDir = resolve(__dirname, '..');
 
-// Read .env file manually using native fs
-const envPath = resolve(__dirname, '../.env');
-if (fs.existsSync(envPath)) {
-  const envContent = fs.readFileSync(envPath, 'utf-8');
-  envContent.split('\n').forEach(line => {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-      const parts = trimmed.split('=');
-      const key = parts[0].trim();
-      const val = parts.slice(1).join('=').trim().replace(/^["']|["']$/g, '');
-      if (key && !process.env[key]) {
-        process.env[key] = val;
-      }
-    }
-  });
+const flags = parseCliFlags();
+const requestedEnv = normalizeEnvName(flags.env || process.env.APP_ENV || process.env.VITE_APP_ENV || 'development');
+
+console.log('----------------------------------------------------');
+console.log('SPIRALDINE — DEVELOPMENT DATABASE RESET SCRIPT');
+console.log('----------------------------------------------------');
+
+// 0. PERMANENT PRODUCTION REFUSAL
+if (requestedEnv === 'production' || requestedEnv === 'staging') {
+  console.error(`\n[SAFETY ABORT] reset-dev-db.js only operates on isolated "development" environments (received "${requestedEnv}").`);
+  process.exit(1);
 }
 
-const targetProjectId = 'spiral-restaurant-saas-v1';
-const currentProjectId = process.env.VITE_FIREBASE_PROJECT_ID;
+if (flags.project) {
+  try {
+    assertNotProductionProject(flags.project, 'reset-dev-db.js (--project)');
+  } catch (err) {
+    console.error(`\n${err.message}`);
+    process.exit(1);
+  }
+}
 
-console.log('----------------------------------------------------');
-console.log('RESTAURANTOS — DEVELOPMENT DATABASE RESET SCRIPT');
-console.log('----------------------------------------------------');
-console.log('Target Project ID:', targetProjectId);
-console.log('Config Project ID:', currentProjectId);
+try {
+  assertNotProductionProject(
+    {
+      projectId: process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || '',
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN || process.env.VITE_FIREBASE_AUTH_DOMAIN || '',
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET || process.env.VITE_FIREBASE_STORAGE_BUCKET || '',
+    },
+    'reset-dev-db.js (process.env)'
+  );
+} catch (err) {
+  console.error(`\n${err.message}`);
+  process.exit(1);
+}
 
-// 1. SAFETY SAFEGUARD CHECK #1: Environment Confirmation Flag
+// 1. SAFETY SAFEGUARD CHECK #1: Explicit confirmation env var
 if (process.env.RESET_DEVELOPMENT_DATABASE !== 'true') {
   console.error('\n[SAFETY ABORT] Environment variable RESET_DEVELOPMENT_DATABASE=true is missing!');
-  console.error('To run this script safely, execute:\n');
-  console.error('  $env:RESET_DEVELOPMENT_DATABASE="true"; npm run reset:dev\n');
+  console.error('Usage:\n  $env:RESET_DEVELOPMENT_DATABASE="true"; node scripts/reset-dev-db.js --project <dev-project-id>\n');
   process.exit(1);
 }
 
-// 2. SAFETY SAFEGUARD CHECK #2: Project ID Matching
-if (!currentProjectId || currentProjectId !== targetProjectId) {
-  console.error(`\n[SAFETY ABORT] Firebase project ID mismatch! Target: "${targetProjectId}", Found: "${currentProjectId}".`);
-  console.error('Refusing to delete data against an unverified project.');
+// 2. Load ONLY development env files (never root .env) and validate config strictly
+loadScriptEnvironment({ rootDir, envName: 'development' });
+
+let firebaseConfig;
+try {
+  firebaseConfig = resolveScriptFirebaseConfig(process.env, { expectedEnv: 'development' });
+  assertNotProductionProject(firebaseConfig, 'reset-dev-db.js (resolved config)');
+} catch (err) {
+  console.error(`\n[SAFETY ABORT] ${err.message}`);
+  console.error(`Confirmed production project "${PRODUCTION_PROJECT_ID}" is permanently blocked from reset-dev-db.js.`);
   process.exit(1);
 }
 
-console.log('\n[SAFETY VERIFIED] Project ID matches spiral-restaurant-saas-v1 and confirmation flag is set.');
-console.log('Beginning database reset...\n');
+// 3. SAFETY SAFEGUARD CHECK #2: Explicit --project must match loaded dev project
+if (!flags.project) {
+  console.error('\n[SAFETY ABORT] Explicit --project <dev-project-id> CLI flag is required to prevent accidental resets.');
+  process.exit(1);
+}
 
-const firebaseConfig = {
-  apiKey: process.env.VITE_FIREBASE_API_KEY,
-  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: currentProjectId,
-  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.VITE_FIREBASE_APP_ID,
-};
+if (flags.project !== firebaseConfig.projectId) {
+  console.error(
+    `\n[SAFETY ABORT] --project "${flags.project}" does not match configured development project "${firebaseConfig.projectId}".`
+  );
+  process.exit(1);
+}
+
+let runnerCreds;
+try {
+  runnerCreds = resolveRunnerCredentials(process.env);
+} catch (err) {
+  console.error(`\n[SAFETY ABORT] ${err.message}`);
+  process.exit(1);
+}
+
+console.log('Environment:      development');
+console.log('Verified Project:', firebaseConfig.projectId);
+console.log('\n[SAFETY VERIFIED] Development project verified and non-production guarantees passed.');
+console.log('Beginning development database reset...\n');
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -81,7 +114,7 @@ const ROOT_COLLECTIONS = [
   'employees',
   'restaurants',
   'supportTickets',
-  'auditLogs'
+  'auditLogs',
 ];
 
 const TENANT_SUBCOLLECTIONS = [
@@ -100,27 +133,8 @@ const TENANT_SUBCOLLECTIONS = [
   'notifications',
   'events',
   'automationRules',
-  'tasks'
+  'tasks',
 ];
-
-async function authenticateDevAdmin() {
-  const adminEmail = 'dev-admin-reset@restaurantos.internal';
-  const adminPass = 'DevResetSecret123!';
-  try {
-    const cred = await signInWithEmailAndPassword(auth, adminEmail, adminPass);
-    console.log('[AUTH] Authenticated reset runner as:', cred.user.email);
-    return cred.user;
-  } catch (err) {
-    try {
-      const cred = await createUserWithEmailAndPassword(auth, adminEmail, adminPass);
-      console.log('[AUTH] Provisioned & authenticated reset runner as:', cred.user.email);
-      return cred.user;
-    } catch (createErr) {
-      console.warn('[AUTH] Auth runner initialization note:', createErr.message);
-      return null;
-    }
-  }
-}
 
 async function deleteCollectionDocs(collectionPath) {
   let count = 0;
@@ -140,7 +154,8 @@ async function deleteCollectionDocs(collectionPath) {
 }
 
 async function performReset() {
-  const adminUser = await authenticateDevAdmin();
+  const cred = await signInWithEmailAndPassword(auth, runnerCreds.email, runnerCreds.password);
+  console.log('[AUTH] Authenticated reset runner as:', cred.user.email);
 
   const stats = {};
 
@@ -165,27 +180,19 @@ async function performReset() {
     stats[rootCol] = deletedCount;
   }
 
-  // Clean up dev admin user document if created
-  if (adminUser) {
-    try {
-      await deleteDoc(doc(db, 'users', adminUser.uid));
-    } catch (e) {}
-  }
-
   console.log('----------------------------------------------------');
-  console.log('DATABASE RESET SUMMARY RESULT');
+  console.log('DEVELOPMENT DATABASE RESET SUMMARY RESULT');
   console.log('----------------------------------------------------');
   for (const [key, count] of Object.entries(stats)) {
     console.log(`- ${key}: ${count} document(s) deleted`);
   }
   console.log('----------------------------------------------------');
-  console.log('✅ Firestore application database reset completed cleanly.');
-  console.log('Zero test restaurants or user profiles remain.');
+  console.log('✅ Development Firestore database reset completed cleanly.');
   console.log('----------------------------------------------------');
   process.exit(0);
 }
 
 performReset().catch((err) => {
-  console.error('Fatal error during reset:', err);
+  console.error('Fatal error during development reset:', err?.message || err);
   process.exit(1);
 });

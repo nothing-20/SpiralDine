@@ -8,7 +8,7 @@ const __dirname = dirname(__filename);
 
 const EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 const [HOST, PORT] = EMULATOR_HOST.split(':');
-const PROJECT_ID = process.env.GCLOUD_PROJECT || 'spiral-restaurant-saas-v1';
+const PROJECT_ID = process.env.GCLOUD_PROJECT || 'demo-spiraldine-emulator';
 
 console.log('================================================================');
 console.log('SPIRALDINE PHASE 14: ORDER VALIDATION ARCHITECTURE & BOUNDARY AUDIT');
@@ -43,7 +43,7 @@ function createEmulatorToken(payload) {
 function firestoreRequest({ path, method = 'GET', body = null, tokenPayload = null, rawToken = null }) {
   return new Promise((resolve, reject) => {
     const urlPath = `/v1/projects/${PROJECT_ID}/databases/(default)/documents/${path}`;
-    
+
     const headers = {
       'Content-Type': 'application/json'
     };
@@ -71,7 +71,7 @@ function firestoreRequest({ path, method = 'GET', body = null, tokenPayload = nu
         let parsed = null;
         try {
           if (data) parsed = JSON.parse(data);
-        } catch (_) {}
+        } catch (_) { }
         resolve({
           statusCode: res.statusCode,
           headers: res.headers,
@@ -386,14 +386,14 @@ async function executeApiOrderCreate({ headers = {}, body = {}, adminToken }) {
   }
 
   // Tax & Service Charge computation from restaurant settings
-  const configuredTaxPercent = restaurantSettings.taxPercent !== undefined 
-    ? Number(restaurantSettings.taxPercent) 
+  const configuredTaxPercent = restaurantSettings.taxPercent !== undefined
+    ? Number(restaurantSettings.taxPercent)
     : (restaurantSettings.taxRate !== undefined ? Number(restaurantSettings.taxRate) : 5);
-    
+
   const configuredServiceChargePercent = (body.orderType === 'dine_in' || !body.orderType)
-    ? (restaurantSettings.serviceCharge !== undefined 
-        ? Number(restaurantSettings.serviceCharge) 
-        : (restaurantSettings.serviceChargePercent !== undefined ? Number(restaurantSettings.serviceChargePercent) : 5))
+    ? (restaurantSettings.serviceCharge !== undefined
+      ? Number(restaurantSettings.serviceCharge)
+      : (restaurantSettings.serviceChargePercent !== undefined ? Number(restaurantSettings.serviceChargePercent) : 5))
     : 0;
 
   const taxableBase = Math.max(0, authoritativeSubtotal - authoritativeDiscount);
@@ -477,16 +477,18 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantA}`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      name: 'Phase 14 Grand Pavilion',
-      tenantId: tenantA,
-      status: 'active',
-      isActive: true,
-      settings: {
-        taxPercent: 10,
-        serviceCharge: 8
-      }
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        name: 'Phase 14 Grand Pavilion',
+        tenantId: tenantA,
+        status: 'active',
+        isActive: true,
+        settings: {
+          taxPercent: 10,
+          serviceCharge: 8
+        }
+      })
+    }
   });
 
   // Seed Restaurant B
@@ -494,12 +496,14 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantB}`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      name: 'Phase 14 Bistro B',
-      tenantId: tenantB,
-      status: 'active',
-      isActive: true
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        name: 'Phase 14 Bistro B',
+        tenantId: tenantB,
+        status: 'active',
+        isActive: true
+      })
+    }
   });
 
   // Seed Table 1 (Active) in Restaurant A
@@ -507,13 +511,15 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantA}/tables/TBL-1`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'TBL-1',
-      number: '1',
-      restaurantId: tenantA,
-      isActive: true,
-      status: 'Available'
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'TBL-1',
+        number: '1',
+        restaurantId: tenantA,
+        isActive: true,
+        status: 'Available'
+      })
+    }
   });
 
   // Seed Table 2 (Disabled) in Restaurant A
@@ -521,13 +527,15 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantA}/tables/TBL-2`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'TBL-2',
-      number: '2',
-      restaurantId: tenantA,
-      isActive: false,
-      status: 'Disabled'
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'TBL-2',
+        number: '2',
+        restaurantId: tenantA,
+        isActive: false,
+        status: 'Disabled'
+      })
+    }
   });
 
   // Seed Table 99 in Restaurant B
@@ -535,13 +543,15 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantB}/tables/TBL-99`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'TBL-99',
-      number: '99',
-      restaurantId: tenantB,
-      isActive: true,
-      status: 'Available'
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'TBL-99',
+        number: '99',
+        restaurantId: tenantB,
+        isActive: true,
+        status: 'Available'
+      })
+    }
   });
 
   // Seed Menu Items for Restaurant A
@@ -550,15 +560,17 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantA}/menu/default/items/ITEM-P14-PANEER`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'ITEM-P14-PANEER',
-      name: 'Paneer Tikka',
-      price: 250,
-      tenantId: tenantA,
-      isAvailable: true,
-      isPublished: true,
-      category: 'Starters'
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'ITEM-P14-PANEER',
+        name: 'Paneer Tikka',
+        price: 250,
+        tenantId: tenantA,
+        isAvailable: true,
+        isPublished: true,
+        category: 'Starters'
+      })
+    }
   });
 
   // 2. Out of stock item: Truffle Soup
@@ -566,15 +578,17 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantA}/menu/default/items/ITEM-P14-SOUP`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'ITEM-P14-SOUP',
-      name: 'Truffle Soup',
-      price: 350,
-      tenantId: tenantA,
-      isAvailable: false, // SOLD OUT
-      isPublished: true,
-      category: 'Soups'
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'ITEM-P14-SOUP',
+        name: 'Truffle Soup',
+        price: 350,
+        tenantId: tenantA,
+        isAvailable: false, // SOLD OUT
+        isPublished: true,
+        category: 'Soups'
+      })
+    }
   });
 
   // 3. Unpublished item: Secret Cocktail
@@ -582,16 +596,18 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantA}/menu/default/items/ITEM-P14-COCKTAIL`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'ITEM-P14-COCKTAIL',
-      name: 'Secret Cocktail',
-      price: 500,
-      tenantId: tenantA,
-      isAvailable: true,
-      isPublished: false, // UNPUBLISHED
-      status: 'unpublished',
-      category: 'Beverages'
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'ITEM-P14-COCKTAIL',
+        name: 'Secret Cocktail',
+        price: 500,
+        tenantId: tenantA,
+        isAvailable: true,
+        isPublished: false, // UNPUBLISHED
+        status: 'unpublished',
+        category: 'Beverages'
+      })
+    }
   });
 
   // Seed Menu Item for Restaurant B: Wagyu Slider
@@ -599,15 +615,17 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantB}/menu/default/items/ITEM-P14-WAGYU`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'ITEM-P14-WAGYU',
-      name: 'Wagyu Slider',
-      price: 900,
-      tenantId: tenantB,
-      isAvailable: true,
-      isPublished: true,
-      category: 'Burgers'
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'ITEM-P14-WAGYU',
+        name: 'Wagyu Slider',
+        price: 900,
+        tenantId: tenantB,
+        isAvailable: true,
+        isPublished: true,
+        category: 'Burgers'
+      })
+    }
   });
 
   console.log('--- FIXTURES SEEDED SUCCESSFULLY ---\n');
@@ -926,19 +944,21 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantA}/orders/ORD-ATTACK-PAID`,
     method: 'PATCH',
     tokenPayload: customerAliceToken,
-    body: { fields: toFirestoreFields({
-      id: 'ORD-ATTACK-PAID',
-      orderId: 'ORD-ATTACK-PAID',
-      tenantId: tenantA,
-      customerId: 'cust_p14_alice',
-      status: 'NEW',
-      paymentStatus: 'paid', // ATTEMPT TO FRAUDULENTLY SELF-APPROVE PAYMENT!
-      total: 500,
-      subtotal: 500,
-      tax: 0,
-      discount: 0,
-      items: [{ itemId: 'ITEM-P14-PANEER', count: 2 }]
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'ORD-ATTACK-PAID',
+        orderId: 'ORD-ATTACK-PAID',
+        tenantId: tenantA,
+        customerId: 'cust_p14_alice',
+        status: 'NEW',
+        paymentStatus: 'paid', // ATTEMPT TO FRAUDULENTLY SELF-APPROVE PAYMENT!
+        total: 500,
+        subtotal: 500,
+        tax: 0,
+        discount: 0,
+        items: [{ itemId: 'ITEM-P14-PANEER', count: 2 }]
+      })
+    }
   });
 
   recordResult({
@@ -958,19 +978,21 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantA}/orders/ORD-ATTACK-NEGATIVE`,
     method: 'PATCH',
     tokenPayload: customerAliceToken,
-    body: { fields: toFirestoreFields({
-      id: 'ORD-ATTACK-NEGATIVE',
-      orderId: 'ORD-ATTACK-NEGATIVE',
-      tenantId: tenantA,
-      customerId: 'cust_p14_alice',
-      status: 'NEW',
-      paymentStatus: 'pending',
-      total: -500, // Negative total!
-      subtotal: -500,
-      tax: 0,
-      discount: 0,
-      items: [{ itemId: 'ITEM-P14-PANEER', count: 1 }]
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'ORD-ATTACK-NEGATIVE',
+        orderId: 'ORD-ATTACK-NEGATIVE',
+        tenantId: tenantA,
+        customerId: 'cust_p14_alice',
+        status: 'NEW',
+        paymentStatus: 'pending',
+        total: -500, // Negative total!
+        subtotal: -500,
+        tax: 0,
+        discount: 0,
+        items: [{ itemId: 'ITEM-P14-PANEER', count: 1 }]
+      })
+    }
   });
 
   recordResult({
@@ -991,20 +1013,22 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantA}/orders/ORD-ALICE-ESTABLISHED`,
     method: 'PATCH',
     tokenPayload: customerAliceToken,
-    body: { fields: toFirestoreFields({
-      id: 'ORD-ALICE-ESTABLISHED',
-      orderId: 'ORD-ALICE-ESTABLISHED',
-      tenantId: tenantA,
-      customerId: 'cust_p14_alice',
-      status: 'NEW',
-      paymentStatus: 'pending',
-      total: 500,
-      subtotal: 500,
-      tax: 0,
-      discount: 0,
-      createdAt: '2020-01-01T00:00:00.000Z', // Ancient fake date
-      items: [{ itemId: 'ITEM-P14-PANEER', count: 2 }]
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'ORD-ALICE-ESTABLISHED',
+        orderId: 'ORD-ALICE-ESTABLISHED',
+        tenantId: tenantA,
+        customerId: 'cust_p14_alice',
+        status: 'NEW',
+        paymentStatus: 'pending',
+        total: 500,
+        subtotal: 500,
+        tax: 0,
+        discount: 0,
+        createdAt: '2020-01-01T00:00:00.000Z', // Ancient fake date
+        items: [{ itemId: 'ITEM-P14-PANEER', count: 2 }]
+      })
+    }
   });
 
   // Customer creating is allowed with valid pending fields, but modifying financials/timestamps on update is blocked
@@ -1012,9 +1036,11 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantA}/orders/ORD-ALICE-ESTABLISHED`,
     method: 'PATCH',
     tokenPayload: customerAliceToken,
-    body: { fields: toFirestoreFields({
-      createdAt: '1999-01-01T00:00:00.000Z' // Modifying established createdAt on update
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        createdAt: '1999-01-01T00:00:00.000Z' // Modifying established createdAt on update
+      })
+    }
   });
 
   recordResult({
@@ -1035,10 +1061,12 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantA}/orders/ORD-ALICE-ESTABLISHED`,
     method: 'PATCH',
     tokenPayload: customerBobToken, // Bob trying to mutate Alice's order!
-    body: { fields: toFirestoreFields({
-      customerName: 'Hacked by Bob',
-      status: 'DINING_COMPLETED'
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        customerName: 'Hacked by Bob',
+        status: 'DINING_COMPLETED'
+      })
+    }
   });
 
   recordResult({
@@ -1059,20 +1087,22 @@ async function runPhase14BoundaryAudit() {
     path: `restaurants/${tenantA}/bills/BILL-ALICE-CONFIDENTIAL`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      billId: 'BILL-ALICE-CONFIDENTIAL',
-      orderId: 'ORD-ALICE-ESTABLISHED',
-      tenantId: tenantA,
-      branchId: 'main',
-      customerId: 'cust_p14_alice',
-      customerName: 'Alice Diner',
-      total: 500,
-      subtotal: 500,
-      tax: 0,
-      serviceCharge: 0,
-      discount: 0,
-      paymentStatus: 'pending'
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        billId: 'BILL-ALICE-CONFIDENTIAL',
+        orderId: 'ORD-ALICE-ESTABLISHED',
+        tenantId: tenantA,
+        branchId: 'main',
+        customerId: 'cust_p14_alice',
+        customerName: 'Alice Diner',
+        total: 500,
+        subtotal: 500,
+        tax: 0,
+        serviceCharge: 0,
+        discount: 0,
+        paymentStatus: 'pending'
+      })
+    }
   });
 
   // Bob attempts to read Alice's bill
@@ -1153,8 +1183,8 @@ async function runPhase14BoundaryAudit() {
     expected: 'status 200 with isDuplicate: true and identical orderId',
     actual: `first: ${firstSubmit.data?.orderId}, second: ${secondSubmit.data?.orderId} (duplicate: ${secondSubmit.data?.isDuplicate})`,
     pass: firstSubmit.status === 200 && secondSubmit.status === 200 &&
-          firstSubmit.data?.orderId === secondSubmit.data?.orderId &&
-          secondSubmit.data?.isDuplicate === true
+      firstSubmit.data?.orderId === secondSubmit.data?.orderId &&
+      secondSubmit.data?.isDuplicate === true
   });
 
   // ==========================================

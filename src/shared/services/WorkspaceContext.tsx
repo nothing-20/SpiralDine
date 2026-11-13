@@ -60,10 +60,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       console.info('[WorkspaceValidation] Start');
       console.info('[WorkspaceValidation] Authenticated user', { uid: user.uid });
 
-      // MOCK SESSION SHORTCUT: If this is a dev mock user (uid starts with 'mock-uid-'),
-      // skip ALL Firestore lookups and build a synthetic workspace directly from the user object.
-      // This keeps the dev workflow functional without requiring Firestore documents for mock roles.
-      if (user.uid.startsWith('mock-uid-')) {
+      // MOCK SESSION SHORTCUT: Only enabled in local Vite development builds.
+      // Cannot execute in staging or production builds where import.meta.env.DEV is false.
+      if (import.meta.env.DEV && user.uid.startsWith('mock-uid-')) {
         const mockRole = user.role;
         let permissions: string[] = [];
         if (mockRole === 'owner') permissions = ['full-access'];

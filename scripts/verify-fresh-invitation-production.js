@@ -18,15 +18,28 @@ import {
   where
 } from 'firebase/firestore';
 import crypto from 'crypto';
+import { createRequire } from 'module';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
-const firebaseConfig = {
-  apiKey: 'AIzaSyCKE7c57Boi_5dpK53FaZOtTu6m6Kz1vHg',
-  authDomain: 'spiral-restaurant-saas-v1.firebaseapp.com',
-  projectId: 'spiral-restaurant-saas-v1',
-  storageBucket: 'spiral-restaurant-saas-v1.firebasestorage.app',
-  messagingSenderId: '917630391162',
-  appId: '1:917630391162:web:6e4c127734b84ca6977cc3'
-};
+const require = createRequire(import.meta.url);
+const {
+  normalizeEnvName,
+  parseCliFlags,
+  loadScriptEnvironment,
+  resolveScriptFirebaseConfig,
+  resolveRunnerCredentials,
+} = require('./_lib/envGuard.cjs');
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const flags = parseCliFlags();
+const targetEnv = normalizeEnvName(flags.env || process.env.APP_ENV || 'staging');
+
+loadScriptEnvironment({ rootDir: resolve(__dirname, '..'), envName: targetEnv });
+
+const firebaseConfig = resolveScriptFirebaseConfig(process.env, { expectedEnv: targetEnv });
+const runnerCreds = resolveRunnerCredentials(process.env);
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -49,14 +62,7 @@ async function runCompleteTest() {
 
   // Step 1: Owner authentication to create invitation
   console.log('[Step 1] Authenticating as Owner...');
-  const ownerEmail = 'dev-admin-reset@restaurantos.internal';
-  const ownerPass = 'DevResetSecret123!';
-  let ownerCred;
-  try {
-    ownerCred = await signInWithEmailAndPassword(auth, ownerEmail, ownerPass);
-  } catch {
-    ownerCred = await createUserWithEmailAndPassword(auth, ownerEmail, ownerPass);
-  }
+  const ownerCred = await signInWithEmailAndPassword(auth, runnerCreds.email, runnerCreds.password);
   const ownerUser = ownerCred.user;
   console.log('  -> Owner authenticated. UID:', ownerUser.uid);
 

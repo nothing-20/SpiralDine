@@ -8,7 +8,7 @@ const __dirname = dirname(__filename);
 
 const EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8080';
 const [HOST, PORT] = EMULATOR_HOST.split(':');
-const PROJECT_ID = process.env.GCLOUD_PROJECT || 'spiral-restaurant-saas-v1';
+const PROJECT_ID = process.env.GCLOUD_PROJECT || 'demo-spiraldine-emulator';
 
 console.log('================================================================');
 console.log('SPIRALDINE PHASE 13: TRUSTED SERVER-SIDE ORDER VALIDATION');
@@ -43,7 +43,7 @@ function createEmulatorToken(payload) {
 function firestoreRequest({ path, method = 'GET', body = null, tokenPayload = null }) {
   return new Promise((resolve, reject) => {
     const urlPath = `/v1/projects/${PROJECT_ID}/databases/(default)/documents/${path}`;
-    
+
     const headers = {
       'Content-Type': 'application/json'
     };
@@ -70,7 +70,7 @@ function firestoreRequest({ path, method = 'GET', body = null, tokenPayload = nu
         let parsed = null;
         try {
           if (data) parsed = JSON.parse(data);
-        } catch (_) {}
+        } catch (_) { }
         resolve({
           statusCode: res.statusCode,
           headers: res.headers,
@@ -358,16 +358,18 @@ async function executeServerOrderValidation(requestPayload, adminToken) {
     path: `restaurants/${tenantId}/kitchenTickets/${kotTicketId}`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: kotTicketId,
-      orderId: targetOrderId,
-      tenantId,
-      tableNumber: cleanTableNum,
-      round: validatedOrder.orderSequence,
-      status: 'NEW',
-      items: verifiedItems,
-      createdAt: nowIso
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: kotTicketId,
+        orderId: targetOrderId,
+        tenantId,
+        tableNumber: cleanTableNum,
+        round: validatedOrder.orderSequence,
+        status: 'NEW',
+        items: verifiedItems,
+        createdAt: nowIso
+      })
+    }
   });
 
   return {
@@ -411,14 +413,16 @@ async function runPhase13Tests() {
     path: `restaurants/${tenantA}/menu/default/items/ITEM-P13-BUTTERCHICKEN`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'ITEM-P13-BUTTERCHICKEN',
-      name: 'Signature Butter Chicken',
-      price: 400,
-      isAvailable: true,
-      isPublished: true,
-      category: 'Main Course'
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'ITEM-P13-BUTTERCHICKEN',
+        name: 'Signature Butter Chicken',
+        price: 400,
+        isAvailable: true,
+        isPublished: true,
+        category: 'Main Course'
+      })
+    }
   });
 
   // 2. Available canonical item: Garlic Naan (Price: 80)
@@ -426,14 +430,16 @@ async function runPhase13Tests() {
     path: `restaurants/${tenantA}/menu/default/items/ITEM-P13-GARLICNAAN`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'ITEM-P13-GARLICNAAN',
-      name: 'Butter Garlic Naan',
-      price: 80,
-      isAvailable: true,
-      isPublished: true,
-      category: 'Breads'
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'ITEM-P13-GARLICNAAN',
+        name: 'Butter Garlic Naan',
+        price: 80,
+        isAvailable: true,
+        isPublished: true,
+        category: 'Breads'
+      })
+    }
   });
 
   // 3. Unavailable (Sold Out) item: Tandoori Lobster
@@ -441,14 +447,16 @@ async function runPhase13Tests() {
     path: `restaurants/${tenantA}/menu/default/items/ITEM-P13-LOBSTER`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'ITEM-P13-LOBSTER',
-      name: 'Tandoori Lobster',
-      price: 1200,
-      isAvailable: false, // SOLD OUT!
-      isPublished: true,
-      category: 'Seafood'
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'ITEM-P13-LOBSTER',
+        name: 'Tandoori Lobster',
+        price: 1200,
+        isAvailable: false, // SOLD OUT!
+        isPublished: true,
+        category: 'Seafood'
+      })
+    }
   });
 
   // 4. Unpublished item: Secret Recipe Curry
@@ -456,15 +464,17 @@ async function runPhase13Tests() {
     path: `restaurants/${tenantA}/menu/default/items/ITEM-P13-UNPUBLISHED`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'ITEM-P13-UNPUBLISHED',
-      name: 'Chef Secret Curry',
-      price: 650,
-      isAvailable: true,
-      isPublished: false, // UNPUBLISHED!
-      status: 'unpublished',
-      category: 'Specials'
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'ITEM-P13-UNPUBLISHED',
+        name: 'Chef Secret Curry',
+        price: 650,
+        isAvailable: true,
+        isPublished: false, // UNPUBLISHED!
+        status: 'unpublished',
+        category: 'Specials'
+      })
+    }
   });
 
   // 5. Variant for Butter Chicken: Large Bowl (+150 or direct 550)
@@ -472,13 +482,15 @@ async function runPhase13Tests() {
     path: `restaurants/${tenantA}/menu/default/variants/VAR-P13-LARGE`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'VAR-P13-LARGE',
-      itemId: 'ITEM-P13-BUTTERCHICKEN',
-      name: 'Large Serving (500g)',
-      price: 550,
-      isAvailable: true
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'VAR-P13-LARGE',
+        itemId: 'ITEM-P13-BUTTERCHICKEN',
+        name: 'Large Serving (500g)',
+        price: 550,
+        isAvailable: true
+      })
+    }
   });
 
   // 6. Sold-out Variant: Family Tub
@@ -486,13 +498,15 @@ async function runPhase13Tests() {
     path: `restaurants/${tenantA}/menu/default/variants/VAR-P13-SOLDOUT`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'VAR-P13-SOLDOUT',
-      itemId: 'ITEM-P13-BUTTERCHICKEN',
-      name: 'Family Tub',
-      price: 950,
-      isAvailable: false // SOLD OUT!
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'VAR-P13-SOLDOUT',
+        itemId: 'ITEM-P13-BUTTERCHICKEN',
+        name: 'Family Tub',
+        price: 950,
+        isAvailable: false // SOLD OUT!
+      })
+    }
   });
 
   // 7. Addon: Extra Cheese (Price: 50)
@@ -500,12 +514,14 @@ async function runPhase13Tests() {
     path: `restaurants/${tenantA}/menu/default/addons/ADDON-P13-CHEESE`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'ADDON-P13-CHEESE',
-      name: 'Extra Cheese',
-      price: 50,
-      isAvailable: true
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'ADDON-P13-CHEESE',
+        name: 'Extra Cheese',
+        price: 50,
+        isAvailable: true
+      })
+    }
   });
 
   // 8. Tables: Table 7 (Active) and Table 99 (Disabled)
@@ -513,26 +529,30 @@ async function runPhase13Tests() {
     path: `restaurants/${tenantA}/tables/TBL-7`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'TBL-7',
-      tableNumber: '7',
-      status: 'Available',
-      isActive: true,
-      capacity: 4
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'TBL-7',
+        tableNumber: '7',
+        status: 'Available',
+        isActive: true,
+        capacity: 4
+      })
+    }
   });
 
   await firestoreRequest({
     path: `restaurants/${tenantA}/tables/TBL-99`,
     method: 'PATCH',
     tokenPayload: adminToken,
-    body: { fields: toFirestoreFields({
-      id: 'TBL-99',
-      tableNumber: '99',
-      status: 'Disabled',
-      isActive: false, // DISABLED TABLE!
-      capacity: 2
-    }) }
+    body: {
+      fields: toFirestoreFields({
+        id: 'TBL-99',
+        tableNumber: '99',
+        status: 'Disabled',
+        isActive: false, // DISABLED TABLE!
+        capacity: 2
+      })
+    }
   });
 
   // 9. Staff accounts
@@ -575,8 +595,8 @@ async function runPhase13Tests() {
     // Tax = Math.round(560 * 0.05) = 28
     // Service Charge = Math.round(560 * 0.05) = 28
     // Total = 560 + 28 + 28 = 616
-    const isCorrect = order1Result.success && 
-      order1Result.order.subtotal === 560 && 
+    const isCorrect = order1Result.success &&
+      order1Result.order.subtotal === 560 &&
       order1Result.order.total === 616;
 
     recordResult({
@@ -613,8 +633,8 @@ async function runPhase13Tests() {
     }, adminToken);
 
     // The server engine must strictly calculate 400 + 20 + 20 = 440, completely ignoring client price
-    const defended = tamperedPriceResult.order.subtotal === 400 && 
-      tamperedPriceResult.order.total === 440 && 
+    const defended = tamperedPriceResult.order.subtotal === 400 &&
+      tamperedPriceResult.order.total === 440 &&
       tamperedPriceResult.order.items[0].pricePerUnit === 400;
 
     recordResult({
@@ -651,7 +671,7 @@ async function runPhase13Tests() {
       ]
     }, adminToken);
 
-    const defended = tamperedTotalResult.order.subtotal === 800 && 
+    const defended = tamperedTotalResult.order.subtotal === 800 &&
       tamperedTotalResult.order.total === 880;
 
     recordResult({
@@ -968,7 +988,7 @@ async function runPhase13Tests() {
       ]
     }, adminToken);
 
-    const isIdempotent = retryResult.isDuplicate === true && 
+    const isIdempotent = retryResult.isDuplicate === true &&
       retryResult.order.orderId === 'ORD-P13-VALID-1';
 
     recordResult({
@@ -1068,7 +1088,7 @@ async function runPhase13Tests() {
       items: [{ itemId: 'ITEM-P13-GARLICNAAN', count: 2 }]
     }, adminToken);
 
-    const regPassed = regCustResult.order.customerId === 'customer_priya_p13' && 
+    const regPassed = regCustResult.order.customerId === 'customer_priya_p13' &&
       regCustResult.order.customerName === 'Priya Sharma';
 
     recordResult({
@@ -1104,7 +1124,7 @@ async function runPhase13Tests() {
       ]
     }, adminToken);
 
-    const round2Passed = round2Result.order.primaryOrderId === 'ORD-P13-VALID-1' && 
+    const round2Passed = round2Result.order.primaryOrderId === 'ORD-P13-VALID-1' &&
       round2Result.order.sessionId === 'SES-P13-TABLE7' &&
       round2Result.order.isAdditionalOrder === true &&
       round2Result.order.orderSequence === 2;
@@ -1207,17 +1227,19 @@ async function runPhase13Tests() {
       path: `restaurants/${tenantA}/orders/ORD-FORGED-DIRECT`,
       method: 'PATCH',
       tokenPayload: guestDinerToken,
-      body: { fields: toFirestoreFields({
-        id: 'ORD-FORGED-DIRECT',
-        orderId: 'ORD-FORGED-DIRECT',
-        tenantId: tenantA,
-        customerId: 'guest_diner_p13',
-        status: 'NEW',
-        paymentStatus: 'pending',
-        items: [], // Malicious empty items array!
-        total: 100,
-        subtotal: 100
-      }) }
+      body: {
+        fields: toFirestoreFields({
+          id: 'ORD-FORGED-DIRECT',
+          orderId: 'ORD-FORGED-DIRECT',
+          tenantId: tenantA,
+          customerId: 'guest_diner_p13',
+          status: 'NEW',
+          paymentStatus: 'pending',
+          items: [], // Malicious empty items array!
+          total: 100,
+          subtotal: 100
+        })
+      }
     });
 
     // Also test unauthenticated direct write attempt
@@ -1225,15 +1247,17 @@ async function runPhase13Tests() {
       path: `restaurants/${tenantA}/orders/ORD-UNAUTH-DIRECT`,
       method: 'PATCH',
       tokenPayload: null, // No auth!
-      body: { fields: toFirestoreFields({
-        id: 'ORD-UNAUTH-DIRECT',
-        orderId: 'ORD-UNAUTH-DIRECT',
-        tenantId: tenantA,
-        customerId: 'guest-uid',
-        status: 'NEW',
-        paymentStatus: 'pending',
-        total: -500 // Negative total!
-      }) }
+      body: {
+        fields: toFirestoreFields({
+          id: 'ORD-UNAUTH-DIRECT',
+          orderId: 'ORD-UNAUTH-DIRECT',
+          tenantId: tenantA,
+          customerId: 'guest-uid',
+          status: 'NEW',
+          paymentStatus: 'pending',
+          total: -500 // Negative total!
+        })
+      }
     });
 
     const rulesProtected = forgedDirectWrite.statusCode === 200 || unauthDirectWrite.statusCode === 403;

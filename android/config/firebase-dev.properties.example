@@ -1,0 +1,17 @@
+# SpiralDine Android — DEVELOPMENT Firebase Configuration Template
+# Copy to `android/config/firebase-dev.properties` (gitignored) and populate
+# from your isolated Free-Tier (Spark) Development Firebase project.
+#
+# NEVER set FIREBASE_PROJECT_ID=spiral-restaurant-saas-v1 in dev builds.
+
+FIREBASE_PROJECT_ID=your_dev_project_id
+FIREBASE_API_KEY=your_dev_android_api_key
+FIREBASE_STORAGE_BUCKET=your_dev_project_id.firebasestorage.app
+FIREBASE_GCM_SENDER_ID=your_dev_messaging_sender_id
+
+# Optional per-module Firebase App IDs (or shared fallback FIREBASE_APPLICATION_ID):
+# FIREBASE_APPLICATION_ID_APP=1:your_sender_id:android:printbridge_dev_id
+# FIREBASE_APPLICATION_ID_CUSTOMER=1:your_sender_id:android:customer_dev_id
+# FIREBASE_APPLICATION_ID_OWNER=1:your_sender_id:android:owner_dev_id
+FIREBASE_APPLICATION_ID=1:your_dev_messaging_sender_id:android:your_dev_app_id
+

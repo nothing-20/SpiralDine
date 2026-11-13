@@ -1,0 +1,13 @@
+# SpiralDine Android — PRODUCTION Firebase Configuration Reference
+# Confirmed Production Firebase Project ID: spiral-restaurant-saas-v1
+# Only create `android/config/firebase-prod.properties` (gitignored) if overriding
+# production values locally. Default prod flavor targets `spiral-restaurant-saas-v1`.
+
+FIREBASE_PROJECT_ID=spiral-restaurant-saas-v1
+FIREBASE_API_KEY=your_production_android_api_key
+FIREBASE_STORAGE_BUCKET=spiral-restaurant-saas-v1.firebasestorage.app
+FIREBASE_GCM_SENDER_ID=your_production_messaging_sender_id
+FIREBASE_APPLICATION_ID_APP=com.spiraldine.printbridge
+FIREBASE_APPLICATION_ID_CUSTOMER=com.spiralworld.spiraldine
+FIREBASE_APPLICATION_ID_OWNER=com.spiraldine.owner
+

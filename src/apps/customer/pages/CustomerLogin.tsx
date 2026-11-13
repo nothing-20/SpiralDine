@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
-import { ConfirmationResult } from 'firebase/auth';
+import { ConfirmationResult, User } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../../../shared/firebase/config';
+import { auth, db } from '../../../shared/firebase/config';
 import { authService } from '../../../services/authService';
 import { RecaptchaManager } from '../../../shared/services/recaptchaManager';
 import { zodResolver } from '../../../utils/zodResolver';
@@ -186,6 +186,13 @@ export const CustomerLogin: React.FC = () => {
     return true;
   };
 
+  const handleResetToPhoneInput = () => {
+    setPhoneStep('input');
+    setPhoneError(null);
+    setOtpCode('');
+    recaptchaManagerRef.current?.reset().catch(() => {});
+  };
+
   const handleSendPhoneOtp = async (isResend = false) => {
     // Prevent duplicate requests in flight
     if (isSendingOtp) return;
@@ -235,15 +242,23 @@ export const CustomerLogin: React.FC = () => {
       console.error('[AUTH Customer Send OTP Error]', err);
       let friendlyError = 'Failed to send OTP. Please check your network and try again.';
 
-      if (err.code === 'auth/invalid-phone-number') {
+      if (err.code === 'auth/billing-not-enabled') {
+        friendlyError = 'Phone authentication is currently unavailable due to project billing configuration. Please sign in with email or contact support.';
+      } else if (err.code === 'auth/missing-phone-number') {
+        friendlyError = 'Please enter your mobile phone number.';
+      } else if (err.code === 'auth/invalid-phone-number') {
         friendlyError = 'Invalid mobile phone number format. Please check the country code and number.';
+      } else if (err.code === 'auth/app-not-authorized') {
+        friendlyError = 'This application domain is not authorized for phone authentication. Please contact support.';
       } else if (err.code === 'auth/too-many-requests') {
         friendlyError = 'Too many requests. Please wait a few minutes before trying again.';
       } else if (err.code === 'auth/quota-exceeded') {
-        friendlyError = 'SMS quota exceeded for this Firebase project. Contact administrator.';
+        friendlyError = 'SMS quota exceeded for this Firebase project. Please try again later or sign in with email.';
+      } else if (err.code === 'auth/network-request-failed') {
+        friendlyError = 'Network error. Please check your internet connection and try again.';
       } else if (err.code === 'auth/captcha-check-failed' || err.message?.includes('reCAPTCHA')) {
         friendlyError = 'Security verification failed. Please try again.';
-        // Reset verifier so subsequent attempt has a clean challenge
+        // Reset verifier cleanly so subsequent attempt gets a fresh challenge
         recaptchaManagerRef.current?.destroy();
       } else if (err.message) {
         friendlyError = err.message;
@@ -261,8 +276,8 @@ export const CustomerLogin: React.FC = () => {
     if (isVerifyingOtp) return;
 
     const cleanOtp = otpCode.trim();
-    if (!cleanOtp || cleanOtp.length !== 6) {
-      setPhoneError('Please enter the complete 6-digit verification code.');
+    if (!cleanOtp || cleanOtp.length !== 6 || !/^\d{6}$/.test(cleanOtp)) {
+      setPhoneError('Please enter the complete 6-digit numeric verification code.');
       return;
     }
 
@@ -277,9 +292,42 @@ export const CustomerLogin: React.FC = () => {
 
     try {
       console.log('[AUTH Customer Phone Login] Verifying OTP...');
-      const credentials = await authService.confirmPhoneOtp(confirmationResult, cleanOtp);
-      const fUser = credentials.user;
-      console.log('[AUTH Customer Phone Login] OTP verified. UID:', fUser.uid);
+      const fullPhoneNumber = `${countryCode}${cleanPhoneDigits}`;
+      const isAnonymousUser = Boolean(auth.currentUser && auth.currentUser.isAnonymous);
+      let fUser: User;
+      let wasLinked = false;
+
+      // Scenario 4A: Anonymous Guest Account Linking
+      if (isAnonymousUser && auth.currentUser) {
+        try {
+          console.log('[AUTH Customer Phone Login] Linking anonymous guest account with phone OTP...');
+          const credentials = await authService.linkPhoneWithCredential(
+            auth.currentUser,
+            confirmationResult.verificationId,
+            cleanOtp
+          );
+          fUser = credentials.user;
+          wasLinked = true;
+          console.log('[AUTH Customer Phone Login] Account linked successfully. Preserved UID:', fUser.uid);
+        } catch (linkErr: any) {
+          // Scenario 4B: Phone number already registered to another Firebase account
+          if (linkErr.code === 'auth/credential-already-in-use') {
+            console.log('[AUTH Customer Phone Login] Phone already belongs to an existing account. Signing into existing account...');
+            const credentials = await authService.confirmPhoneOtp(confirmationResult, cleanOtp);
+            fUser = credentials.user;
+            console.log('[AUTH Customer Phone Login] Signed into existing user account. UID:', fUser.uid);
+            addToast('Signed into your existing diner account. Active table session preserved.', 'info');
+          } else {
+            throw linkErr;
+          }
+        }
+      } else {
+        // Direct non-anonymous phone verification
+        const credentials = await authService.confirmPhoneOtp(confirmationResult, cleanOtp);
+        fUser = credentials.user;
+      }
+
+      console.log('[AUTH Customer Phone Login] OTP verified. Active UID:', fUser.uid);
 
       // Check if this UID is associated with a restaurant owner/staff account
       const staffUserSnap = await getDoc(doc(db, 'users', fUser.uid));
@@ -310,10 +358,18 @@ export const CustomerLogin: React.FC = () => {
           setIsVerifyingOtp(false);
           return;
         }
+
+        // If existing profile, preserve all fields; ensure phone and active flags are synced
+        if (!custData.phoneNumber || wasLinked) {
+          await setDoc(custDocRef, {
+            phoneNumber: fullPhoneNumber,
+            isAnonymous: false,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+        }
       } else {
         // First-time mobile diner: auto-provision standard customer profile
         console.log('[AUTH Customer Login] Auto-provisioning diner profile for UID:', fUser.uid);
-        const fullPhoneNumber = `${countryCode}${cleanPhoneDigits}`;
         await setDoc(custDocRef, {
           uid: fUser.uid,
           fullName: fUser.displayName || `Diner ${cleanPhoneDigits.slice(-4)}`,
@@ -325,7 +381,9 @@ export const CustomerLogin: React.FC = () => {
           walletBalance: 0,
           loyaltyPoints: 0,
           status: 'active',
-          createdAt: new Date().toISOString()
+          isAnonymous: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         });
       }
 
@@ -338,9 +396,13 @@ export const CustomerLogin: React.FC = () => {
       if (err.code === 'auth/invalid-verification-code') {
         friendlyError = 'The 6-digit OTP code entered is incorrect. Please check and re-enter.';
       } else if (err.code === 'auth/code-expired') {
-        friendlyError = 'The verification code has expired. Please request a new code.';
+        friendlyError = 'The verification code has expired. Please request a new OTP code.';
       } else if (err.code === 'auth/too-many-requests') {
         friendlyError = 'Too many attempts. Please wait a few moments before trying again.';
+      } else if (err.code === 'auth/network-request-failed') {
+        friendlyError = 'Network error. Please check your internet connection and try again.';
+      } else if (err.code === 'auth/credential-already-in-use') {
+        friendlyError = 'This phone number is already registered to another account.';
       } else if (err.message) {
         friendlyError = err.message;
       }
@@ -686,7 +748,7 @@ export const CustomerLogin: React.FC = () => {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setPhoneStep('input')}
+                      onClick={handleResetToPhoneInput}
                       className="text-[#D65336] hover:text-[#B9432D] font-bold hover:underline cursor-pointer"
                     >
                       Change
@@ -770,7 +832,7 @@ export const CustomerLogin: React.FC = () => {
                   {/* Back to Number Button */}
                   <button
                     type="button"
-                    onClick={() => setPhoneStep('input')}
+                    onClick={handleResetToPhoneInput}
                     disabled={isVerifyingOtp}
                     className="w-full py-2 text-xs font-semibold text-[#667085] hover:text-[#17202A] flex items-center justify-center space-x-1 transition-colors cursor-pointer"
                   >

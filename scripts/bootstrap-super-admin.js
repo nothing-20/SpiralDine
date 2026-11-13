@@ -24,47 +24,30 @@
 
 import admin from 'firebase-admin';
 import fs from 'fs';
+import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+const require = createRequire(import.meta.url);
+const {
+  PRODUCTION_PROJECT_ID,
+  isValidEnvValue,
+  normalizeEnvName,
+  parseCliFlags,
+  loadScriptEnvironment,
+} = require('./_lib/envGuard.cjs');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load .env if present
-const envPath = path.resolve(__dirname, '../.env');
-if (fs.existsSync(envPath)) {
-  const envContent = fs.readFileSync(envPath, 'utf-8');
-  envContent.split('\n').forEach(line => {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-      const parts = trimmed.split('=');
-      const key = parts[0].trim();
-      const val = parts.slice(1).join('=').trim().replace(/^["']|["']$/g, '');
-      if (key && !process.env[key]) {
-        process.env[key] = val;
-      }
-    }
-  });
-}
-
 // Parse command-line flags
-const args = process.argv.slice(2);
-let targetEmail = null;
-let targetUid = null;
-let serviceAccountPath = null;
+const flags = parseCliFlags();
+const targetEnv = normalizeEnvName(flags.env || process.env.APP_ENV || '');
+const targetEmail = flags.email ? flags.email.toLowerCase() : null;
+const targetUid = flags.uid || null;
+const serviceAccountPath = flags.key ? path.resolve(flags.key) : null;
 
-for (let i = 0; i < args.length; i++) {
-  if (args[i] === '--email' && args[i + 1]) {
-    targetEmail = args[i + 1].trim().toLowerCase();
-    i++;
-  } else if (args[i] === '--uid' && args[i + 1]) {
-    targetUid = args[i + 1].trim();
-    i++;
-  } else if (args[i] === '--key' && args[i + 1]) {
-    serviceAccountPath = path.resolve(args[i + 1].trim());
-    i++;
-  }
-}
+loadScriptEnvironment({ rootDir: path.resolve(__dirname, '..'), envName: targetEnv });
 
 if (!targetEmail && !targetUid) {
   console.log(`
@@ -84,6 +67,7 @@ if (!targetEmail && !targetUid) {
 
 // Locate service account credentials
 let credential = null;
+let serviceAccountProjectId = null;
 const possibleKeyPaths = [
   serviceAccountPath,
   process.env.GOOGLE_APPLICATION_CREDENTIALS,
@@ -97,6 +81,7 @@ for (const p of possibleKeyPaths) {
     try {
       const fileData = JSON.parse(fs.readFileSync(p, 'utf-8'));
       credential = admin.credential.cert(fileData);
+      serviceAccountProjectId = fileData.project_id || null;
       console.log(`\x1b[32m✔ Loaded Firebase Service Account credentials from: ${p}\x1b[0m`);
       break;
     } catch (err) {
@@ -109,13 +94,34 @@ if (!credential && process.env.FIREBASE_SERVICE_ACCOUNT) {
   try {
     const parsed = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
     credential = admin.credential.cert(parsed);
+    serviceAccountProjectId = parsed.project_id || null;
     console.log(`\x1b[32m✔ Loaded Firebase Service Account from FIREBASE_SERVICE_ACCOUNT env var.\x1b[0m`);
   } catch (err) {
     console.warn(`Warning parsing FIREBASE_SERVICE_ACCOUNT:`, err.message);
   }
 }
 
-const projectId = process.env.VITE_FIREBASE_PROJECT_ID || 'spiral-restaurant-saas-v1';
+const candidateProjectId =
+  serviceAccountProjectId ||
+  flags.project ||
+  process.env.FIREBASE_PROJECT_ID ||
+  process.env.VITE_FIREBASE_PROJECT_ID ||
+  '';
+
+if (!isValidEnvValue(candidateProjectId)) {
+  console.error(
+    '\x1b[31m✖ Missing Firebase project ID. Provide --project <id>, FIREBASE_PROJECT_ID, VITE_FIREBASE_PROJECT_ID, or a service account JSON containing project_id.\x1b[0m'
+  );
+  process.exit(1);
+}
+
+const projectId = candidateProjectId.trim();
+if ((targetEnv === 'development' || targetEnv === 'staging') && projectId.toLowerCase() === PRODUCTION_PROJECT_ID) {
+  console.error(
+    `\x1b[31m✖ Environment isolation violation: --env=${targetEnv} refuses to target production project "${PRODUCTION_PROJECT_ID}".\x1b[0m`
+  );
+  process.exit(1);
+}
 
 try {
   if (admin.apps.length === 0) {

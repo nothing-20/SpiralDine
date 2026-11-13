@@ -16,5 +16,5 @@ $env:PATH = "$jdkBin;$env:PATH"
 Write-Host "Active Java Version for Emulator:"
 & "$jdkBin\java.exe" -version
 
-Write-Host "`nStarting Firestore Emulator with compiled rules..."
-firebase.cmd emulators:exec --only firestore $Command
+Write-Host "`nStarting Firestore Emulator with compiled rules (project: demo-spiraldine-emulator)..."
+firebase.cmd emulators:exec --project demo-spiraldine-emulator --only firestore $Command

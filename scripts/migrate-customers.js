@@ -1,79 +1,112 @@
+#!/usr/bin/env node
+
 import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword 
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  getDocs, 
-  getDoc,
-  setDoc,
-  doc 
-} from 'firebase/firestore';
+import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
+import { getFirestore, collection, getDocs, getDoc, setDoc, doc } from 'firebase/firestore';
+import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
-import fs from 'fs';
+
+const require = createRequire(import.meta.url);
+const {
+  PRODUCTION_PROJECT_ID,
+  normalizeEnvName,
+  parseCliFlags,
+  loadScriptEnvironment,
+  referencesProductionProject,
+  resolveScriptFirebaseConfig,
+  resolveRunnerCredentials,
+} = require('./_lib/envGuard.cjs');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const rootDir = resolve(__dirname, '..');
 
-// Read .env file manually using native fs
-const envPath = resolve(__dirname, '../.env');
-if (fs.existsSync(envPath)) {
-  const envContent = fs.readFileSync(envPath, 'utf-8');
-  envContent.split('\n').forEach(line => {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-      const parts = trimmed.split('=');
-      const key = parts[0].trim();
-      const val = parts.slice(1).join('=').trim().replace(/^["']|["']$/g, '');
-      if (key && !process.env[key]) {
-        process.env[key] = val;
-      }
-    }
-  });
-}
-
-const targetProjectId = 'spiral-restaurant-saas-v1';
-const currentProjectId = process.env.VITE_FIREBASE_PROJECT_ID;
+const flags = parseCliFlags();
+const targetEnv = normalizeEnvName(flags.env);
+const dryRun = !flags.execute;
 
 console.log('====================================================');
-console.log('RESTAURANTOS — SAFE CUSTOMER PROFILE MIGRATION TOOL');
+console.log('SPIRALDINE — SAFE CUSTOMER PROFILE MIGRATION TOOL');
 console.log('====================================================');
-console.log('Target Project ID:', targetProjectId);
-console.log('Config Project ID:', currentProjectId);
 
-if (!currentProjectId || currentProjectId !== targetProjectId) {
-  console.error(`\n[SAFETY ABORT] Firebase project ID mismatch! Target: "${targetProjectId}", Found: "${currentProjectId}".`);
+if (!targetEnv || !['development', 'staging', 'production'].includes(targetEnv)) {
+  console.error('\n[SAFETY ABORT] Explicit --env <dev|staging|prod> CLI argument is required.');
+  console.error('Usage:\n  node scripts/migrate-customers.js --env dev --project <project-id> [--execute]');
   process.exit(1);
 }
 
-const firebaseConfig = {
-  apiKey: process.env.VITE_FIREBASE_API_KEY,
-  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.VITE_FIREBASE_APP_ID,
-};
+if (!flags.project) {
+  console.error('\n[SAFETY ABORT] Explicit --project <firebase-project-id> CLI argument is required.');
+  process.exit(1);
+}
+
+// Guard against mismatched production target
+if (targetEnv !== 'production' && referencesProductionProject(flags.project)) {
+  console.error(
+    `\n[SAFETY ABORT] Non-production environment "${targetEnv}" cannot target production project "${PRODUCTION_PROJECT_ID}".`
+  );
+  process.exit(1);
+}
+
+// Load env files strictly matching --env
+loadScriptEnvironment({ rootDir, envName: targetEnv });
+
+let firebaseConfig;
+try {
+  firebaseConfig = resolveScriptFirebaseConfig(process.env, { expectedEnv: targetEnv });
+} catch (err) {
+  console.error(`\n[SAFETY ABORT] ${err.message}`);
+  process.exit(1);
+}
+
+if (flags.project !== firebaseConfig.projectId) {
+  console.error(
+    `\n[SAFETY ABORT] --project "${flags.project}" does not match configured "${targetEnv}" project "${firebaseConfig.projectId}".`
+  );
+  process.exit(1);
+}
+
+const isProductionTarget =
+  targetEnv === 'production' || referencesProductionProject(firebaseConfig);
+
+if (isProductionTarget && !dryRun) {
+  if (process.env.ALLOW_PRODUCTION_MIGRATION !== 'YES_I_HAVE_VERIFIED_BACKUP') {
+    console.error('\n[PRODUCTION SAFEGUARD] Refusing live write migration against production without verified backup confirmation.');
+    console.error('To execute writes on production after verifying a Firestore export backup, set:');
+    console.error('  $env:ALLOW_PRODUCTION_MIGRATION="YES_I_HAVE_VERIFIED_BACKUP"');
+    process.exit(1);
+  }
+}
+
+let runnerCreds;
+try {
+  runnerCreds = resolveRunnerCredentials(process.env);
+} catch (err) {
+  console.error(`\n[SAFETY ABORT] ${err.message}`);
+  process.exit(1);
+}
+
+console.log(`Target Env:     ${targetEnv}`);
+console.log(`Target Project: ${firebaseConfig.projectId}`);
+console.log(`Mode:           ${dryRun ? 'DRY-RUN (no writes will be committed; pass --execute to write)' : 'EXECUTE (live writes enabled)'}`);
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
 const STAFF_ROLES = new Set([
-  'super-admin', 
-  'owner', 
-  'admin', 
-  'manager', 
-  'waiter', 
-  'kitchen', 
-  'cashier', 
-  'reception', 
-  'chef', 
-  'staff'
+  'super-admin',
+  'super_admin',
+  'owner',
+  'admin',
+  'manager',
+  'waiter',
+  'kitchen',
+  'cashier',
+  'reception',
+  'chef',
+  'staff',
 ]);
 
 const CUSTOMER_SUBCOLLECTIONS = [
@@ -82,46 +115,13 @@ const CUSTOMER_SUBCOLLECTIONS = [
   'diningHistory',
   'transactions',
   'notifications',
-  'orders'
+  'orders',
 ];
-
-async function authenticateRunner() {
-  const runnerEmail = 'dev-admin-reset@restaurantos.internal';
-  const runnerPass = 'DevResetSecret123!';
-  try {
-    const cred = await signInWithEmailAndPassword(auth, runnerEmail, runnerPass);
-    console.log('[AUTH] Authenticated migration runner as:', cred.user.email);
-    // Ensure the runner doc in users has role 'super-admin'
-    await setDoc(doc(db, 'users', cred.user.uid), {
-      uid: cred.user.uid,
-      email: runnerEmail,
-      role: 'super-admin',
-      displayName: 'System Migration Runner',
-      status: 'active'
-    }, { merge: true });
-    return cred.user;
-  } catch (err) {
-    try {
-      const cred = await createUserWithEmailAndPassword(auth, runnerEmail, runnerPass);
-      console.log('[AUTH] Provisioned & authenticated migration runner as:', cred.user.email);
-      await setDoc(doc(db, 'users', cred.user.uid), {
-        uid: cred.user.uid,
-        email: runnerEmail,
-        role: 'super-admin',
-        displayName: 'System Migration Runner',
-        status: 'active'
-      }, { merge: true });
-      return cred.user;
-    } catch (createErr) {
-      console.warn('[AUTH] Auth runner note:', createErr.message);
-      return null;
-    }
-  }
-}
 
 async function runMigration() {
   console.log('\n[1/4] Authenticating migration runner...');
-  await authenticateRunner();
+  const cred = await signInWithEmailAndPassword(auth, runnerCreds.email, runnerCreds.password);
+  console.log('[AUTH] Authenticated migration runner as:', cred.user.email);
 
   console.log('\n[2/4] Scanning root users/ collection...');
 
@@ -142,29 +142,25 @@ async function runMigration() {
   let ambiguousUsers = 0;
   let errors = 0;
 
-  console.log('\n[2/4] Classifying documents and migrating confirmed customers...');
+  console.log('\n[3/4] Classifying documents and migrating confirmed customers...');
 
   for (const userDoc of usersSnap.docs) {
     const data = userDoc.data();
     const uid = userDoc.id;
     const rawRole = (data.role || data.userRole || data.accountType || data.type || '').toLowerCase().trim();
 
-    // Check if staff/owner
     if (STAFF_ROLES.has(rawRole) || data.isOwner === true || data.isStaff === true) {
       skipped++;
       continue;
     }
 
-    // Check if confirmed customer
-    const isConfirmedCustomer = (
+    const isConfirmedCustomer =
       rawRole === 'customer' ||
       data.isCustomer === true ||
       (data.loyaltyPoints !== undefined && !data.tenantId) ||
-      (data.walletBalance !== undefined && !data.tenantId)
-    );
+      (data.walletBalance !== undefined && !data.tenantId);
 
     if (!isConfirmedCustomer) {
-      // Ambiguous document: leave untouched
       ambiguousUsers++;
       console.log(`  [AMBIGUOUS] Skipped ambiguous user UID: ${uid} (role: "${rawRole || 'none'}")`);
       continue;
@@ -173,7 +169,6 @@ async function runMigration() {
     customersDetected++;
 
     try {
-      // Check if target customers/{uid} already exists
       const targetDocRef = doc(db, 'customers', uid);
       const targetSnap = await getDoc(targetDocRef);
 
@@ -192,12 +187,23 @@ async function runMigration() {
         dietaryPrefs: Array.isArray(data.dietaryPrefs) ? data.dietaryPrefs : [],
         allergens: Array.isArray(data.allergens) ? data.allergens : [],
         createdAt: data.createdAt || new Date().toISOString(),
-        updatedAt: data.updatedAt || new Date().toISOString()
+        updatedAt: data.updatedAt || new Date().toISOString(),
       };
+
+      if (dryRun) {
+        if (targetSnap.exists()) {
+          alreadyExisted++;
+          console.log(`  [DRY-RUN EXISTING] Would merge customer ${uid} into customers/${uid}`);
+        } else {
+          customersMigrated++;
+          console.log(`  [DRY-RUN MIGRATE] Would copy customer ${uid} (${customerProfilePayload.email}) to customers/${uid}`);
+        }
+        continue;
+      }
 
       if (targetSnap.exists()) {
         alreadyExisted++;
-        console.log(`  [EXISTING] Customer ${uid} already in customers/{uid}. Non-destructively merging any missing fields.`);
+        console.log(`  [EXISTING] Customer ${uid} already in customers/{uid}. Non-destructively merging missing fields.`);
         await setDoc(targetDocRef, customerProfilePayload, { merge: true });
       } else {
         await setDoc(targetDocRef, customerProfilePayload);
@@ -205,7 +211,6 @@ async function runMigration() {
         console.log(`  [MIGRATED] Successfully copied customer ${uid} (${customerProfilePayload.email}) to customers/${uid}`);
       }
 
-      // Check and copy subcollections non-destructively
       for (const subName of CUSTOMER_SUBCOLLECTIONS) {
         try {
           const srcSubCol = collection(db, 'users', uid, subName);
@@ -221,16 +226,15 @@ async function runMigration() {
           console.warn(`    [WARN] Subcollection copy warning for ${subName}:`, subErr.message || subErr);
         }
       }
-
     } catch (docErr) {
       errors++;
       console.error(`  [ERROR] Failed migrating customer ${uid}:`, docErr);
     }
   }
 
-  console.log('\n[3/4] Migration process complete.');
+  console.log('\n[4/4] Migration process complete.');
   console.log('\n====================================================');
-  console.log('CUSTOMER MIGRATION REPORT');
+  console.log(`CUSTOMER MIGRATION REPORT (${dryRun ? 'DRY-RUN' : 'EXECUTED'})`);
   console.log('====================================================');
   console.log(`Customers detected: ${customersDetected}`);
   console.log(`Customers migrated: ${customersMigrated}`);
@@ -242,7 +246,7 @@ async function runMigration() {
   console.log('SAFETY CONFIRMATION: Original users/{uid} documents were NOT deleted.\n');
 }
 
-runMigration().catch(err => {
-  console.error('[UNCAUGHT MIGRATION ERROR]', err);
+runMigration().catch((err) => {
+  console.error('[UNCAUGHT MIGRATION ERROR]', err?.message || err);
   process.exit(1);
 });

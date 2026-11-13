@@ -3,5 +3,13 @@ node_modules
 dist
 .vercel
 .env*
+!.env.example
+!.env.*.example
 firestore-debug.log
+firebase-debug.log
+serviceAccountKey.json
+service-account.json
+android/**/google-services*.json
+android/config/*.properties
+!android/config/*.properties.example
 .vscode/

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Mail, Settings } from 'lucide-react';
+import { OFFICIAL_SUPPORT_EMAIL } from '../../../shared/constants/contact';
 import { openCookieConsentModal } from '../../../shared/utils/cookieConsent';
 
 export const PublicFooter: React.FC = () => {
@@ -104,11 +105,11 @@ export const PublicFooter: React.FC = () => {
               Have questions or need assistance with your restaurant setup?
             </p>
             <a 
-              href="mailto:kumbhageethakrishna143@gmail.com" 
-              className="inline-flex items-center space-x-2 text-xs font-semibold text-[#D65336] hover:underline"
+              href={`mailto:${OFFICIAL_SUPPORT_EMAIL}`}
+              className="inline-flex items-center space-x-2 text-xs font-semibold text-[#D65336] hover:underline break-all"
             >
-              <Mail className="w-3.5 h-3.5" />
-              <span>kumbhageethakrishna143@gmail.com</span>
+              <Mail className="w-3.5 h-3.5 shrink-0" />
+              <span>{OFFICIAL_SUPPORT_EMAIL}</span>
             </a>
             <div className="pt-2">
               <Link 

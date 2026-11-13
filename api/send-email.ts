@@ -1,56 +1,49 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import {
+  handleAuthError,
+  requireNonAnonymousUser,
+  requireSuperAdmin,
+} from './_lib/authMiddleware.js';
 import { sendMailWithLogging } from './_lib/resendHelper.js';
-import { 
-  getWelcomeTemplate, 
-  getInvoiceTemplate, 
-  getOrderConfirmationTemplate, 
+import {
+  getWelcomeTemplate,
+  getInvoiceTemplate,
+  getOrderConfirmationTemplate,
   getReservationTemplate,
   getRestaurantApprovalHtml,
-  getRestaurantApprovalText
+  getRestaurantApprovalText,
 } from '../src/services/email/emailTemplates.js';
 
-interface ITokenUser {
-  uid: string;
-  isAnonymous?: boolean;
-}
+const OFFICIAL_SUPPORT_EMAIL = 'support@spiralworld.in';
 
-async function verifyAuthToken(token: string): Promise<ITokenUser | null> {
-  if (!token) return null;
-  const apiKey = process.env.VITE_FIREBASE_API_KEY || process.env.FIREBASE_API_KEY;
-  if (!apiKey) {
-    try {
-      const parts = token.split('.');
-      if (parts.length >= 2) {
-        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
-        const uid = payload.user_id || payload.sub || payload.uid;
-        if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
-        if (uid) return { uid, isAnonymous: payload.firebase?.sign_in_provider === 'anonymous' };
-      }
-    } catch (_) {}
-    return null;
-  }
-
-  try {
-    const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idToken: token }),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data.users || data.users.length === 0) return null;
-    return {
-      uid: data.users[0].localId,
-      isAnonymous: data.users[0].providerUserInfo?.length === 0,
-    };
-  } catch (_) {
-    return null;
-  }
+interface EmailRequestBody {
+  type?: string;
+  email?: string;
+  fullName?: string;
+  restaurantName?: string;
+  tenantId?: string;
+  customerName?: string;
+  invoiceId?: string;
+  items?: Array<{ name: string; quantity: number; price: string | number }>;
+  subtotal?: string | number;
+  tax?: string | number;
+  total?: string | number;
+  orderNumber?: string;
+  date?: string;
+  time?: string;
+  partySize?: number;
+  tableNumber?: string | number;
+  applicationId?: string;
+  ownerEmail?: string;
+  ownerName?: string;
+  country?: string;
+  currency?: string;
+  notes?: string;
 }
 
 /**
  * Unified Email Dispatch Serverless Function.
- * Handles welcome, invoice, order confirmation, reservation, and admin registration notifications.
+ * Handles welcome, invoice, order confirmation, reservation, and admin notifications.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') {
@@ -61,18 +54,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  // Determine email type from query param, header, body, or URL
-  const queryType = req.query.type as string | undefined;
-  const bodyType = req.body?.type as string | undefined;
+  const queryType = typeof req.query.type === 'string' ? req.query.type : undefined;
+  const body = (req.body || {}) as EmailRequestBody;
+  const bodyType = typeof body.type === 'string' ? body.type : undefined;
   const emailType = (queryType || bodyType || '').toLowerCase();
-
-  const body = req.body || {};
 
   try {
     // -----------------------------------------------------------
     // Case 1: Welcome Email
     // -----------------------------------------------------------
-    if (emailType === 'welcome' || (!emailType && body.fullName && body.restaurantName && !body.invoiceId && !body.orderNumber)) {
+    if (
+      emailType === 'welcome' ||
+      (!emailType && body.fullName && body.restaurantName && !body.invoiceId && !body.orderNumber)
+    ) {
       const { email, fullName, restaurantName, tenantId } = body;
       if (!email || !fullName) {
         return res.status(400).json({ error: 'Missing required arguments: email and fullName.' });
@@ -93,17 +87,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // -----------------------------------------------------------
     if (emailType === 'invoice' || body.invoiceId) {
       const { email, customerName, invoiceId, items, subtotal, tax, total, tenantId } = body;
-      if (!email || !customerName || !invoiceId || !items || !subtotal || !tax || !total) {
+      if (
+        !email ||
+        !customerName ||
+        !invoiceId ||
+        !items ||
+        subtotal === undefined ||
+        tax === undefined ||
+        total === undefined
+      ) {
         return res.status(400).json({ error: 'Missing required invoice config details.' });
       }
       const templateHtml = getInvoiceTemplate({
         customerName,
         invoiceId,
         date: new Date().toLocaleDateString(),
-        items,
-        subtotal,
-        tax,
-        total,
+        items: items.map((item) => ({
+          name: String(item.name),
+          quantity: Number(item.quantity),
+          price: String(item.price),
+        })),
+        subtotal: String(subtotal),
+        tax: String(tax),
+        total: String(total),
       });
       const emailRes = await sendMailWithLogging({
         to: email.trim(),
@@ -120,7 +126,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // -----------------------------------------------------------
     if (emailType === 'order_confirmation' || body.orderNumber) {
       const { email, customerName, orderNumber, restaurantName, total, tenantId } = body;
-      if (!email || !customerName || !orderNumber || !restaurantName || !total) {
+      if (!email || !customerName || !orderNumber || !restaurantName || total === undefined) {
         return res.status(400).json({ error: 'Missing required order configuration details.' });
       }
       const templateHtml = getOrderConfirmationTemplate({
@@ -128,7 +134,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         orderNumber,
         restaurantName,
         date: new Date().toLocaleDateString(),
-        total,
+        total: String(total),
       });
       const emailRes = await sendMailWithLogging({
         to: email.trim(),
@@ -144,7 +150,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Case 4: Reservation Confirmation Email
     // -----------------------------------------------------------
     if (emailType === 'reservation' || body.partySize) {
-      const { email, customerName, restaurantName, date, time, partySize, tableNumber, tenantId } = body;
+      const { email, customerName, restaurantName, date, time, partySize, tableNumber, tenantId } =
+        body;
       if (!email || !customerName || !restaurantName || !date || !time || !partySize) {
         return res.status(400).json({ error: 'Missing required reservation configuration details.' });
       }
@@ -167,17 +174,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // -----------------------------------------------------------
-    // Case 5: Admin Registration Notification
+    // Case 5: Admin Registration Notification (Authenticated user required)
     // -----------------------------------------------------------
     if (emailType === 'admin_registration' || body.applicationId) {
-      const authHeader = req.headers.authorization || '';
-      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-      if (!token) {
-        return res.status(401).json({ error: 'Unauthorized: Missing Authorization header.' });
-      }
-      const tokenUser = await verifyAuthToken(token);
-      if (!tokenUser || !tokenUser.uid || tokenUser.isAnonymous) {
-        return res.status(401).json({ error: 'Unauthorized: Invalid token.' });
+      try {
+        await requireNonAnonymousUser(req);
+      } catch (authErr: unknown) {
+        return handleAuthError(res, authErr);
       }
 
       const {
@@ -187,7 +190,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ownerEmail,
         ownerName,
         country,
-        currency
+        currency,
       } = body;
 
       const cleanRestName = String(restaurantName || 'New Restaurant').trim();
@@ -198,8 +201,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const cleanCountry = country ? String(country).trim() : 'Global';
       const cleanCurrency = currency ? String(currency).trim() : 'USD';
 
-      const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || 'kumbhageethakrishna143@gmail.com';
-      const portalUrl = `https://spiral-dine.vercel.app/super-admin/applications?id=${encodeURIComponent(cleanAppId)}`;
+      const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || OFFICIAL_SUPPORT_EMAIL;
+      const baseUrl = (process.env.APP_PUBLIC_URL || 'https://spiral-dine.vercel.app').replace(
+        /\/+$/,
+        ''
+      );
+      const portalUrl = `${baseUrl}/super-admin/applications?id=${encodeURIComponent(cleanAppId)}`;
 
       const subject = `[New Restaurant Application] ${cleanRestName} (Pending Approval)`;
       const html = `
@@ -255,24 +262,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         subject,
         html,
         tenantId: cleanTenantId,
-        type: 'admin_registration_notification'
+        type: 'admin_registration_notification',
       });
 
       return res.status(200).json({ success: true, emailResult: result });
     }
 
     // -----------------------------------------------------------
-    // Case 6: Restaurant Application Approved Notification
+    // Case 6: Restaurant Application Approved Notification (Super Admin required)
     // -----------------------------------------------------------
     if (emailType === 'restaurant_application_approved') {
-      const authHeader = req.headers.authorization || '';
-      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-      if (!token) {
-        return res.status(401).json({ error: 'Unauthorized: Missing Authorization header.' });
-      }
-      const tokenUser = await verifyAuthToken(token);
-      if (!tokenUser || !tokenUser.uid || tokenUser.isAnonymous) {
-        return res.status(401).json({ error: 'Unauthorized: Invalid token.' });
+      try {
+        await requireSuperAdmin(req);
+      } catch (authErr: unknown) {
+        return handleAuthError(res, authErr);
       }
 
       const {
@@ -282,7 +285,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         restaurantName,
         applicationId,
         tenantId,
-        notes
+        notes,
       } = body;
 
       const targetEmail = (email || ownerEmail || '').trim().toLowerCase();
@@ -295,8 +298,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const cleanRestName = restaurantName ? String(restaurantName).trim() : 'Your Restaurant';
       const cleanAppId = String(applicationId || tenantId || 'app_approved');
       const cleanTenantId = String(tenantId || cleanAppId);
-      const supportEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || 'kumbhageethakrishna143@gmail.com';
-      const loginUrl = 'https://spiral-dine.vercel.app/owner/login';
+      const supportEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || OFFICIAL_SUPPORT_EMAIL;
+      const baseUrl = (process.env.APP_PUBLIC_URL || 'https://spiral-dine.vercel.app').replace(
+        /\/+$/,
+        ''
+      );
+      const loginUrl = `${baseUrl}/owner/login`;
 
       const approvalHtml = getRestaurantApprovalHtml({
         ownerName: cleanOwnerName,
@@ -304,7 +311,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         applicationId: cleanAppId,
         loginUrl,
         supportEmail,
-        reviewNotes: notes || undefined
+        reviewNotes: notes || undefined,
       });
 
       const approvalText = getRestaurantApprovalText({
@@ -313,7 +320,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         applicationId: cleanAppId,
         loginUrl,
         supportEmail,
-        reviewNotes: notes || undefined
+        reviewNotes: notes || undefined,
       });
 
       const result = await sendMailWithLogging({
@@ -322,15 +329,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         html: approvalHtml,
         text: approvalText,
         tenantId: cleanTenantId,
-        type: 'restaurant_application_approved'
+        type: 'restaurant_application_approved',
       });
 
       return res.status(200).json(result);
     }
 
     return res.status(400).json({ error: 'Unrecognized email request configuration.' });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Internal Server Error';
     console.error('[send-email] Unified dispatcher error:', err);
-    return res.status(500).json({ error: err.message || 'Internal Server Error' });
+    return res.status(500).json({ error: message });
   }
 }

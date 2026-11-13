@@ -17,6 +17,7 @@ import {
   linkWithPhoneNumber,
   linkWithCredential,
   EmailAuthProvider,
+  PhoneAuthProvider,
   ActionCodeSettings,
   verifyPasswordResetCode as firebaseVerifyPasswordResetCode,
   confirmPasswordReset as firebaseConfirmPasswordReset
@@ -356,4 +357,14 @@ export const linkPhone = async (
 ): Promise<ConfirmationResult> => {
   return linkWithPhoneNumber(user, phoneNumber, appVerifier);
 };
+
+export const linkPhoneWithCredential = async (
+  user: User,
+  verificationId: string,
+  verificationCode: string
+): Promise<UserCredential> => {
+  const cred = PhoneAuthProvider.credential(verificationId, verificationCode);
+  return linkWithCredential(user, cred);
+};
+
 

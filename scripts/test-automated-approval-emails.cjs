@@ -349,25 +349,29 @@ assert(handleResendAction('active', 'owner@bistro.com', 'sent').ok === true, 're
 // -----------------------------------------------------------------------------
 console.log('\n🔹 Suite 6: Live Firestore & Resend API Verification');
 
+const {
+  normalizeEnvName,
+  parseCliFlags,
+  loadScriptEnvironment,
+  resolveScriptFirebaseConfig,
+  resolveRunnerCredentials,
+} = require('./_lib/envGuard.cjs');
+const path = require('path');
+
 async function verifyLiveIntegration() {
-  const firebaseConfig = {
-    apiKey: process.env.VITE_FIREBASE_API_KEY || 'AIzaSyCKE7c57Boi_5dpK53FaZOtTu6m6Kz1vHg',
-    authDomain: 'spiral-restaurant-saas-v1.firebaseapp.com',
-    projectId: 'spiral-restaurant-saas-v1',
-    storageBucket: 'spiral-restaurant-saas-v1.firebasestorage.app',
-    messagingSenderId: '917630391162',
-    appId: '1:917630391162:web:6e4c127734b84ca6977cc3'
-  };
+  const flags = parseCliFlags();
+  const targetEnv = normalizeEnvName(flags.env || process.env.APP_ENV || 'staging');
+  loadScriptEnvironment({ rootDir: path.resolve(__dirname, '..'), envName: targetEnv });
+
+  const firebaseConfig = resolveScriptFirebaseConfig(process.env, { expectedEnv: targetEnv });
+  const runnerCreds = resolveRunnerCredentials(process.env);
 
   const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
   const db = getFirestore(app);
   const auth = getAuth(app);
 
   try {
-    const serverEmail = process.env.FIREBASE_SERVER_EMAIL || 'dev-admin-reset@restaurantos.internal';
-    const serverPassword = process.env.FIREBASE_SERVER_PASSWORD || 'DevResetSecret123!';
-
-    await signInWithEmailAndPassword(auth, serverEmail, serverPassword);
+    await signInWithEmailAndPassword(auth, runnerCreds.email, runnerCreds.password);
     assert(true, 'Live Firebase Authentication succeeded for server test runner');
 
     // 1. Verify applicant restaurant document in restaurants collection

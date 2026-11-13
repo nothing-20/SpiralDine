@@ -17,7 +17,7 @@ import http from 'http';
 
 const EMULATOR_HOST = process.env.FIRESTORE_EMULATOR_HOST || '127.0.0.1:8088';
 const [HOST, PORT] = EMULATOR_HOST.split(':');
-const PROJECT_ID = 'spiral-restaurant-saas-v1';
+const PROJECT_ID = process.env.GCLOUD_PROJECT || 'demo-spiraldine-emulator';
 const BASE_PATH = `/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 
 function makeRequest(method, path, authHeader, body = null) {
@@ -40,7 +40,7 @@ function makeRequest(method, path, authHeader, body = null) {
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         let json = null;
-        try { json = JSON.parse(data); } catch (_) {}
+        try { json = JSON.parse(data); } catch (_) { }
         resolve({
           status: res.statusCode,
           data: json,
@@ -90,7 +90,7 @@ async function runTests() {
 
   // Step 1: Seed Test Fixtures (via Admin bypass)
   console.log('[Setup] Seeding test database fixtures in emulator...');
-  
+
   // Seed Users (Staff profiles in /users)
   await seedDoc('users/staff_tenant_a', {
     uid: { stringValue: 'staff_tenant_a' },

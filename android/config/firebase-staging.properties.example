@@ -1,0 +1,17 @@
+# SpiralDine Android — STAGING Firebase Configuration Template
+# Copy to `android/config/firebase-staging.properties` (gitignored) and populate
+# from your isolated Free-Tier (Spark) Staging Firebase project.
+#
+# NEVER set FIREBASE_PROJECT_ID=spiral-restaurant-saas-v1 in staging builds.
+
+FIREBASE_PROJECT_ID=your_staging_project_id
+FIREBASE_API_KEY=your_staging_android_api_key
+FIREBASE_STORAGE_BUCKET=your_staging_project_id.firebasestorage.app
+FIREBASE_GCM_SENDER_ID=your_staging_messaging_sender_id
+
+# Optional per-module Firebase App IDs (or shared fallback FIREBASE_APPLICATION_ID):
+# FIREBASE_APPLICATION_ID_APP=1:your_sender_id:android:printbridge_staging_id
+# FIREBASE_APPLICATION_ID_CUSTOMER=1:your_sender_id:android:customer_staging_id
+# FIREBASE_APPLICATION_ID_OWNER=1:your_sender_id:android:owner_staging_id
+FIREBASE_APPLICATION_ID=1:your_staging_messaging_sender_id:android:your_staging_app_id
+

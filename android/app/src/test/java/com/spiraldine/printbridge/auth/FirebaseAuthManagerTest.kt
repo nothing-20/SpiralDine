@@ -362,11 +362,48 @@ class FirebaseAuthManagerTest {
     }
 
     @Test
-    fun firebaseConfig_targetsCorrectSaaSProject() {
-        assertEquals("spiral-restaurant-saas-v1", FirebaseAuthManager.PROJECT_ID)
-        assertEquals("com.spiraldine.printbridge", FirebaseAuthManager.APPLICATION_ID)
-        assertEquals("spiral-restaurant-saas-v1.firebasestorage.app", FirebaseAuthManager.STORAGE_BUCKET)
-        assertTrue("API Key must be present", FirebaseAuthManager.API_KEY.isNotBlank())
+    fun firebaseConfig_respectsFlavorIsolationAndRefusesSilentProdFallback() {
+        if (FirebaseAuthManager.APP_ENV == "prod") {
+            assertTrue("Prod must be configured", FirebaseAuthManager.IS_CONFIGURED)
+            assertEquals("spiral-restaurant-saas-v1", FirebaseAuthManager.PROJECT_ID)
+            assertEquals("com.spiraldine.printbridge", FirebaseAuthManager.APPLICATION_ID)
+            assertEquals("spiral-restaurant-saas-v1.firebasestorage.app", FirebaseAuthManager.STORAGE_BUCKET)
+            assertTrue("API Key must be present", FirebaseAuthManager.API_KEY.isNotBlank())
+        } else {
+            assertFalse(
+                "Unconfigured non-prod build must NOT silently point to prod",
+                FirebaseAuthManager.PROJECT_ID == "spiral-restaurant-saas-v1"
+            )
+            val missingEx = try {
+                FirebaseAuthManager.resolveValidatedConfig(
+                    appEnv = FirebaseAuthManager.APP_ENV,
+                    configured = false,
+                    apiKey = "",
+                    projectId = "",
+                    applicationId = "",
+                    storageBucket = ""
+                )
+                null
+            } catch (e: IllegalStateException) {
+                e
+            }
+            assertNotNull("Missing config must throw IllegalStateException", missingEx)
+        }
+
+        val crossEnvEx = try {
+            FirebaseAuthManager.resolveValidatedConfig(
+                appEnv = "dev",
+                configured = true,
+                apiKey = "test-key",
+                projectId = "spiral-restaurant-saas-v1",
+                applicationId = "com.spiraldine.printbridge.dev",
+                storageBucket = "spiral-restaurant-saas-v1.firebasestorage.app"
+            )
+            null
+        } catch (e: IllegalStateException) {
+            e
+        }
+        assertNotNull("Dev targeting prod must throw IllegalStateException", crossEnvEx)
     }
 
     @Test

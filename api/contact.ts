@@ -1,87 +1,58 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { Resend } from 'resend';
+import { OFFICIAL_SUPPORT_EMAIL } from '../src/shared/constants/contact.js';
+import { extractClientIp } from './_lib/email/contactGuard.js';
+import { processContactSubmission } from './_lib/email/contactService.js';
+
+function parseRequestBody(req: VercelRequest): unknown {
+  if (!req.body) return {};
+  if (typeof req.body === 'string') {
+    try {
+      return JSON.parse(req.body);
+    } catch {
+      return {};
+    }
+  }
+  return req.body;
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
+    return res.status(405).json({
+      success: false,
+      code: 'METHOD_NOT_ALLOWED',
+      error: 'Method Not Allowed',
+      fallbackEmail: OFFICIAL_SUPPORT_EMAIL,
+    });
   }
 
   try {
-    const { name, email, phone, restaurantName, subject, message } = req.body || {};
+    const clientIp = extractClientIp(
+      req.headers as Record<string, string | string[] | undefined>,
+      req.socket?.remoteAddress
+    );
+    const body = parseRequestBody(req);
+    const result = await processContactSubmission(body, clientIp);
 
-    if (!name || !email || !message) {
-      return res.status(400).json({ 
-        error: 'Missing required fields. Name, email, and message are mandatory.' 
-      });
+    if (result.retryAfterSeconds) {
+      res.setHeader('Retry-After', String(result.retryAfterSeconds));
     }
 
-    const timestamp = new Date().toISOString();
-    const submissionData = {
-      name: String(name).trim(),
-      email: String(email).trim().toLowerCase(),
-      phone: phone ? String(phone).trim() : '',
-      restaurantName: restaurantName ? String(restaurantName).trim() : '',
-      subject: subject ? String(subject).trim() : 'General Inquiry',
-      message: String(message).trim(),
-      timestamp,
-      status: 'pending',
-    };
-
-    const supportEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || process.env.ADMIN_NOTIFICATION_EMAIL || 'kumbhageethakrishna143@gmail.com';
-
-    const apiKey = process.env.RESEND_API_KEY;
-    if (!apiKey) {
-      // Per instructions: Do not pretend message was sent if backend email service is unconfigured
-      return res.status(503).json({
-        success: false,
-        error: 'Contact email dispatch is currently unavailable on the server.',
-        fallbackEmail: supportEmail,
-      });
-    }
-
-    const resend = new Resend(apiKey);
-    const emailHtml = `
-      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e8ded6; border-radius: 12px;">
-        <h2 style="color: #d65336;">New SpiralDine Contact Inquiry</h2>
-        <p><strong>Name:</strong> ${submissionData.name}</p>
-        <p><strong>Email:</strong> ${submissionData.email}</p>
-        <p><strong>Phone:</strong> ${submissionData.phone || 'N/A'}</p>
-        <p><strong>Restaurant Name:</strong> ${submissionData.restaurantName || 'N/A'}</p>
-        <p><strong>Subject:</strong> ${submissionData.subject}</p>
-        <hr style="border: none; border-top: 1px solid #e8ded6; margin: 20px 0;" />
-        <p><strong>Message:</strong></p>
-        <p style="white-space: pre-wrap; background: #fcfaf7; padding: 15px; border-radius: 8px;">${submissionData.message}</p>
-        <p style="font-size: 11px; color: #8a817a;">Received at: ${timestamp}</p>
-      </div>
-    `;
-
-    const response = await resend.emails.send({
-      from: 'Spiral Dine <onboarding@resend.dev>',
-      to: [supportEmail],
-      subject: `[SpiralDine Contact] ${submissionData.subject} - ${submissionData.restaurantName || submissionData.name}`,
-      html: emailHtml,
-    });
-
-    if (response.error) {
-      return res.status(502).json({
-        success: false,
-        error: response.error.message || 'Failed to deliver message.',
-        fallbackEmail: supportEmail,
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: 'Inquiry received successfully. Our team will contact you shortly.',
-      id: response.data?.id,
-    });
-  } catch (err: any) {
-    console.error('[Vercel API /contact] Error processing request:', err);
-    const fallbackSupportEmail = process.env.SUPPORT_NOTIFICATION_EMAIL || process.env.ADMIN_NOTIFICATION_EMAIL || 'kumbhageethakrishna143@gmail.com';
+    return res.status(result.httpStatus).json(result.body);
+  } catch (err: unknown) {
+    const errName = err instanceof Error ? err.name : 'UnexpectedError';
+    console.error('[Vercel API /contact] Unhandled handler error:', { name: errName });
     return res.status(500).json({
       success: false,
-      error: 'An internal server error occurred while processing your request.',
-      fallbackEmail: fallbackSupportEmail,
+      code: 'INTERNAL_SERVER_ERROR',
+      error: `Unable to process your enquiry right now. Please try again shortly or email ${OFFICIAL_SUPPORT_EMAIL}.`,
+      fallbackEmail: OFFICIAL_SUPPORT_EMAIL,
     });
   }
 }

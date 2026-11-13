@@ -15,38 +15,28 @@ import {
   where,
   getDocs
 } from 'firebase/firestore';
-import fs from 'fs';
+import { createRequire } from 'module';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
+const require = createRequire(import.meta.url);
+const {
+  normalizeEnvName,
+  parseCliFlags,
+  loadScriptEnvironment,
+  resolveScriptFirebaseConfig,
+  resolveRunnerCredentials,
+} = require('./_lib/envGuard.cjs');
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const flags = parseCliFlags();
+const targetEnv = normalizeEnvName(flags.env || process.env.APP_ENV || 'development');
 
-// Read .env if present
-const envPath = resolve(__dirname, '../.env');
-if (fs.existsSync(envPath)) {
-  const envContent = fs.readFileSync(envPath, 'utf-8');
-  envContent.split('\n').forEach(line => {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-      const parts = trimmed.split('=');
-      const key = parts[0].trim();
-      const val = parts.slice(1).join('=').trim().replace(/^["']|["']$/g, '');
-      if (key && !process.env[key]) {
-        process.env[key] = val;
-      }
-    }
-  });
-}
+loadScriptEnvironment({ rootDir: resolve(__dirname, '..'), envName: targetEnv });
 
-const firebaseConfig = {
-  apiKey: process.env.VITE_FIREBASE_API_KEY,
-  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.VITE_FIREBASE_APP_ID,
-};
+const firebaseConfig = resolveScriptFirebaseConfig(process.env, { expectedEnv: targetEnv });
+const runnerCreds = resolveRunnerCredentials(process.env);
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
@@ -74,7 +64,7 @@ async function runTestSuite() {
   console.log('============================================================\n');
 
   console.log('Authenticating as administrative test runner...');
-  await signInWithEmailAndPassword(auth, 'dev-admin-reset@restaurantos.internal', 'DevResetSecret123!');
+  await signInWithEmailAndPassword(auth, runnerCreds.email, runnerCreds.password);
   console.log('Authentication confirmed.\n');
 
   // --- TEST 1: Initial Order ---

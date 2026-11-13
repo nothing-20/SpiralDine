@@ -254,27 +254,31 @@ assert(authContent.includes('ownerName: displayName.trim()'), 'signUpOwner saves
 // -----------------------------------------------------------------------------
 // 6. Live Firestore Verification
 // -----------------------------------------------------------------------------
-console.log('\n🔹 Suite 6: Live Firestore Production Database Verification');
+console.log('\n🔹 Suite 6: Live Firestore Verification');
 
-const firebaseConfig = {
-  apiKey: process.env.VITE_FIREBASE_API_KEY || 'AIzaSyCKE7c57Boi_5dpK53FaZOtTu6m6Kz1vHg',
-  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || 'spiral-restaurant-saas-v1.firebaseapp.com',
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'spiral-restaurant-saas-v1',
-  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET || 'spiral-restaurant-saas-v1.firebasestorage.app',
-  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '917630391162',
-  appId: process.env.VITE_FIREBASE_APP_ID || '1:917630391162:web:6e4c127734b84ca6977cc3',
-};
+const {
+  normalizeEnvName,
+  parseCliFlags,
+  loadScriptEnvironment,
+  resolveScriptFirebaseConfig,
+  resolveRunnerCredentials,
+} = require('./_lib/envGuard.cjs');
+const path = require('path');
 
 async function verifyLiveFirestore() {
+  const flags = parseCliFlags();
+  const targetEnv = normalizeEnvName(flags.env || process.env.APP_ENV || 'staging');
+  loadScriptEnvironment({ rootDir: path.resolve(__dirname, '..'), envName: targetEnv });
+
+  const firebaseConfig = resolveScriptFirebaseConfig(process.env, { expectedEnv: targetEnv });
+  const runnerCreds = resolveRunnerCredentials(process.env);
+
   const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
   const db = getFirestore(app);
   const auth = getAuth(app);
 
   try {
-    const serverEmail = process.env.FIREBASE_SERVER_EMAIL || 'dev-admin-reset@restaurantos.internal';
-    const serverPassword = process.env.FIREBASE_SERVER_PASSWORD || 'DevResetSecret123!';
-
-    await signInWithEmailAndPassword(auth, serverEmail, serverPassword);
+    await signInWithEmailAndPassword(auth, runnerCreds.email, runnerCreds.password);
     assert(true, 'Super Admin authenticated with Cloud Firestore');
 
     // Query restaurants collection
