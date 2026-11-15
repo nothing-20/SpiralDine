@@ -1,29 +1,129 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    match /restaurants/{tenantId}/{allPaths=**} {
-      // Branding assets (logo, cover photo) are publicly readable by customers
-      allow read: if true;
-      
-      // Helper function to check if user belongs to this tenant and has management role
-      function isTenantAuthorized() {
-        return request.auth != null && (
-          (request.auth.token.tenantId == tenantId && request.auth.token.role in ['owner', 'admin', 'super-admin']) ||
+
+    // =========================================================================
+    // AUTHORIZATION HELPERS
+    // =========================================================================
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isAuth() && (
+        (
+          (
+            (request.auth.token.get('role', '') in ['super_admin', 'super-admin']) ||
+            (request.auth.token.get('super_admin', false) == true)
+          ) && request.auth.token.get('status', 'active') != 'suspended'
+        ) || (
+          firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+          firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('role', '') in ['super_admin', 'super-admin'] &&
+          firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', 'active') != 'suspended'
+        )
+      );
+    }
+
+    function isTenantOwner(tenantId) {
+      return isAuth() && (
+        // Requirement: The tenant document itself must not be suspended
+        (
+          !firestore.exists(/databases/(default)/documents/tenants/$(tenantId)) ||
+          firestore.get(/databases/(default)/documents/tenants/$(tenantId)).data.get('status', 'active') != 'suspended'
+        ) && (
+          // Check 1: Custom Claims on auth token with active status
+          (
+            request.auth.token.get('tenantId', '') == tenantId &&
+            request.auth.token.get('role', '') in ['owner', 'admin', 'manager', 'super_admin', 'super-admin'] &&
+            request.auth.token.get('status', 'active') != 'suspended'
+          ) ||
+          // Check 2: users/{uid} document matches tenantId, role, and active status
           (
             firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
-            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.tenantId == tenantId &&
-            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role in ['owner', 'admin', 'super-admin']
+            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('tenantId', '') == tenantId &&
+            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('role', '') in ['owner', 'admin', 'manager', 'super_admin', 'super-admin'] &&
+            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', 'active') != 'suspended'
+          ) ||
+          // Check 3: tenants/{tenantId} document directly records ownerUid or ownerId AND user is not suspended
+          (
+            firestore.exists(/databases/(default)/documents/tenants/$(tenantId)) &&
+            (
+              firestore.get(/databases/(default)/documents/tenants/$(tenantId)).data.get('ownerUid', '') == request.auth.uid ||
+              firestore.get(/databases/(default)/documents/tenants/$(tenantId)).data.get('ownerId', '') == request.auth.uid
+            ) &&
+            (
+              !firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) ||
+              firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', 'active') != 'suspended'
+            )
           )
-        );
+        )
+      );
+    }
+
+    function isTenantManager(tenantId) {
+      return isTenantOwner(tenantId) || isSuperAdmin();
+    }
+
+    function isValidImage() {
+      return request.resource.contentType.matches('image/(png|jpeg|jpg|webp)');
+    }
+
+    // =========================================================================
+    // RESTAURANT MULTI-TENANT ASSET RULES
+    // =========================================================================
+
+    match /restaurants/{tenantId} {
+      
+      // Branding assets (logos, cover photos)
+      match /branding/{fileName} {
+        // Public download of individual branding assets for menus & discovery
+        allow get: if true;
+        // Restrict directory listing to authorized tenant manager
+        allow list: if isTenantManager(tenantId);
+        
+        // Write: Restricted to authorized tenant owner/manager
+        // File validation: PNG/JPEG/WebP; Logo <= 2MB, Cover <= 5MB
+        // Strictly only logo_ or cover_ prefixed filenames permitted
+        allow create, update: if isTenantManager(tenantId)
+          && isValidImage()
+          && (
+            (fileName.matches('^logo_.*') && request.resource.size <= 2 * 1024 * 1024) ||
+            (fileName.matches('^cover_.*') && request.resource.size <= 5 * 1024 * 1024)
+          );
+          
+        allow delete: if isTenantManager(tenantId);
       }
 
-      // Write (create, update) is restricted to authenticated authorized owners/admins of this tenant
-      allow create, update: if isTenantAuthorized()
-        && request.resource.size < 5 * 1024 * 1024
-        && request.resource.contentType.matches('image/(png|jpeg|jpg|webp)');
+      // Menu category images
+      match /categories/{catId} {
+        allow get: if true;
+        allow list: if isTenantManager(tenantId);
+        allow create, update: if isTenantManager(tenantId)
+          && isValidImage()
+          && request.resource.size <= 5 * 1024 * 1024;
+        allow delete: if isTenantManager(tenantId);
+      }
 
-      // Deletion of old assets is allowed for authorized owners/admins
-      allow delete: if isTenantAuthorized();
+      // Menu item images
+      match /items/{itemId} {
+        allow get: if true;
+        allow list: if isTenantManager(tenantId);
+        allow create, update: if isTenantManager(tenantId)
+          && isValidImage()
+          && request.resource.size <= 5 * 1024 * 1024;
+        allow delete: if isTenantManager(tenantId);
+      }
+
+      // Restaurant gallery images
+      match /gallery/{imageId} {
+        allow get: if true;
+        allow list: if isTenantManager(tenantId);
+        allow create, update: if isTenantManager(tenantId)
+          && isValidImage()
+          && request.resource.size <= 5 * 1024 * 1024;
+        allow delete: if isTenantManager(tenantId);
+      }
     }
   }
 }

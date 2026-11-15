@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, setDoc, collection, query, where, getDocs, limit } from 'firebase/firestore';
 import { db } from '../../../config/firebase';
 import { useAuth } from '../../../context/AuthContext';
 import Input from '../../../components/ui/Input/Input';
@@ -160,6 +160,25 @@ export const OwnerSettings: React.FC = () => {
           const userSnap = await getDoc(userRef);
           if (userSnap.exists()) {
             activeTenantId = userSnap.data().tenantId || '';
+          }
+        }
+
+        // Authoritative fallback: if not in user profile, query tenants or restaurants by ownerUid
+        if (!activeTenantId && user.uid) {
+          try {
+            const qTenants = query(collection(db, 'tenants'), where('ownerUid', '==', user.uid), limit(1));
+            const snapTenants = await getDocs(qTenants);
+            if (!snapTenants.empty) {
+              activeTenantId = snapTenants.docs[0].id;
+            } else {
+              const qRest = query(collection(db, 'restaurants'), where('ownerUid', '==', user.uid), limit(1));
+              const snapRest = await getDocs(qRest);
+              if (!snapRest.empty) {
+                activeTenantId = snapRest.docs[0].id;
+              }
+            }
+          } catch (tErr) {
+            console.warn('[OwnerSettings] Fallback ownerUid tenant resolution warning:', tErr);
           }
         }
 

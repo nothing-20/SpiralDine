@@ -1,5 +1,5 @@
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
-import { storage } from '../firebase/config';
+import { storage, auth } from '../firebase/config';
 
 export interface UploadOptions {
   onProgress?: (progressPercent: number) => void;
@@ -27,8 +27,28 @@ export async function uploadRestaurantAsset(
     throw new Error('Firebase Storage is not initialized or unavailable in this environment.');
   }
 
+  if (!auth?.currentUser) {
+    throw new Error('Authentication required. Please sign in to upload restaurant assets.');
+  }
+
   if (!tenantId || tenantId.trim() === '') {
     throw new Error('Invalid restaurant identifier (tenantId is missing).');
+  }
+
+  // Enforce strict file size limits (2MB logo, 5MB cover)
+  const maxSizeBytes = type === 'logo' ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
+  if (file.size > maxSizeBytes) {
+    throw new Error(
+      `${type === 'logo' ? 'Logo' : 'Cover image'} exceeds the maximum permitted size of ${
+        type === 'logo' ? '2 MB' : '5 MB'
+      }.`
+    );
+  }
+
+  // Validate allowed image MIME types
+  const allowedMimes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+  if (file.type && !allowedMimes.includes(file.type.toLowerCase())) {
+    throw new Error('Invalid image format. Allowed formats are PNG, JPEG, and WebP.');
   }
 
   // Sanitize file extension
