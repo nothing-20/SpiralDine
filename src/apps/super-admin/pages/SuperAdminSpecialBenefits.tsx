@@ -19,7 +19,18 @@ import {
   RefreshCw
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { collection, onSnapshot, getDocs } from 'firebase/firestore';
+import { 
+  collection, 
+  onSnapshot, 
+  getDocs, 
+  doc, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  orderBy, 
+  limit 
+} from 'firebase/firestore';
 import { db, auth } from '../../../shared/firebase/config';
 import type { 
   ISpecialBenefit, 
@@ -33,6 +44,28 @@ import type {
 interface IRestaurantOption {
   id: string;
   name: string;
+}
+
+function normalizeMemberPhone(phone: unknown): string {
+  if (typeof phone !== 'string') return '';
+  const digits = phone.replace(/[\s\-()]/g, '').trim();
+  if (!digits) return '';
+
+  if (digits.startsWith('+')) {
+    return digits;
+  }
+  if (digits.startsWith('0') && digits.length === 11) {
+    return `+91${digits.slice(1)}`;
+  }
+  if (digits.length === 10) {
+    return `+91${digits}`;
+  }
+  return `+${digits}`;
+}
+
+function normalizeMemberEmail(email: unknown): string {
+  if (typeof email !== 'string') return '';
+  return email.trim().toLowerCase();
 }
 
 export const SuperAdminSpecialBenefits: React.FC = () => {
@@ -177,15 +210,22 @@ export const SuperAdminSpecialBenefits: React.FC = () => {
     const toastId = toast.loading(editingBenefit ? 'Updating member benefit...' : 'Registering member benefit...');
 
     try {
-      const idToken = await auth.currentUser?.getIdToken();
-      if (!idToken) {
+      const user = auth.currentUser;
+      if (!user) {
         throw new Error('Authentication expired. Please sign in again.');
       }
 
-      const payload = {
+      const normalizedEmail = memberEmail.trim() ? normalizeMemberEmail(memberEmail) : undefined;
+      const normalizedPhone = memberPhone.trim() ? normalizeMemberPhone(memberPhone) : undefined;
+
+      const now = new Date().toISOString();
+      const benefitId = editingBenefit
+        ? editingBenefit.id
+        : `BENEFIT-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+      const benefitData: Record<string, any> = {
+        id: benefitId,
         memberName: memberName.trim(),
-        memberEmail: memberEmail.trim() || undefined,
-        memberPhone: memberPhone.trim() || undefined,
         discountPercentage: Number(discountPercentage),
         status,
         scope,
@@ -196,27 +236,20 @@ export const SuperAdminSpecialBenefits: React.FC = () => {
         usageFrequency,
         maxUsageTotal: maxUsageTotal ? Number(maxUsageTotal) : null,
         maxDiscountPerOrder: maxDiscountPerOrder ? Number(maxDiscountPerOrder) : null,
-        startDate: startDate ? new Date(startDate).toISOString() : undefined,
-        expiryDate: expiryDate ? new Date(expiryDate).toISOString() : undefined,
-        notes: notes.trim()
+        notes: notes.trim(),
+        redemptionCount: editingBenefit?.redemptionCount ?? 0,
+        createdBy: editingBenefit?.createdBy ?? user.uid,
+        createdByName: editingBenefit?.createdByName ?? (user.email || 'Super Admin'),
+        createdAt: editingBenefit?.createdAt ?? now,
+        updatedAt: now,
       };
 
-      const url = editingBenefit ? `/api/special-benefits/admin?id=${editingBenefit.id}` : '/api/special-benefits/admin';
-      const method = editingBenefit ? 'PUT' : 'POST';
+      if (normalizedEmail) benefitData.memberEmail = normalizedEmail;
+      if (normalizedPhone) benefitData.memberPhone = normalizedPhone;
+      if (startDate) benefitData.startDate = new Date(startDate).toISOString();
+      if (expiryDate) benefitData.expiryDate = new Date(expiryDate).toISOString();
 
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${idToken}`
-        },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to save special benefit.');
-      }
+      await setDoc(doc(db, 'specialBenefits', benefitId), benefitData, { merge: true });
 
       toast.success(editingBenefit ? 'Special benefit updated successfully!' : 'Eligible member registered successfully!', { id: toastId });
       setIsModalOpen(false);
@@ -234,22 +267,12 @@ export const SuperAdminSpecialBenefits: React.FC = () => {
     const toastId = toast.loading(`${newStatus === 'active' ? 'Activating' : 'Deactivating'} benefit...`);
 
     try {
-      const idToken = await auth.currentUser?.getIdToken();
-      if (!idToken) throw new Error('Authentication expired.');
+      if (!auth.currentUser) throw new Error('Authentication expired.');
 
-      const res = await fetch(`/api/special-benefits/admin?id=${benefit.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${idToken}`
-        },
-        body: JSON.stringify({ status: newStatus })
+      await updateDoc(doc(db, 'specialBenefits', benefit.id), {
+        status: newStatus,
+        updatedAt: new Date().toISOString()
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Failed to update status.');
-      }
 
       toast.success(`Special benefit is now ${newStatus}.`, { id: toastId });
     } catch (err: any) {
@@ -265,22 +288,24 @@ export const SuperAdminSpecialBenefits: React.FC = () => {
 
     const toastId = toast.loading('Removing benefit...');
     try {
-      const idToken = await auth.currentUser?.getIdToken();
-      if (!idToken) throw new Error('Authentication expired.');
+      if (!auth.currentUser) throw new Error('Authentication expired.');
 
-      const res = await fetch(`/api/special-benefits/admin?id=${benefit.id}`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${idToken}`
-        }
-      });
+      const redemptionsSnap = await getDocs(
+        query(collection(db, 'specialBenefits', benefit.id, 'redemptions'), limit(1))
+      );
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to remove benefit.');
+      if (!redemptionsSnap.empty) {
+        // Redemptions exist: soft delete (inactivate) to preserve audit trail
+        await updateDoc(doc(db, 'specialBenefits', benefit.id), {
+          status: 'inactive',
+          updatedAt: new Date().toISOString(),
+          notes: `${benefit.notes || ''}\n[Archived by Super Admin on ${new Date().toISOString()}]`.trim(),
+        });
+        toast.success('Special benefit has historical redemptions and was marked inactive to preserve audit records.', { id: toastId });
+      } else {
+        await deleteDoc(doc(db, 'specialBenefits', benefit.id));
+        toast.success('Special benefit removed permanently.', { id: toastId });
       }
-
-      toast.success(data.message || 'Special benefit removed.', { id: toastId });
     } catch (err: any) {
       toast.error(err.message || 'Failed to remove.', { id: toastId });
     }
@@ -292,19 +317,14 @@ export const SuperAdminSpecialBenefits: React.FC = () => {
     setRedemptions([]);
 
     try {
-      const idToken = await auth.currentUser?.getIdToken();
-      if (!idToken) throw new Error('Authentication expired.');
-
-      const res = await fetch(`/api/special-benefits/admin?id=${benefit.id}`, {
-        headers: {
-          Authorization: `Bearer ${idToken}`
-        }
+      const redSnap = await getDocs(
+        query(collection(db, 'specialBenefits', benefit.id, 'redemptions'), orderBy('reservedAt', 'desc'), limit(50))
+      );
+      const list: ISpecialBenefitRedemption[] = [];
+      redSnap.forEach((d) => {
+        list.push({ id: d.id, ...d.data() } as ISpecialBenefitRedemption);
       });
-
-      const data = await res.json();
-      if (res.ok && Array.isArray(data.redemptions)) {
-        setRedemptions(data.redemptions);
-      }
+      setRedemptions(list);
     } catch (err) {
       console.warn('[SuperAdminSpecialBenefits] Failed to load redemptions:', err);
     } finally {
