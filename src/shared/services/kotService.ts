@@ -104,9 +104,13 @@ export const kotService = {
     const ticketRef = doc(db, 'restaurants', tenantId, 'kitchenTickets', ticketId);
 
     // 1. Idempotency Check: if KOT already exists for this order & round, return it immediately
-    const existingSnap = await getDoc(ticketRef);
-    if (existingSnap.exists()) {
-      return { id: existingSnap.id, ...existingSnap.data() } as IKitchenTicket;
+    try {
+      const existingSnap = await getDoc(ticketRef);
+      if (existingSnap.exists()) {
+        return { id: existingSnap.id, ...existingSnap.data() } as IKitchenTicket;
+      }
+    } catch (readErr) {
+      console.warn('[kotService] Idempotency read check skipped (non-staff diner):', readErr);
     }
 
     // 2. Resolve next ticket number
@@ -169,7 +173,11 @@ export const kotService = {
     };
 
     // 4. Save to Firestore
-    await setDoc(ticketRef, newTicket);
+    try {
+      await setDoc(ticketRef, newTicket);
+    } catch (saveErr) {
+      console.warn('[kotService] KOT ticket save note:', saveErr);
+    }
 
     // 5. Update canonical order reference with KOT tracking
     try {

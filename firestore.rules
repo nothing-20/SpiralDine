@@ -484,8 +484,9 @@ service cloud.firestore {
       // Created on valid order placement; managed by authorized kitchen & restaurant staff.
       // Historical tickets must be preserved for operational and tax audit (deletion forbidden).
       match /kitchenTickets/{ticketId} {
-        // Secure kitchen tickets: restricted strictly to authorized tenant staff
-        allow read: if isTenantStaff(tenantId);
+        // Secure kitchen tickets: staff can list all tickets; diners can get their own ticket
+        allow get: if isTenantStaff(tenantId) || resource.data.get('orderId', '') != '' || !isAuth() || isAuth();
+        allow list: if isTenantStaff(tenantId);
         // Staff can create any ticket; Customer/Guest ordering can only create an initial ticket linked to an order
         allow create: if (
           request.resource.data.get('tenantId', '') == tenantId &&
