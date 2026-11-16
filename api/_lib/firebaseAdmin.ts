@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { createRequire } from 'node:module';
 import {
   App,
   ServiceAccount,
@@ -7,7 +8,7 @@ import {
   getApps,
   initializeApp,
 } from 'firebase-admin/app';
-import { Auth, getAuth } from 'firebase-admin/auth';
+import type { Auth } from 'firebase-admin/auth';
 import {
   FieldValue,
   Firestore,
@@ -49,7 +50,7 @@ export interface ResolvedAdminConfig {
 
 export interface FirebaseAdminBundle {
   app: App;
-  auth: Auth;
+  auth?: Auth;
   db: Firestore;
   FieldValue: typeof FieldValue;
   Timestamp: typeof Timestamp;
@@ -264,7 +265,6 @@ export function getFirebaseAdmin(
 
   return {
     app,
-    auth: getAuth(app),
     db: getFirestore(app),
     FieldValue,
     Timestamp,
@@ -280,10 +280,22 @@ export function getAdminDb(
   return getFirebaseAdmin(env).db;
 }
 
+const nodeRequire = createRequire(import.meta.url);
+
 export function getAdminAuth(
   env: Record<string, string | undefined> = process.env
 ): Auth {
-  return getFirebaseAdmin(env).auth;
+  const admin = getFirebaseAdmin(env);
+  if (!admin.auth) {
+    try {
+      const { getAuth } = nodeRequire('firebase-admin/auth');
+      admin.auth = getAuth(admin.app);
+    } catch (err) {
+      console.warn('[firebaseAdmin] firebase-admin/auth could not be loaded dynamically:', err);
+      throw err;
+    }
+  }
+  return admin.auth;
 }
 
 function createLazyAdminProxy<T extends object>(resolveTarget: () => T): T {

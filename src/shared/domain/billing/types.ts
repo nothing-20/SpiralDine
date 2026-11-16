@@ -8,6 +8,7 @@ export interface IBill {
   branchId?: string;
   tableId?: string;
   tableNumber: string;
+  sessionId?: string;
   customerId?: string;
   customerName?: string;
   customerPhone?: string;

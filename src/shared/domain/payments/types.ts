@@ -1,6 +1,6 @@
 export type PaymentProviderName = 'razorpay' | 'stripe';
 
-export type PaymentStatus = 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILED' | 'CANCELLED' | 'UNKNOWN';
+export type PaymentStatus = 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILED' | 'CANCELLED' | 'REFUNDED' | 'UNKNOWN';
 
 export type NormalizedPaymentMethod = 'cash' | 'upi' | 'card' | 'wallet' | 'netbanking' | 'online';
 

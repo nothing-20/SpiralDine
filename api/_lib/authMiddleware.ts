@@ -1,8 +1,8 @@
+import crypto from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import type { DecodedIdToken } from 'firebase-admin/auth';
 import {
   FirebaseAdminInitError,
-  getAdminAuth,
   getAdminDb,
 } from './firebaseAdmin.js';
 
@@ -19,6 +19,7 @@ export type AuthErrorCode =
   | 'SUPER_ADMIN_REQUIRED'
   | 'TENANT_ACCESS_DENIED'
   | 'BRANCH_ACCESS_DENIED'
+  | 'FORBIDDEN_BILL_ACCESS'
   | 'AUTH_CONFIG_ERROR';
 
 export class AuthError extends Error {
@@ -66,6 +67,142 @@ const DEFAULT_INACTIVE_STATUSES = new Set([
   'deleted',
 ]);
 
+let cachedGoogleCerts: Record<string, string> | null = null;
+let googleCertsExpiresAt = 0;
+
+async function getGooglePublicCerts(): Promise<Record<string, string>> {
+  const now = Date.now();
+  if (cachedGoogleCerts && now < googleCertsExpiresAt) {
+    return cachedGoogleCerts;
+  }
+  try {
+    const res = await fetch(
+      'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com'
+    );
+    if (!res.ok) {
+      if (cachedGoogleCerts) return cachedGoogleCerts;
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const cacheControl = res.headers.get('cache-control') || '';
+    const match = /max-age=(\d+)/i.exec(cacheControl);
+    const maxAgeSeconds = match ? parseInt(match[1], 10) : 3600;
+    cachedGoogleCerts = (await res.json()) as Record<string, string>;
+    googleCertsExpiresAt = now + maxAgeSeconds * 1000;
+    return cachedGoogleCerts;
+  } catch (err) {
+    if (cachedGoogleCerts) return cachedGoogleCerts;
+    throw new AuthError(503, 'AUTH_CONFIG_ERROR', 'Google certificate authority is unreachable.');
+  }
+}
+
+export async function verifyFirebaseIdTokenDirect(
+  token: string,
+  _checkRevoked = false
+): Promise<DecodedIdToken> {
+  if (!token || typeof token !== 'string') {
+    throw new AuthError(401, 'INVALID_TOKEN', 'Missing or empty authentication token.');
+  }
+
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    throw new AuthError(401, 'INVALID_TOKEN', 'Malformed Firebase ID token format.');
+  }
+
+  const [headerB64, payloadB64, signatureB64] = parts;
+  let header: { alg?: string; kid?: string; typ?: string };
+  let payload: Record<string, unknown>;
+
+  try {
+    header = JSON.parse(Buffer.from(headerB64, 'base64url').toString('utf8'));
+    payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+  } catch {
+    throw new AuthError(401, 'INVALID_TOKEN', 'Failed to parse Firebase ID token.');
+  }
+
+  // If in emulator mode, bypass Google public cert signature check
+  if (process.env.FIREBASE_AUTH_EMULATOR_HOST) {
+    return {
+      ...payload,
+      uid: String(payload.user_id || payload.sub || ''),
+    } as unknown as DecodedIdToken;
+  }
+
+  if (header.alg !== 'RS256' || !header.kid) {
+    throw new AuthError(401, 'INVALID_TOKEN', 'Unsupported token algorithm or missing key ID.');
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const exp = Number(payload.exp);
+  const iat = Number(payload.iat);
+  const authTime = Number(payload.auth_time);
+
+  if (!exp || exp <= nowSec) {
+    throw new AuthError(401, 'TOKEN_EXPIRED', 'Firebase ID token has expired.');
+  }
+  if (!iat || iat > nowSec + 300) {
+    throw new AuthError(401, 'INVALID_TOKEN', 'Token issued in the future.');
+  }
+  if (!authTime || authTime > nowSec + 300) {
+    throw new AuthError(401, 'INVALID_TOKEN', 'Token authentication time is in the future.');
+  }
+
+  const expectedProjectId =
+    process.env.FIREBASE_PROJECT_ID ||
+    process.env.VITE_FIREBASE_PROJECT_ID ||
+    'spiral-restaurant-saas-v1';
+  if (payload.aud !== expectedProjectId) {
+    throw new AuthError(
+      401,
+      'INVALID_TOKEN',
+      `Token audience (${payload.aud}) does not match expected project (${expectedProjectId}).`
+    );
+  }
+  if (payload.iss !== `https://securetoken.google.com/${expectedProjectId}`) {
+    throw new AuthError(
+      401,
+      'INVALID_TOKEN',
+      `Token issuer (${payload.iss}) does not match expected issuer.`
+    );
+  }
+  if (!payload.sub || typeof payload.sub !== 'string' || !payload.sub.trim()) {
+    throw new AuthError(401, 'INVALID_TOKEN', 'Token subject identifier is missing.');
+  }
+
+  // Cryptographic signature check against Google public certs
+  try {
+    const certs = await getGooglePublicCerts();
+    const cert = certs[header.kid];
+    if (!cert) {
+      throw new AuthError(
+        401,
+        'INVALID_TOKEN',
+        `Public key (${header.kid}) not found in Google certificate authority.`
+      );
+    }
+
+    const pubKey = crypto.createPublicKey(cert);
+    const isValid = crypto.verify(
+      'RSA-SHA256',
+      Buffer.from(`${headerB64}.${payloadB64}`),
+      pubKey,
+      Buffer.from(signatureB64, 'base64url')
+    );
+
+    if (!isValid) {
+      throw new AuthError(401, 'INVALID_TOKEN', 'Token signature verification failed.');
+    }
+  } catch (sigErr) {
+    if (sigErr instanceof AuthError) throw sigErr;
+    console.error('[authMiddleware] Signature verification error:', sigErr);
+    throw new AuthError(401, 'INVALID_TOKEN', 'Cryptographic verification rejected token.');
+  }
+
+  return {
+    ...payload,
+    uid: String(payload.user_id || payload.sub || ''),
+  } as unknown as DecodedIdToken;
+}
+
 function defaultLoadUserDoc(uid: string): Promise<Record<string, unknown> | null> {
   return getAdminDb()
     .collection('users')
@@ -77,7 +214,7 @@ function defaultLoadUserDoc(uid: string): Promise<Record<string, unknown> | null
 function getDefaultDeps(): AuthDependencies {
   return {
     verifyIdToken: (token: string, checkRevoked = true) =>
-      getAdminAuth().verifyIdToken(token, checkRevoked),
+      verifyFirebaseIdTokenDirect(token, checkRevoked),
     loadUserDoc: defaultLoadUserDoc,
   };
 }
@@ -167,6 +304,7 @@ export async function verifyRequestAuth(
   try {
     decoded = await resolvedDeps.verifyIdToken(token, checkRevoked);
   } catch (err: unknown) {
+    if (err instanceof AuthError) throw err;
     mapTokenVerificationError(err);
   }
 
