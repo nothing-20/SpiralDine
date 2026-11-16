@@ -295,6 +295,9 @@ export function getAdminAuth(
       throw err;
     }
   }
+  if (!admin.auth) {
+    throw new FirebaseAdminInitError('INIT_FAILED', 'Firebase Auth could not be initialized.');
+  }
   return admin.auth;
 }
 
