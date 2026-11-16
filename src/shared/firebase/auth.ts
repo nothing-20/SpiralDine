@@ -3,7 +3,6 @@ import {
   createUserWithEmailAndPassword, 
   signInAnonymously,
   signOut as firebaseSignOut, 
-  sendPasswordResetEmail,
   sendEmailVerification,
   getIdTokenResult,
   setPersistence,
@@ -22,7 +21,7 @@ import {
   verifyPasswordResetCode as firebaseVerifyPasswordResetCode,
   confirmPasswordReset as firebaseConfirmPasswordReset
 } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, runTransaction } from 'firebase/firestore';
 import { auth, db } from './config';
 import { TUserRole } from '../types';
 import { getCurrencySymbol, detectDefaultCountryAndCurrency } from '../utils/format';
@@ -221,6 +220,121 @@ export const signUpOwner = async (
   return userCredential;
 };
 
+/**
+ * Canonical customer profile management: ensures a customer document exists in customers/{uid}
+ * and is synchronized to users/{uid} for fast resolution and Firestore rules compatibility.
+ * Idempotently creates default profile if missing, or merges phone/active state if existing.
+ * NEVER overwrites existing wallet balance, loyalty points, or display names.
+ */
+export const ensureCustomerProfile = async (
+  user: User,
+  extra?: {
+    fullName?: string;
+    displayName?: string;
+    phoneNumber?: string;
+    email?: string;
+    wasLinked?: boolean;
+  }
+): Promise<any> => {
+  if (!user || !user.uid) return null;
+  const now = new Date().toISOString();
+  const cleanPhone = extra?.phoneNumber?.trim() || user.phoneNumber || '';
+  const cleanEmail = (extra?.email || user.email || '').trim().toLowerCase();
+  const phoneDigits = cleanPhone.replace(/\D/g, '');
+  const phoneLast4 = phoneDigits.slice(-4) || 'Diner';
+  const resolvedName = (
+    extra?.fullName?.trim() ||
+    extra?.displayName?.trim() ||
+    user.displayName?.trim() ||
+    (cleanEmail ? cleanEmail.split('@')[0] : '') ||
+    `Diner ${phoneLast4}`
+  );
+
+  const custDocRef = doc(db, 'customers', user.uid);
+  const userDocRef = doc(db, 'users', user.uid);
+
+  return await runTransaction(db, async (transaction) => {
+    // 1. Transactional Reads
+    const custSnap = await transaction.get(custDocRef);
+    const userSnap = await transaction.get(userDocRef);
+
+    // CRITICAL SECURITY GUARD:
+    // If users/{uid} already exists with an authoritative non-customer role (owner, manager, waiter, chef, etc.),
+    // NEVER overwrite with customer! Throw an explicit error to prevent privilege compromise.
+    if (userSnap.exists()) {
+      const uData = userSnap.data();
+      if (uData.role && uData.role !== 'customer') {
+        console.warn(`[AUTH ensureCustomerProfile] Security violation: UID ${user.uid} possesses staff/owner role "${uData.role}". Rejecting customer provisioning.`);
+        throw new Error('STAFF_ACCOUNT_CANNOT_BE_CUSTOMER');
+      }
+    }
+
+    let finalProfile: any;
+
+    if (custSnap.exists()) {
+      const existingCustData = custSnap.data();
+      // Customer profile already exists — preserve all existing values!
+      finalProfile = {
+        ...existingCustData,
+        uid: user.uid,
+        phoneNumber: cleanPhone || existingCustData.phoneNumber || '',
+        email: cleanEmail || existingCustData.email || '',
+        isAnonymous: false,
+        role: 'customer',
+        status: existingCustData.status || 'active',
+        updatedAt: now
+      };
+
+      // Atomic update to customers/{uid}
+      transaction.update(custDocRef, {
+        phoneNumber: finalProfile.phoneNumber,
+        email: finalProfile.email,
+        isAnonymous: false,
+        updatedAt: now
+      });
+    } else {
+      // New customer profile — provision canonical default structure
+      finalProfile = {
+        uid: user.uid,
+        fullName: resolvedName,
+        displayName: resolvedName,
+        email: cleanEmail,
+        phoneNumber: cleanPhone,
+        role: 'customer' as TUserRole,
+        tenantId: null,
+        walletBalance: 0,
+        loyaltyPoints: 0,
+        status: 'active',
+        isAnonymous: false,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      transaction.set(custDocRef, finalProfile);
+    }
+
+    // 2. Synchronize to users/{uid} for consistent fast lookups and Firestore rules userExists()
+    const userProfileData = {
+      uid: user.uid,
+      email: finalProfile.email,
+      displayName: finalProfile.displayName || finalProfile.fullName || 'Customer',
+      fullName: finalProfile.fullName || finalProfile.displayName || 'Customer',
+      role: 'customer' as TUserRole,
+      tenantId: '',
+      branchId: '',
+      department: '',
+      status: finalProfile.status || 'active',
+      phoneNumber: finalProfile.phoneNumber || '',
+      createdAt: finalProfile.createdAt || now,
+      updatedAt: now
+    };
+
+    transaction.set(userDocRef, userProfileData, { merge: true });
+
+    return finalProfile;
+  });
+};
+
 export const signUpCustomer = async (
   email: string, 
   password: string, 
@@ -255,23 +369,12 @@ export const signUpCustomer = async (
 
   const user = userCredential.user;
 
-  // Create or merge customer profile in customers/{uid}
-  const customerRef = doc(db, 'customers', user.uid);
-  await setDoc(customerRef, {
-    uid: user.uid,
-    fullName: fullName.trim(),
-    displayName: fullName.trim(),
-    email: email.trim().toLowerCase(),
-    role: 'customer' as TUserRole,
-    tenantId: null,
-    phoneNumber: phoneNumber?.trim() || '',
-    walletBalance: 0,
-    loyaltyPoints: 0,
-    status: 'active',
-    isAnonymous: false,
-    updatedAt: new Date().toISOString(),
-    createdAt: new Date().toISOString()
-  }, { merge: true });
+  // Canonical profile creation and synchronization
+  await ensureCustomerProfile(user, {
+    fullName,
+    email,
+    phoneNumber
+  });
 
   return userCredential;
 };
@@ -286,9 +389,43 @@ export const getResetActionCodeSettings = (): ActionCodeSettings => {
   };
 };
 
-export const resetPassword = async (email: string, actionCodeSettings?: ActionCodeSettings): Promise<void> => {
-  const settings = actionCodeSettings || getResetActionCodeSettings();
-  return sendPasswordResetEmail(auth, email, settings);
+export const resetPassword = async (
+  email: string,
+  _actionCodeSettings?: ActionCodeSettings
+): Promise<void> => {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail) {
+    const err = new Error('Email address is required.');
+    (err as unknown as Record<string, unknown>).code = 'auth/invalid-email';
+    throw err;
+  }
+
+  const response = await fetch('/api/auth/send-password-reset', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email: cleanEmail }),
+  });
+
+  const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+  if (!response.ok) {
+    const message =
+      typeof data.error === 'string'
+        ? data.error
+        : typeof data.message === 'string'
+        ? data.message
+        : 'Failed to dispatch password reset email.';
+    const err = new Error(message);
+    (err as unknown as Record<string, unknown>).code =
+      typeof data.code === 'string'
+        ? data.code
+        : response.status === 429
+        ? 'auth/too-many-requests'
+        : 'auth/internal-error';
+    throw err;
+  }
 };
 
 export const verifyPasswordResetCode = async (actionCode: string): Promise<string> => {

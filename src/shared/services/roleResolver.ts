@@ -7,6 +7,7 @@ export interface IResolvedUserProfile {
   uid: string;
   email: string;
   displayName: string;
+  fullName?: string;
   role: TUserRole;
   tenantId: string;
   branchId?: string;
@@ -14,6 +15,7 @@ export interface IResolvedUserProfile {
   status?: 'active' | 'approved' | 'inactive' | 'pending_approval' | 'rejected' | 'more_info_required';
   phoneNumber?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 /**
@@ -81,37 +83,10 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
     throw new Error('PERMISSION_DENIED_USER_PROFILE');
   }
 
-  // 1. Check customers/{uid} for customer-side accounts
-  try {
-    const custDocRef = doc(db, 'customers', fUser.uid);
-    const custSnap = await getDoc(custDocRef);
-    if (custSnap.exists()) {
-      const custData = custSnap.data();
-      const resolvedCust: IResolvedUserProfile = {
-        uid: fUser.uid,
-        email: cleanEmail || custData.email || '',
-        displayName: custData.fullName || custData.displayName || fUser.displayName || cleanEmail.split('@')[0] || 'Customer',
-        role: 'customer' as TUserRole,
-        tenantId: custData.tenantId || '',
-        branchId: '',
-        department: '',
-        status: custData.status || 'active',
-        phoneNumber: custData.phoneNumber || custData.phone || '',
-        createdAt: custData.createdAt || fUser.metadata.creationTime || new Date().toISOString()
-      };
-
-      console.log('[AUTH ROLE RESOLVER] Resolved customer profile from customers/' + fUser.uid, {
-        uid: resolvedCust.uid,
-        role: resolvedCust.role
-      });
-
-      return resolvedCust;
-    }
-  } catch (custErr: any) {
-    console.warn('[AUTH ROLE RESOLVER] Note checking customers/' + fUser.uid + ':', custErr?.message || custErr);
-  }
-
-  // 2. Read restaurant-side profile from Firestore: users/{uid} (or legacy customer fallback)
+  // =========================================================================
+  // STEP 1: Authoritative Precedence — Existing Staff / Owner in users/{uid}
+  // Existing staff or owner accounts MUST NEVER be demoted or overwritten as customer.
+  // =========================================================================
   if (userSnap.exists()) {
     const data = userSnap.data();
     if (!data.role) {
@@ -122,36 +97,69 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
     const rawRole = data.role;
     const resolvedRole: TUserRole = (rawRole === 'super-admin' ? 'super_admin' : rawRole) as TUserRole;
 
-    const resolved: IResolvedUserProfile = {
-      uid: fUser.uid,
-      email: cleanEmail || data.email || '',
-      displayName: data.fullName || data.displayName || fUser.displayName || cleanEmail.split('@')[0] || 'User',
-      role: resolvedRole,
-      tenantId: data.tenantId || data.restaurantId || '',
-      branchId: data.branchId || '',
-      department: data.department || '',
-      status: data.status || 'active',
-      phoneNumber: data.phoneNumber || '',
-      createdAt: data.createdAt || fUser.metadata.creationTime || new Date().toISOString()
-    };
+    if (resolvedRole !== 'customer') {
+      // Authoritative Staff / Business Owner / Super Admin
+      const resolved: IResolvedUserProfile = {
+        uid: fUser.uid,
+        email: cleanEmail || data.email || '',
+        displayName: data.fullName || data.displayName || fUser.displayName || cleanEmail.split('@')[0] || 'User',
+        role: resolvedRole,
+        tenantId: data.tenantId || data.restaurantId || '',
+        branchId: data.branchId || '',
+        department: data.department || '',
+        status: data.status || 'active',
+        phoneNumber: data.phoneNumber || fUser.phoneNumber || '',
+        createdAt: data.createdAt || fUser.metadata.creationTime || new Date().toISOString()
+      };
 
-    if (resolved.role === 'customer') {
-      console.log('[AUTH ROLE RESOLVER] Resolved customer from legacy users/' + fUser.uid + ' (migration fallback):', {
-        uid: resolved.uid,
-        role: resolved.role
-      });
-    } else {
-      console.log('[AUTH ROLE RESOLVER] Resolved from users/' + fUser.uid + ':', {
+      console.log('[AUTH ROLE RESOLVER] Resolved authoritative staff/owner profile from users/' + fUser.uid + ':', {
         uid: resolved.uid,
         role: resolved.role,
         tenantId: resolved.tenantId
       });
-    }
 
-    return resolved;
+      return resolved;
+    } else {
+      // Existing customer profile indicated in users/{uid} — fetch rich customer data from customers/{uid}
+      try {
+        const custDocRef = doc(db, 'customers', fUser.uid);
+        const custSnap = await getDoc(custDocRef);
+        if (custSnap.exists()) {
+          const custData = custSnap.data();
+          return {
+            uid: fUser.uid,
+            email: cleanEmail || custData.email || data.email || '',
+            displayName: custData.fullName || custData.displayName || data.fullName || data.displayName || 'Customer',
+            role: 'customer' as TUserRole,
+            tenantId: custData.tenantId || '',
+            branchId: '',
+            department: '',
+            status: custData.status || data.status || 'active',
+            phoneNumber: custData.phoneNumber || data.phoneNumber || fUser.phoneNumber || '',
+            createdAt: custData.createdAt || data.createdAt || new Date().toISOString()
+          };
+        }
+      } catch (_custErr) {}
+
+      // Fallback to customer data in users/{uid}
+      return {
+        uid: fUser.uid,
+        email: cleanEmail || data.email || '',
+        displayName: data.fullName || data.displayName || fUser.displayName || 'Customer',
+        role: 'customer' as TUserRole,
+        tenantId: '',
+        branchId: '',
+        department: '',
+        status: data.status || 'active',
+        phoneNumber: data.phoneNumber || fUser.phoneNumber || '',
+        createdAt: data.createdAt || new Date().toISOString()
+      };
+    }
   }
 
-  // 2. Check owners/{uid} collection if owner profiles are stored there
+  // =========================================================================
+  // STEP 2: Precedence Check — Owner Collections (owners, tenants, restaurants)
+  // =========================================================================
   try {
     const ownerDocRef = doc(db, 'owners', fUser.uid);
     const ownerSnap = await getDoc(ownerDocRef);
@@ -166,7 +174,7 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
         branchId: data.branchId || '',
         department: 'Management',
         status: data.status || 'active',
-        phoneNumber: data.phoneNumber || '',
+        phoneNumber: data.phoneNumber || fUser.phoneNumber || '',
         createdAt: data.createdAt || new Date().toISOString()
       };
       console.log('[AUTH ROLE RESOLVER] Resolved from owners/' + fUser.uid + ':', {
@@ -174,17 +182,13 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
         role: resolved.role,
         tenantId: resolved.tenantId
       });
-      // Synchronize to users/{uid} for consistent fast lookups
       try {
         await setDoc(userDocRef, resolved);
       } catch (_e) {}
       return resolved;
     }
-  } catch (_ownerErr) {
-    // collection may not exist or not allowed
-  }
+  } catch (_ownerErr) {}
 
-  // 3. Check tenants collection where ownerUid or ownerId matches Firebase UID
   try {
     const tenantsRef = collection(db, 'tenants');
     const qTenant = query(tenantsRef, where('ownerUid', '==', fUser.uid));
@@ -203,7 +207,7 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
         branchId: '',
         department: 'Management',
         status: resolvedStatus,
-        phoneNumber: tData.phone || '',
+        phoneNumber: tData.phone || fUser.phoneNumber || '',
         createdAt: tData.createdAt || new Date().toISOString()
       };
       console.log('[AUTH ROLE RESOLVER] Resolved from tenants (ownerUid):', {
@@ -219,7 +223,6 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
     }
   } catch (_tenantErr) {}
 
-  // 4. Check restaurants collection where ownerUid or ownerId matches Firebase UID
   try {
     const restRef = collection(db, 'restaurants');
     const qRest = query(restRef, where('ownerUid', '==', fUser.uid));
@@ -238,7 +241,7 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
         branchId: '',
         department: 'Management',
         status: resolvedStatus,
-        phoneNumber: rData.phone || '',
+        phoneNumber: rData.phone || fUser.phoneNumber || '',
         createdAt: rData.createdAt || new Date().toISOString()
       };
       console.log('[AUTH ROLE RESOLVER] Resolved from restaurants (ownerUid):', {
@@ -254,8 +257,11 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
     }
   } catch (_restErr) {}
 
-  // 5. Profile missing: Check employees collection by firebaseUid
-  console.warn(`[AUTH ROLE RESOLVER] Profile document missing at users/${fUser.uid}. Searching employees collection...`);
+  // =========================================================================
+  // STEP 3: Precedence Check — Employees Collection (Staff auto-provisioning)
+  // Check employees collection before customer auto-provisioning so staff
+  // with mobile numbers are never erroneously classified as customers.
+  // =========================================================================
   let empData: any = null;
   try {
     const empRef = collection(db, 'employees');
@@ -272,7 +278,7 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
       }
     }
   } catch (empErr: any) {
-    console.warn('[AUTH ROLE RESOLVER] Employee lookup by UID failed:', empErr);
+    console.warn('[AUTH ROLE RESOLVER] Employee lookup failed:', empErr);
   }
 
   if (empData && empData.role) {
@@ -287,7 +293,7 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
       branchId: empData.branchId || '',
       department: empData.department || '',
       status: empData.status || 'active',
-      phoneNumber: empData.phoneNumber || empData.phone || '',
+      phoneNumber: empData.phoneNumber || empData.phone || fUser.phoneNumber || '',
       createdAt: now
     };
 
@@ -301,7 +307,100 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
     }
   }
 
-  // IMPORTANT: UNKNOWN ROLE MUST NEVER BECOME CUSTOMER
+  // =========================================================================
+  // STEP 4: Diner / Customer Resolution & Auto-Provisioning
+  // Only reached if user is NOT an owner, staff member, or superadmin.
+  // =========================================================================
+  try {
+    const custDocRef = doc(db, 'customers', fUser.uid);
+    const custSnap = await getDoc(custDocRef);
+    if (custSnap.exists()) {
+      const custData = custSnap.data();
+      const resolvedCust: IResolvedUserProfile = {
+        uid: fUser.uid,
+        email: cleanEmail || custData.email || '',
+        displayName: custData.fullName || custData.displayName || fUser.displayName || cleanEmail.split('@')[0] || 'Customer',
+        role: 'customer' as TUserRole,
+        tenantId: custData.tenantId || '',
+        branchId: '',
+        department: '',
+        status: custData.status || 'active',
+        phoneNumber: custData.phoneNumber || custData.phone || fUser.phoneNumber || '',
+        createdAt: custData.createdAt || fUser.metadata.creationTime || new Date().toISOString()
+      };
+
+      console.log('[AUTH ROLE RESOLVER] Resolved customer profile from customers/' + fUser.uid, {
+        uid: resolvedCust.uid,
+        role: resolvedCust.role
+      });
+
+      // Synchronize to users/{uid} for consistent fast lookups and Firestore rules userExists()
+      try {
+        await setDoc(userDocRef, resolvedCust, { merge: true });
+      } catch (_e) {}
+
+      return resolvedCust;
+    } else if (fUser.phoneNumber) {
+      // Verified phone customer with no staff/owner records.
+      // Auto-provision canonical customer profile to prevent race conditions during sign-in.
+      console.log('[AUTH ROLE RESOLVER] Verified phone customer detected. Auto-provisioning customers/' + fUser.uid);
+      const now = new Date().toISOString();
+      const phoneDigits = fUser.phoneNumber.replace(/\D/g, '');
+      const phoneLast4 = phoneDigits.slice(-4) || 'Diner';
+      const defaultName = fUser.displayName || `Diner ${phoneLast4}`;
+
+      const newCustProfile = {
+        uid: fUser.uid,
+        email: cleanEmail || '',
+        fullName: defaultName,
+        displayName: defaultName,
+        phoneNumber: fUser.phoneNumber,
+        role: 'customer' as TUserRole,
+        tenantId: null,
+        walletBalance: 0,
+        loyaltyPoints: 0,
+        status: 'active' as const,
+        isAnonymous: false,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      try {
+        await setDoc(custDocRef, newCustProfile, { merge: true });
+      } catch (writeErr) {
+        console.warn('[AUTH ROLE RESOLVER] Non-blocking customers/' + fUser.uid + ' write warning:', writeErr);
+      }
+
+      const resolvedCust: IResolvedUserProfile = {
+        uid: fUser.uid,
+        email: cleanEmail || '',
+        displayName: defaultName,
+        fullName: defaultName,
+        role: 'customer' as TUserRole,
+        tenantId: '',
+        branchId: '',
+        department: '',
+        status: 'active',
+        phoneNumber: fUser.phoneNumber,
+        createdAt: now,
+        updatedAt: now
+      };
+
+      try {
+        await setDoc(userDocRef, resolvedCust, { merge: true });
+      } catch (_e) {}
+
+      console.log('[AUTH ROLE RESOLVER] Successfully auto-provisioned customer profile for UID:', fUser.uid);
+      return resolvedCust;
+    }
+  } catch (custErr: any) {
+    console.warn('[AUTH ROLE RESOLVER] Note checking customers/' + fUser.uid + ':', custErr?.message || custErr);
+  }
+
+  // =========================================================================
+  // STEP 5: Unknown Account — Fail Safely
+  // IMPORTANT: UNKNOWN ROLE MUST NEVER DEFAULT TO CUSTOMER OR OWNER
+  // =========================================================================
   console.warn('[AUTH ROLE RESOLVER] No authoritative profile document found for UID:', fUser.uid);
   return null;
 }

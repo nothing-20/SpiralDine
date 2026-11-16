@@ -36,6 +36,10 @@
       "destination": "/api/send-email?type=admin_registration"
     },
     {
+      "source": "/api/send-password-reset",
+      "destination": "/api/auth/send-password-reset"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },

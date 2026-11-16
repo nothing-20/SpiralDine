@@ -344,47 +344,20 @@ export const CustomerLogin: React.FC = () => {
         }
       }
 
-      // Check or provision customer document in customers/{uid}
-      const custDocRef = doc(db, 'customers', fUser.uid);
-      const custSnap = await getDoc(custDocRef);
+      // Ensure canonical customer profile exists in customers/{uid} and users/{uid}
+      console.log('[AUTH Customer Login] Ensuring canonical diner profile for UID:', fUser.uid);
+      const customerProfile = await authService.ensureCustomerProfile(fUser, {
+        phoneNumber: fullPhoneNumber,
+        wasLinked
+      });
 
-      if (custSnap.exists()) {
-        const custData = custSnap.data();
-        if (custData.status && custData.status !== 'active') {
-          console.warn('[AUTH Customer Login] Suspended diner profile:', custData.status);
-          await authService.signOutUser();
-          setPhoneError('Your diner account has been suspended. Please contact support.');
-          addToast('Your diner account is suspended.', 'error');
-          setIsVerifyingOtp(false);
-          return;
-        }
-
-        // If existing profile, preserve all fields; ensure phone and active flags are synced
-        if (!custData.phoneNumber || wasLinked) {
-          await setDoc(custDocRef, {
-            phoneNumber: fullPhoneNumber,
-            isAnonymous: false,
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
-        }
-      } else {
-        // First-time mobile diner: auto-provision standard customer profile
-        console.log('[AUTH Customer Login] Auto-provisioning diner profile for UID:', fUser.uid);
-        await setDoc(custDocRef, {
-          uid: fUser.uid,
-          fullName: fUser.displayName || `Diner ${cleanPhoneDigits.slice(-4)}`,
-          displayName: fUser.displayName || `Diner ${cleanPhoneDigits.slice(-4)}`,
-          email: fUser.email || '',
-          role: 'customer',
-          tenantId: null,
-          phoneNumber: fullPhoneNumber,
-          walletBalance: 0,
-          loyaltyPoints: 0,
-          status: 'active',
-          isAnonymous: false,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        });
+      if (customerProfile && customerProfile.status && customerProfile.status !== 'active') {
+        console.warn('[AUTH Customer Login] Suspended diner profile:', customerProfile.status);
+        await authService.signOutUser();
+        setPhoneError('Your diner account has been suspended. Please contact support.');
+        addToast('Your diner account is suspended.', 'error');
+        setIsVerifyingOtp(false);
+        return;
       }
 
       console.log('[AUTH Customer Phone Login] Successful customer sign-in. Navigating to destination.');
@@ -392,6 +365,14 @@ export const CustomerLogin: React.FC = () => {
       navigate(getSuccessRedirect(), { replace: true });
     } catch (err: any) {
       console.error('[AUTH Customer Phone Verify OTP Error]', err);
+      if (err.message === 'STAFF_ACCOUNT_CANNOT_BE_CUSTOMER') {
+        await authService.signOutUser();
+        const mismatchMsg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
+        setPhoneError(mismatchMsg);
+        addToast(mismatchMsg, 'error');
+        setIsVerifyingOtp(false);
+        return;
+      }
       let friendlyError = 'Failed to verify OTP. Please try again.';
       if (err.code === 'auth/invalid-verification-code') {
         friendlyError = 'The 6-digit OTP code entered is incorrect. Please check and re-enter.';
@@ -444,45 +425,39 @@ export const CustomerLogin: React.FC = () => {
         }
       }
 
-      // 2. Check or provision customer profile in customers/{uid}
-      const custDocRef = doc(db, 'customers', fUser.uid);
-      const custSnap = await getDoc(custDocRef);
+      // 2. Ensure canonical customer profile in customers/{uid} and users/{uid}
+      console.log('[AUTH Customer Login] Ensuring diner profile for email user UID:', fUser.uid);
+      const customerProfile = await authService.ensureCustomerProfile(fUser, {
+        email: cleanEmail
+      });
 
-      if (custSnap.exists()) {
-        const custData = custSnap.data();
-        if (custData.status && custData.status !== 'active') {
-          console.warn('[AUTH Customer Login] Customer account suspended:', custData.status);
-          await authService.signOutUser();
-          setErrorState({
-            message: 'Your diner account has been suspended. Please contact support.',
-            showRegister: false
-          });
-          addToast('Your diner account is suspended.', 'error');
-          setIsSubmittingEmail(false);
-          return;
-        }
-      } else {
-        // First-time or migrated email diner: auto-provision standard customer profile
-        console.log('[AUTH Customer Login] Auto-provisioning diner profile for UID:', fUser.uid);
-        await setDoc(custDocRef, {
-          uid: fUser.uid,
-          fullName: fUser.displayName || cleanEmail.split('@')[0] || 'Spiral Diner',
-          displayName: fUser.displayName || cleanEmail.split('@')[0] || 'Spiral Diner',
-          email: fUser.email || cleanEmail,
-          role: 'customer',
-          tenantId: null,
-          phoneNumber: fUser.phoneNumber || '',
-          walletBalance: 0,
-          loyaltyPoints: 0,
-          status: 'active',
-          createdAt: new Date().toISOString()
+      if (customerProfile && customerProfile.status && customerProfile.status !== 'active') {
+        console.warn('[AUTH Customer Login] Customer account suspended:', customerProfile.status);
+        await authService.signOutUser();
+        setErrorState({
+          message: 'Your diner account has been suspended. Please contact support.',
+          showRegister: false
         });
+        addToast('Your diner account is suspended.', 'error');
+        setIsSubmittingEmail(false);
+        return;
       }
 
       addToast('Signed in successfully!', 'success');
       navigate(getSuccessRedirect(), { replace: true });
     } catch (e: any) {
       console.error('[AUTH Customer Login] Authentication failed:', e);
+      if (e.message === 'STAFF_ACCOUNT_CANNOT_BE_CUSTOMER') {
+        await authService.signOutUser();
+        const mismatchMsg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
+        setErrorState({
+          message: mismatchMsg,
+          showRegister: false
+        });
+        addToast(mismatchMsg, 'error');
+        setIsSubmittingEmail(false);
+        return;
+      }
       let errMsg = e.message || 'Login failed. Please verify credentials.';
       let isNotFound = false;
 

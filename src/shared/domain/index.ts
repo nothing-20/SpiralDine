@@ -9,3 +9,4 @@ export * from './events';
 export * from './notifications';
 export * from './customer';
 export * from './tasks';
+export * from './specialBenefits/types';

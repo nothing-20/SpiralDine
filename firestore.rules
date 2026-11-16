@@ -191,6 +191,15 @@ service cloud.firestore {
       allow read, write: if isSuperAdmin();
     }
 
+    // Special Benefits & Automatic Discount System (Accessible strictly to Super Admins)
+    match /specialBenefits/{benefitId} {
+      allow read, write: if isSuperAdmin();
+
+      match /redemptions/{redemptionId} {
+        allow read, write: if isSuperAdmin();
+      }
+    }
+
     // Email dispatch audit logs
     match /emailLogs/{logId} {
       allow read: if isSuperAdmin();
@@ -219,25 +228,66 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
-    // Root-level User accounts (restaurant staff and owners)
+    // Root-level User accounts (restaurant staff, owners, and customer directory entries)
     // A user can read user profiles when authenticated.
-    // Ordinary users can update their profile but cannot grant themselves privileged roles or change tenantId.
+    // Privileged roles (super_admin, owner, manager, waiter, kitchen, chef, cashier) can NEVER be self-assigned.
     match /users/{userId} {
       allow read: if isAuth();
+
+      // CREATE: Strict Role & Directory Schema Restrictions
       allow create: if isAuth() && (
+        // Path 1: Super Admin
         isSuperAdmin() ||
-        (request.auth.uid == userId && (
-          !('role' in request.resource.data && request.resource.data.role in ['super_admin', 'super-admin']) &&
-          (request.resource.data.get('role', '') != 'owner' || request.resource.data.get('status', '') == 'pending_approval')
-        ))
+        // Path 2: Customer Self-Provisioning (strictly role: 'customer' with empty tenant/branch/department)
+        (
+          request.auth.uid == userId &&
+          request.resource.data.get('role', '') == 'customer' &&
+          request.resource.data.get('tenantId', '') == '' &&
+          request.resource.data.get('branchId', '') == '' &&
+          request.resource.data.get('department', '') == '' &&
+          request.resource.data.get('status', 'active') == 'active' &&
+          request.resource.data.keys().hasOnly([
+            'uid', 'email', 'displayName', 'fullName', 'role', 
+            'tenantId', 'branchId', 'department', 'status', 
+            'phoneNumber', 'phone', 'createdAt', 'updatedAt'
+          ])
+        ) ||
+        // Path 3: Owner Registration Application (strictly pending_approval)
+        (
+          request.auth.uid == userId &&
+          request.resource.data.get('role', '') == 'owner' &&
+          request.resource.data.get('status', '') == 'pending_approval' &&
+          request.resource.data.get('tenantId', '') == '' &&
+          request.resource.data.keys().hasOnly([
+            'uid', 'email', 'displayName', 'fullName', 'role', 
+            'tenantId', 'branchId', 'department', 'status', 
+            'phoneNumber', 'phone', 'createdAt', 'updatedAt'
+          ])
+        )
       );
+
+      // UPDATE: Authorization & Tenant Immutability
       allow update: if isAuth() && (
         isSuperAdmin() ||
-        (request.auth.uid == userId && 
-         request.resource.data.get('role', '') == resource.data.get('role', '') &&
-         request.resource.data.get('status', '') == resource.data.get('status', '') &&
-         request.resource.data.get('tenantId', '') == resource.data.get('tenantId', ''))
+        (
+          request.auth.uid == userId &&
+          // Role is strictly immutable: customers cannot elevate, staff cannot alter roles
+          request.resource.data.get('role', '') == resource.data.get('role', '') &&
+          // Status is strictly immutable: suspended users cannot reactivate
+          request.resource.data.get('status', '') == resource.data.get('status', '') &&
+          // TenantId is strictly immutable: prevents tenant hopping
+          request.resource.data.get('tenantId', '') == resource.data.get('tenantId', '') &&
+          // BranchId is strictly immutable
+          request.resource.data.get('branchId', '') == resource.data.get('branchId', '') &&
+          // Department is strictly immutable
+          request.resource.data.get('department', '') == resource.data.get('department', '') &&
+          // Only verified non-authorization fields can be updated
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'displayName', 'fullName', 'phoneNumber', 'phone', 'email', 'updatedAt'
+          ])
+        )
       );
+
       allow delete: if isSuperAdmin();
 
       match /{subcollection}/{docId} {
@@ -247,16 +297,61 @@ service cloud.firestore {
 
     // Root-level Customer accounts (diner profiles, strictly isolated by UID)
     match /customers/{customerUid} {
+      // READ: Restricted strictly to the account owner, Super Admin, or restaurant management
       allow read: if isAuth() && (
         request.auth.uid == customerUid ||
         isSuperAdmin() ||
         getUserData().get('role', '') in ['super_admin', 'super-admin', 'admin', 'owner']
       );
-      allow write: if isAuth() && (
-        request.auth.uid == customerUid ||
+
+      // CREATE: Strict Schema Enforcement (Financials & Status Protected)
+      allow create: if isAuth() && (
         isSuperAdmin() ||
-        getUserData().get('role', '') in ['super_admin', 'super-admin', 'admin', 'owner']
+        (
+          request.auth.uid == customerUid &&
+          // Role is strictly 'customer'
+          request.resource.data.get('role', '') == 'customer' &&
+          // TenantId must be null or empty (cross-restaurant diner)
+          (request.resource.data.get('tenantId', null) == null || request.resource.data.get('tenantId', '') == '') &&
+          // Status must initialize to 'active'
+          request.resource.data.get('status', 'active') == 'active' &&
+          // Financial balances must initialize strictly to 0
+          request.resource.data.get('walletBalance', 0) == 0 &&
+          request.resource.data.get('loyaltyPoints', 0) == 0 &&
+          // Strict schema allowlist
+          request.resource.data.keys().hasOnly([
+            'uid', 'fullName', 'displayName', 'email', 'phoneNumber', 'phone',
+            'role', 'tenantId', 'walletBalance', 'loyaltyPoints', 'status',
+            'isAnonymous', 'dietaryPrefs', 'dietaryPreferences', 'allergens',
+            'preferredCuisines', 'diningMethod', 'isVeg', 'favoriteDishes',
+            'notificationPreferences', 'theme', 'language', 'textSize',
+            'createdAt', 'updatedAt'
+          ])
+        )
       );
+
+      // UPDATE: Field-Level Protection via affectedKeys()
+      allow update: if isAuth() && (
+        isSuperAdmin() ||
+        (
+          request.auth.uid == customerUid &&
+          // Immutable security & financial invariants
+          request.resource.data.get('role', '') == resource.data.get('role', '') &&
+          request.resource.data.get('status', '') == resource.data.get('status', '') &&
+          request.resource.data.get('walletBalance', 0) == resource.data.get('walletBalance', 0) &&
+          request.resource.data.get('loyaltyPoints', 0) == resource.data.get('loyaltyPoints', 0) &&
+          request.resource.data.get('tenantId', null) == resource.data.get('tenantId', null) &&
+          // Explicit allowlist of customer-editable fields:
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'displayName', 'fullName', 'phoneNumber', 'phone', 'email', 'isAnonymous',
+            'dietaryPrefs', 'dietaryPreferences', 'allergens', 'preferredCuisines',
+            'diningMethod', 'isVeg', 'favoriteDishes', 'notificationPreferences',
+            'theme', 'language', 'textSize', 'isDeleted', 'deletedAt', 'updatedAt'
+          ])
+        )
+      );
+
+      allow delete: if isSuperAdmin();
 
       // Customer reservations subcollection: customer can read/write; restaurant staff can update reservation status
       match /reservations/{reservationId} {
@@ -272,7 +367,7 @@ service cloud.firestore {
         );
       }
 
-      // Customer private subcollections (addresses, transactions, diningHistory, notifications, orders)
+      // Customer private subcollections (addresses, transactions, diningHistory, notifications, orders, favorites, reviews)
       match /{subcollection}/{docId} {
         allow read, write: if isAuth() && (
           request.auth.uid == customerUid ||

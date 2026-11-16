@@ -74,17 +74,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         try {
-          // Check if customer profile exists at customers/{uid}
+          const userDocRef = doc(db, 'users', fUser.uid);
           const custDocRef = doc(db, 'customers', fUser.uid);
-          let isCustomerProfile = false;
+
+          // Precedence check: If an authoritative staff or owner profile exists in users/{uid},
+          // it MUST take precedence over customer auto-detection (even if fUser.phoneNumber is present).
+          let isStaffOrOwner = false;
           try {
-            const custSnap = await getDoc(custDocRef);
-            if (custSnap.exists()) {
-              isCustomerProfile = true;
+            const userSnap = await getDoc(userDocRef);
+            if (userSnap.exists()) {
+              const uData = userSnap.data();
+              if (uData.role && uData.role !== 'customer') {
+                isStaffOrOwner = true;
+              }
             }
           } catch (_err) {}
 
-          const profileDocRef = isCustomerProfile ? custDocRef : doc(db, 'users', fUser.uid);
+          let isCustomerProfile = false;
+          if (!isStaffOrOwner) {
+            if (fUser.phoneNumber) {
+              isCustomerProfile = true;
+            } else {
+              try {
+                const custSnap = await getDoc(custDocRef);
+                if (custSnap.exists()) {
+                  isCustomerProfile = true;
+                }
+              } catch (_err) {}
+            }
+          }
+
+          const profileDocRef = isCustomerProfile ? custDocRef : userDocRef;
 
           // Real-time listener for user or customer profile updates
           unsubscribeUserDoc = onSnapshot(

@@ -4,7 +4,7 @@ import { useCart } from '../../../context/CartContext';
 import { useAuth } from '../../../context/AuthContext';
 import { useCurrency } from '../../../context/CurrencyContext';
 import { doc, getDoc, setDoc, collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '../../../config/firebase';
+import { db, auth } from '../../../config/firebase';
 import { generateUniqueOrderId, isOrderActive } from '../../../shared/utils/orderUtils';
 import { getMenuItemPath } from '../../../shared/firebase/collections';
 import TableSelectionModal, { ITableData } from '../components/TableSelectionModal';
@@ -21,7 +21,8 @@ import {
   ShoppingBag, Trash2, ArrowLeft, ArrowRight, Minus, Plus, 
   Tag, Check, Sparkles, ShieldCheck, Utensils, Heart, 
   MapPin, Store, AlertCircle, RefreshCw, FileText, CheckCircle2,
-  Lock
+  Lock,
+  Award
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { IPromotion } from '../../../shared/domain/promotions/types';
@@ -110,6 +111,16 @@ export const CartPage: React.FC = () => {
   const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [waiterTip, setWaiterTip] = useState<number>(0);
+
+  // Special Benefits membership state
+  const [specialBenefit, setSpecialBenefit] = useState<{
+    eligible: boolean;
+    benefitId?: string;
+    discountPercentage?: number;
+    discountAmount?: number;
+    label?: string;
+  } | null>(null);
+  const [, setIsLoadingBenefit] = useState(false);
 
   // Table selection modal state for Dine-In ordering
   const [isChangeTableOpen, setIsChangeTableOpen] = useState(false);
@@ -263,9 +274,66 @@ export const CartPage: React.FC = () => {
     }
   }, [cartSubtotal, cartItems, appliedPromotion, user?.uid]);
 
+  // Auto-resolve Special Benefits for authenticated member
+  useEffect(() => {
+    let isCancelled = false;
+    const checkSpecialBenefit = async () => {
+      if (!user || user.isAnonymous) {
+        setSpecialBenefit(null);
+        return;
+      }
+      try {
+        setIsLoadingBenefit(true);
+        const idToken = await auth.currentUser?.getIdToken();
+        if (!idToken) return;
+
+        const res = await fetch('/api/special-benefits/eligibility', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${idToken}`,
+          },
+          body: JSON.stringify({
+            tenantId: activeTenantId,
+            subtotal: cartSubtotal,
+          }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (!isCancelled) {
+            if (data.eligible) {
+              setSpecialBenefit(data);
+              setAppliedPromotion(null);
+              setAppliedCouponCode('');
+              setCouponDiscountVal(0);
+            } else {
+              setSpecialBenefit(null);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[CartPage] Special benefit check notice:', err);
+      } finally {
+        if (!isCancelled) setIsLoadingBenefit(false);
+      }
+    };
+
+    if (cartSubtotal > 0) {
+      checkSpecialBenefit();
+    }
+    return () => {
+      isCancelled = true;
+    };
+  }, [user, activeTenantId, cartSubtotal]);
+
   // 2. Pricing & Calculation Engine
   const subtotal = cartSubtotal; // in cents / minor currency
-  const discountVal = couponDiscountVal; // in cents / minor currency
+  const memberBenefitDiscount = specialBenefit?.eligible && specialBenefit.discountPercentage
+    ? Math.round(subtotal * (specialBenefit.discountPercentage / 100))
+    : 0;
+  const effectiveDiscount = memberBenefitDiscount > 0 ? memberBenefitDiscount : couponDiscountVal;
+  const discountVal = effectiveDiscount; // in cents / minor currency
   const taxedSubtotal = Math.max(0, subtotal - discountVal);
 
   // Configured tax & fee rates (fallback: tax 5%, service fee 5%)
@@ -989,20 +1057,47 @@ export const CartPage: React.FC = () => {
                 </h2>
               </div>
 
+              {/* Special Benefits Automatic Membership Discount Banner */}
+              {specialBenefit?.eligible && (
+                <div className="p-3.5 bg-gradient-to-r from-amber-500/10 via-amber-500/15 to-amber-600/10 border border-amber-500/30 rounded-2xl flex items-center justify-between gap-3 animate-fade-in shadow-xs">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-700 flex items-center justify-center shrink-0">
+                      <Award className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-amber-950 block">
+                        Special member discount applied
+                      </span>
+                      <span className="text-[11px] text-amber-800">
+                        {specialBenefit.discountPercentage}% automatic membership benefit deducted at checkout
+                      </span>
+                    </div>
+                  </div>
+                  <span className="text-xs font-black text-amber-700 bg-amber-100/80 px-2 py-1 rounded-lg shrink-0">
+                    -{specialBenefit.discountPercentage}%
+                  </span>
+                </div>
+              )}
+
               {/* Coupon / Voucher Input */}
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] font-extrabold uppercase tracking-wider text-[#756B64] block">
                     Offers & Coupons
                   </label>
-                  {availableCoupons.length > 0 && !appliedPromotion && (
+                  {availableCoupons.length > 0 && !appliedPromotion && !specialBenefit?.eligible && (
                     <span className="text-[10px] font-bold text-[#C85A3F] bg-[#F3E8DF] px-2 py-0.5 rounded-full">
                       {availableCoupons.length} available
                     </span>
                   )}
                 </div>
 
-                {appliedPromotion ? (
+                {specialBenefit?.eligible ? (
+                  <div className="p-3 bg-[#FAF8F5] border border-[#E5DCD5] rounded-xl text-[11px] text-[#756B64] flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Special member discount ({specialBenefit.discountPercentage}%) is applied. Restaurant coupons cannot be stacked.</span>
+                  </div>
+                ) : appliedPromotion ? (
                   <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-1">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-2">
@@ -1146,12 +1241,17 @@ export const CartPage: React.FC = () => {
                   <span className="font-bold text-[#202124]">{formatPrice(subtotal)}</span>
                 </div>
                 
-                {discountVal > 0 && (
+                {memberBenefitDiscount > 0 ? (
+                  <div className="flex justify-between text-emerald-600 font-semibold">
+                    <span>Membership Discount ({specialBenefit?.discountPercentage}%)</span>
+                    <span>-{formatPrice(memberBenefitDiscount)}</span>
+                  </div>
+                ) : discountVal > 0 ? (
                   <div className="flex justify-between text-[#2E8B57] font-semibold">
                     <span>Coupon Savings ({appliedCouponCode})</span>
                     <span>-{formatPrice(discountVal)}</span>
                   </div>
-                )}
+                ) : null}
 
                 {vatTax > 0 && (
                   <div className="flex justify-between">

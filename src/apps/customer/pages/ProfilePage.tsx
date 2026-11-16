@@ -4,9 +4,9 @@ import { useAuth } from '../../../context/AuthContext';
 import { 
   collection, getDocs, getDoc, doc, setDoc, deleteDoc, onSnapshot, query, where, orderBy, addDoc 
 } from 'firebase/firestore';
-import { sendPasswordResetEmail, deleteUser } from 'firebase/auth';
+import { deleteUser } from 'firebase/auth';
 import { db, auth } from '../../../config/firebase';
-import { getResetActionCodeSettings } from '../../../shared/firebase/auth';
+import { authService } from '../../../shared/services/authService';
 import Card from '../../../components/ui/Card/Card';
 import Badge from '../../../components/ui/Badge/Badge';
 import Button from '../../../components/ui/Button/Button';
@@ -497,7 +497,7 @@ export const ProfilePage: React.FC = () => {
       return;
     }
     try {
-      await sendPasswordResetEmail(auth, user.email, getResetActionCodeSettings());
+      await authService.resetPassword(user.email);
       toast.success(`Password reset instructions sent to ${user.email}`);
     } catch (err: any) {
       toast.error(err.message || 'Failed to send password reset email.');

@@ -10,9 +10,8 @@ import {
   getDocs,
   orderBy,
 } from 'firebase/firestore';
-import { sendPasswordResetEmail } from 'firebase/auth';
-import { db, auth as fbAuth } from '../../../config/firebase';
-import { getResetActionCodeSettings } from '../../../shared/firebase/auth';
+import { db } from '../../../config/firebase';
+import { authService } from '../../../shared/services/authService';
 import { createStaffInvitation, generateSecureToken, buildStaffActivationLink } from '../../../services/staff/invitationService';
 import { useAuth } from '../../../context/AuthContext';
 import Button from '../../../components/ui/Button/Button';
@@ -376,7 +375,7 @@ export const OwnerStaffManager: React.FC = () => {
       return;
     }
     try {
-      await sendPasswordResetEmail(fbAuth, emp.email, getResetActionCodeSettings());
+      await authService.resetPassword(emp.email);
       toast.success(`Password reset email sent to ${emp.email}.`);
     } catch (err: any) {
       console.error(err);

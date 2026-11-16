@@ -122,6 +122,7 @@ const SuperAdminApplications = React.lazy(() => import('../apps/super-admin/page
 const SuperAdminRestaurants = React.lazy(() => import('../apps/super-admin/pages/SuperAdminRestaurants'));
 const SuperAdminOwners = React.lazy(() => import('../apps/super-admin/pages/SuperAdminOwners'));
 const SuperAdminCustomers = React.lazy(() => import('../apps/super-admin/pages/SuperAdminCustomers'));
+const SuperAdminSpecialBenefits = React.lazy(() => import('../apps/super-admin/pages/SuperAdminSpecialBenefits'));
 const SuperAdminStaff = React.lazy(() => import('../apps/super-admin/pages/SuperAdminStaff'));
 const SuperAdminOrders = React.lazy(() => import('../apps/super-admin/pages/SuperAdminOrders'));
 const SuperAdminPayments = React.lazy(() => import('../apps/super-admin/pages/SuperAdminPayments'));
@@ -532,6 +533,7 @@ export const AppRoutes: React.FC = () => {
             <Route path="/super-admin/tenants" element={<Navigate to="/super-admin/restaurants" replace />} />
             <Route path="/super-admin/owners" element={<SuperAdminOwners />} />
             <Route path="/super-admin/customers" element={<SuperAdminCustomers />} />
+            <Route path="/super-admin/special-benefits" element={<SuperAdminSpecialBenefits />} />
             <Route path="/super-admin/staff" element={<SuperAdminStaff />} />
             <Route path="/super-admin/orders" element={<SuperAdminOrders />} />
             <Route path="/super-admin/payments" element={<SuperAdminPayments />} />
@@ -540,6 +542,23 @@ export const AppRoutes: React.FC = () => {
             <Route path="/super-admin/analytics" element={<SuperAdminAnalytics />} />
             <Route path="/super-admin/audit-logs" element={<SuperAdminAuditLogs />} />
             <Route path="/super-admin/settings" element={<SuperAdminSettings />} />
+
+            {/* Support underscore aliases for /super_admin/* */}
+            <Route path="/super_admin" element={<Navigate to="/super-admin/dashboard" replace />} />
+            <Route path="/super_admin/dashboard" element={<Navigate to="/super-admin/dashboard" replace />} />
+            <Route path="/super_admin/special-benefits" element={<Navigate to="/super-admin/special-benefits" replace />} />
+            <Route path="/super_admin/special_benefits" element={<Navigate to="/super-admin/special-benefits" replace />} />
+            <Route path="/super_admin/customers" element={<Navigate to="/super-admin/customers" replace />} />
+            <Route path="/super_admin/restaurants" element={<Navigate to="/super-admin/restaurants" replace />} />
+            <Route path="/super_admin/owners" element={<Navigate to="/super-admin/owners" replace />} />
+            <Route path="/super_admin/orders" element={<Navigate to="/super-admin/orders" replace />} />
+            <Route path="/super_admin/payments" element={<Navigate to="/super-admin/payments" replace />} />
+            <Route path="/super_admin/staff" element={<Navigate to="/super-admin/staff" replace />} />
+            <Route path="/super_admin/applications" element={<Navigate to="/super-admin/applications" replace />} />
+            <Route path="/super_admin/support" element={<Navigate to="/super-admin/support" replace />} />
+            <Route path="/super_admin/analytics" element={<Navigate to="/super-admin/analytics" replace />} />
+            <Route path="/super_admin/audit-logs" element={<Navigate to="/super-admin/audit-logs" replace />} />
+            <Route path="/super_admin/settings" element={<Navigate to="/super-admin/settings" replace />} />
           </Route>
         </Route>
 

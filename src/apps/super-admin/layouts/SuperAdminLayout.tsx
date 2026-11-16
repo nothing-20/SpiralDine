@@ -18,7 +18,8 @@ import {
   X,
   ShieldAlert,
   MessageSquare,
-  ClipboardCheck
+  ClipboardCheck,
+  Award
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { collection, onSnapshot } from 'firebase/firestore';
@@ -37,6 +38,7 @@ const navItems: INavItem[] = [
   { to: '/super-admin/restaurants', label: 'Restaurants', icon: Building2 },
   { to: '/super-admin/owners', label: 'Owners', icon: Users },
   { to: '/super-admin/customers', label: 'Customers', icon: Contact2 },
+  { to: '/super-admin/special-benefits', label: 'Special Benefits', icon: Award },
   { to: '/super-admin/staff', label: 'Staff', icon: ChefHat },
   { to: '/super-admin/orders', label: 'Orders', icon: Receipt },
   { to: '/super-admin/payments', label: 'Payments', icon: CreditCard },

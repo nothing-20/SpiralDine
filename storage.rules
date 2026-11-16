@@ -27,35 +27,30 @@ service firebase.storage {
 
     function isTenantOwner(tenantId) {
       return isAuth() && (
-        // Requirement: The tenant document itself must not be suspended
+        // Check 1: Custom Claims on auth token with active status
         (
-          !firestore.exists(/databases/(default)/documents/tenants/$(tenantId)) ||
-          firestore.get(/databases/(default)/documents/tenants/$(tenantId)).data.get('status', 'active') != 'suspended'
-        ) && (
-          // Check 1: Custom Claims on auth token with active status
+          request.auth.token.get('tenantId', '') == tenantId &&
+          request.auth.token.get('role', '') in ['owner', 'admin', 'manager', 'super_admin', 'super-admin'] &&
+          request.auth.token.get('status', 'active') != 'suspended'
+        ) ||
+        // Check 2: users/{uid} document matches tenantId, role, and active status
+        (
+          firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
+          firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('tenantId', '') == tenantId &&
+          firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('role', '') in ['owner', 'admin', 'manager', 'super_admin', 'super-admin'] &&
+          firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', 'active') != 'suspended'
+        ) ||
+        // Check 3: tenants/{tenantId} document directly records ownerUid or ownerId AND user is not suspended
+        (
+          firestore.exists(/databases/(default)/documents/tenants/$(tenantId)) &&
           (
-            request.auth.token.get('tenantId', '') == tenantId &&
-            request.auth.token.get('role', '') in ['owner', 'admin', 'manager', 'super_admin', 'super-admin'] &&
-            request.auth.token.get('status', 'active') != 'suspended'
-          ) ||
-          // Check 2: users/{uid} document matches tenantId, role, and active status
+            firestore.get(/databases/(default)/documents/tenants/$(tenantId)).data.get('ownerUid', '') == request.auth.uid ||
+            firestore.get(/databases/(default)/documents/tenants/$(tenantId)).data.get('ownerId', '') == request.auth.uid
+          ) &&
+          firestore.get(/databases/(default)/documents/tenants/$(tenantId)).data.get('status', 'active') != 'suspended' &&
           (
-            firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) &&
-            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('tenantId', '') == tenantId &&
-            firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('role', '') in ['owner', 'admin', 'manager', 'super_admin', 'super-admin'] &&
+            !firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) ||
             firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', 'active') != 'suspended'
-          ) ||
-          // Check 3: tenants/{tenantId} document directly records ownerUid or ownerId AND user is not suspended
-          (
-            firestore.exists(/databases/(default)/documents/tenants/$(tenantId)) &&
-            (
-              firestore.get(/databases/(default)/documents/tenants/$(tenantId)).data.get('ownerUid', '') == request.auth.uid ||
-              firestore.get(/databases/(default)/documents/tenants/$(tenantId)).data.get('ownerId', '') == request.auth.uid
-            ) &&
-            (
-              !firestore.exists(/databases/(default)/documents/users/$(request.auth.uid)) ||
-              firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.get('status', 'active') != 'suspended'
-            )
           )
         )
       );

@@ -9,6 +9,11 @@ import {
   requireAuthenticatedUser,
   VerifiedAuthContext,
 } from '../_lib/authMiddleware.js';
+import {
+  calculateMembershipDiscount,
+  resolveEligibleSpecialBenefit,
+} from '../_lib/specialBenefitsService.js';
+import type { ISpecialBenefit } from '../../src/shared/domain/specialBenefits/types.js';
 
 interface OrderItemInput {
   itemId?: unknown;
@@ -318,8 +323,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // 7. Authoritative Tax, Service Charge, and Total
-    let authoritativeDiscount = 0;
+    // 7. Authoritative Special Benefits & Automatic Discount Evaluation
+    let appliedSpecialBenefit: ISpecialBenefit | null = null;
+    let specialBenefitDiscount = 0;
+    let specialBenefitCalc: ReturnType<typeof calculateMembershipDiscount> | null = null;
+
+    if (!authUser.isAnonymous) {
+      try {
+        const phone =
+          typeof authUser.decodedToken.phone_number === 'string'
+            ? authUser.decodedToken.phone_number
+            : null;
+        const email = authUser.emailVerified && authUser.email ? authUser.email : null;
+
+        appliedSpecialBenefit = await resolveEligibleSpecialBenefit({
+          uid: verifiedUid,
+          phone,
+          email,
+          emailVerified: authUser.emailVerified,
+          tenantId: cleanTenantId,
+        });
+
+        if (appliedSpecialBenefit) {
+          specialBenefitCalc = calculateMembershipDiscount(
+            authoritativeSubtotal,
+            appliedSpecialBenefit
+          );
+          specialBenefitDiscount = specialBenefitCalc.discountAmount;
+        }
+      } catch (sbErr) {
+        console.warn('[api/orders/create] Special benefits resolution notice:', sbErr);
+      }
+    }
+
+    // 7b. Restaurant Coupon Evaluation (Non-stacking)
+    let couponDiscount = 0;
     let matchedPromotionId: string | null = null;
     const rawDiscount = Number(body.discount || 0);
     const hasCouponCode = typeof body.couponCode === 'string' && body.couponCode.trim().length > 0;
@@ -449,15 +487,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       );
 
       if (isPercent) {
-        authoritativeDiscount = Math.round(eligibleSubtotal * (discountVal / 100));
+        couponDiscount = Math.round(eligibleSubtotal * (discountVal / 100));
       } else {
-        authoritativeDiscount = Math.min(eligibleSubtotal, discountVal);
+        couponDiscount = Math.min(eligibleSubtotal, discountVal);
       }
 
       const maxDiscount = Number(promoData.maxDiscountAmount || promoData.maxDiscount || 0);
       if (maxDiscount > 0) {
-        authoritativeDiscount = Math.min(authoritativeDiscount, maxDiscount);
+        couponDiscount = Math.min(couponDiscount, maxDiscount);
       }
+    }
+
+    // Determine final authoritative discount (Non-stacking: membership benefit takes precedence unless coupon provides higher value)
+    let authoritativeDiscount = 0;
+    let resolvedDiscountLabel: string | undefined = undefined;
+    let resolvedDiscountType: 'percentage' | 'fixed' | 'coupon' | undefined = undefined;
+    let resolvedDiscountPercent: number | undefined = undefined;
+
+    if (specialBenefitDiscount > 0 && specialBenefitDiscount >= couponDiscount) {
+      authoritativeDiscount = specialBenefitDiscount;
+      resolvedDiscountLabel = 'Special member discount applied';
+      resolvedDiscountType = 'percentage';
+      resolvedDiscountPercent = appliedSpecialBenefit?.discountPercentage;
+      matchedPromotionId = null; // Superseded by membership benefit
+    } else if (couponDiscount > 0) {
+      authoritativeDiscount = couponDiscount;
+      resolvedDiscountLabel = hasCouponCode
+        ? `Coupon ${String(body.couponCode).trim().toUpperCase()}`
+        : undefined;
+      resolvedDiscountType = 'coupon';
+      appliedSpecialBenefit = null; // Restaurant coupon gave higher discount
     }
 
     const configuredTaxPercent =
@@ -545,8 +604,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       serviceCharge: authoritativeServiceCharge,
       serviceChargePercent: configuredServiceChargePercent,
       discount: authoritativeDiscount,
-      discountLabel: cleanCouponCode ? `Coupon ${cleanCouponCode}` : undefined,
-      couponCode: cleanCouponCode,
+      discountLabel: resolvedDiscountLabel,
+      discountType: resolvedDiscountType,
+      discountPercent: resolvedDiscountPercent,
+      specialBenefitId: appliedSpecialBenefit?.id || undefined,
+      specialBenefitDiscount: appliedSpecialBenefit ? specialBenefitDiscount : undefined,
+      specialBenefitFunding: appliedSpecialBenefit?.fundingModel || undefined,
+      couponCode: matchedPromotionId ? cleanCouponCode : undefined,
       appliedPromotionId: matchedPromotionId || undefined,
       total: authoritativeTotal,
       totalAmount: authoritativeTotal,
@@ -568,7 +632,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 8. Persist Order to Firestore
     await existingOrderRef.set(sanitizedOrder);
 
-    // 8b. Record promotion redemption metric
+    // 8b. Record Special Benefit redemption reservation
+    if (appliedSpecialBenefit && specialBenefitCalc) {
+      try {
+        const redemptionRef = adminDb
+          .collection('specialBenefits')
+          .doc(appliedSpecialBenefit.id)
+          .collection('redemptions')
+          .doc(`RED-${targetOrderId}`);
+
+        await adminDb.runTransaction(async (t) => {
+          t.set(redemptionRef, {
+            id: `RED-${targetOrderId}`,
+            benefitId: appliedSpecialBenefit!.id,
+            orderId: targetOrderId,
+            tenantId: cleanTenantId,
+            restaurantName: String(
+              restaurantSettings.name ||
+                restaurantSettings.restaurantName ||
+                cleanTenantId
+            ),
+            customerUid: verifiedUid,
+            customerEmail: authUser.email || undefined,
+            customerPhone:
+              typeof authUser.decodedToken.phone_number === 'string'
+                ? authUser.decodedToken.phone_number
+                : undefined,
+            originalSubtotal: authoritativeSubtotal,
+            discountPercentage: appliedSpecialBenefit!.discountPercentage,
+            discountAmount: specialBenefitDiscount,
+            finalPayableAmount: authoritativeTotal,
+            fundingModel: appliedSpecialBenefit!.fundingModel || 'platform_funded',
+            platformFundedAmount: specialBenefitCalc!.platformFundedAmount,
+            restaurantFundedAmount: specialBenefitCalc!.restaurantFundedAmount,
+            status: 'reserved',
+            reservedAt: nowIso,
+          });
+
+          const benefitRef = adminDb.collection('specialBenefits').doc(appliedSpecialBenefit!.id);
+          t.update(benefitRef, {
+            redemptionCount: FieldValue.increment(1),
+            lastRedeemedAt: nowIso,
+            updatedAt: nowIso,
+          });
+        });
+      } catch (reserveErr) {
+        console.warn(
+          '[api/orders/create] Benefit reservation metric notice:',
+          reserveErr
+        );
+      }
+    }
+
+    // 8c. Record promotion redemption metric
     if (matchedPromotionId) {
       try {
         const promoRef = adminDb

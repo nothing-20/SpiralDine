@@ -245,3 +245,9 @@ export {
   getRestaurantApprovalHtml,
   getRestaurantApprovalText
 } from './approvalEmailTemplate';
+
+export {
+  type PasswordResetEmailData,
+  getPasswordResetHtml,
+  getPasswordResetText
+} from './passwordResetTemplate';

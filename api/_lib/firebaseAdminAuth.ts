@@ -256,3 +256,43 @@ export async function setFirebaseAuthCustomClaims(
     throw new Error(data.error?.message || 'Failed to assign custom claims to user.');
   }
 }
+
+/**
+ * Generate password reset link via Google Identity Toolkit REST API
+ */
+export async function generateFirebaseAuthResetLink(
+  creds: ServiceAccountCredentials,
+  email: string,
+  continueUrl: string
+): Promise<{ oobCode: string; oobLink: string }> {
+  const token = await getGoogleAccessToken(creds);
+
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/projects/${creds.projectId}/accounts:sendOobCode`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        requestType: 'PASSWORD_RESET',
+        email,
+        returnOobLink: true,
+        continueUrl,
+      }),
+    }
+  );
+
+  const data = await res.json();
+  if (!res.ok) {
+    const err = new Error(data.error?.message || 'Failed to generate password reset link.');
+    (err as unknown as Record<string, unknown>).code = data.error?.message;
+    throw err;
+  }
+
+  return {
+    oobCode: data.oobCode,
+    oobLink: data.oobLink,
+  };
+}

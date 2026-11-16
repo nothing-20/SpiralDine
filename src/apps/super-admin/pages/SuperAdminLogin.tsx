@@ -2,12 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { 
   signInWithEmailAndPassword, 
-  sendPasswordResetEmail, 
   signOut 
 } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../../../config/firebase';
-import { getResetActionCodeSettings } from '../../../shared/firebase/auth';
+import { authService } from '../../../shared/services/authService';
 import { useAuth } from '../../../context/AuthContext';
 import { 
   ShieldCheck, 
@@ -134,7 +133,7 @@ export const SuperAdminLogin: React.FC = () => {
 
     setResetStatus('loading');
     try {
-      await sendPasswordResetEmail(auth, cleanEmail, getResetActionCodeSettings());
+      await authService.resetPassword(cleanEmail);
       setResetStatus('success');
       setResetMessage('Password reset instructions have been dispatched to your email.');
       toast.success('Reset email sent.');

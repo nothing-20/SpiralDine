@@ -144,6 +144,22 @@ export const authService = {
     verificationCode: string
   ): Promise<UserCredential> {
     return firebaseAuth.linkPhoneWithCredential(user, verificationId, verificationCode);
+  },
+
+  /**
+   * Canonical customer profile management: ensures customers/{uid} and users/{uid} exist.
+   */
+  async ensureCustomerProfile(
+    user: User,
+    extra?: {
+      fullName?: string;
+      displayName?: string;
+      phoneNumber?: string;
+      email?: string;
+      wasLinked?: boolean;
+    }
+  ): Promise<any> {
+    return firebaseAuth.ensureCustomerProfile(user, extra);
   }
 };
 

@@ -1,4 +1,5 @@
 import { adminDb } from '../firebaseAdmin.js';
+import { finalizeSpecialBenefitRedemption } from '../specialBenefitsService.js';
 import type { IBill } from '../../../src/shared/domain/billing/types';
 import type { IPaymentVerificationResult } from '../../../src/shared/domain/payments/types';
 
@@ -241,6 +242,11 @@ export const serverBillingService = {
         settledBill: { ...bill, ...updatedBillData, id: cleanBillId, billId: cleanBillId },
         targetOrderId,
       };
+    });
+
+    // Finalize Special Benefit redemption if present
+    finalizeSpecialBenefitRedemption(txOutcome.targetOrderId, cleanBillId).catch((err) => {
+      console.warn('[serverBillingService] Special benefit finalization note:', err);
     });
 
     // Non-blocking cleanup for active waiterRequests after atomic settlement
