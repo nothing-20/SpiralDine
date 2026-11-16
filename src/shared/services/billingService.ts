@@ -503,28 +503,48 @@ export const billingService = {
   ): Promise<{ bill: IBill; invoiceNumber: string }> => {
     const billId = billingService.getCanonicalBillId(billIdOrOrderId);
     const billRef = doc(db, 'restaurants', tenantId, 'bills', billId);
-    let billSnap = await getDoc(billRef);
+    let billSnap: any = null;
+    try {
+      billSnap = await getDoc(billRef);
+    } catch (_snapErr) {
+      console.warn('[billingService] Notice checking bill doc:', _snapErr);
+    }
 
     // Resilient fallback: If canonical bill document has not been persisted yet, create it from the order
-    if (!billSnap.exists()) {
+    if (!billSnap || !billSnap.exists()) {
       const cleanOrderId = billIdOrOrderId.replace(/^BILL-/i, '').trim();
-      let orderSnap = await getDoc(doc(db, 'restaurants', tenantId, 'orders', cleanOrderId));
-      if (!orderSnap.exists()) {
-        const qOrder = query(collection(db, 'restaurants', tenantId, 'orders'), where('orderId', '==', cleanOrderId), limit(1));
-        const qSnap = await getDocs(qOrder);
-        if (!qSnap.empty) {
-          orderSnap = qSnap.docs[0];
+      let orderSnap: any = null;
+      try {
+        orderSnap = await getDoc(doc(db, 'restaurants', tenantId, 'orders', cleanOrderId));
+      } catch (_) {}
+
+      if (!orderSnap || !orderSnap.exists()) {
+        const candidateQueries = [
+          query(collection(db, 'restaurants', tenantId, 'orders'), where('orderId', '==', cleanOrderId), limit(1)),
+          query(collection(db, 'restaurants', tenantId, 'orders'), where('orderId', '==', `ORD-${cleanOrderId}`), limit(1)),
+          query(collection(db, 'restaurants', tenantId, 'orders'), where('id', '==', cleanOrderId), limit(1)),
+        ];
+        for (const qCandidate of candidateQueries) {
+          try {
+            const qSnap = await getDocs(qCandidate);
+            if (!qSnap.empty) {
+              orderSnap = qSnap.docs[0];
+              break;
+            }
+          } catch (_) {}
         }
       }
 
-      if (orderSnap.exists()) {
+      if (orderSnap && orderSnap.exists()) {
         const orderData = { orderId: orderSnap.id, ...orderSnap.data() } as IOrder;
         await billingService.getOrCreateCanonicalBill(tenantId, orderData, params.actor);
-        billSnap = await getDoc(billRef);
+        try {
+          billSnap = await getDoc(billRef);
+        } catch (_) {}
       }
     }
 
-    if (!billSnap.exists()) {
+    if (!billSnap || !billSnap.exists()) {
       throw new Error(`Bill ${billId} does not exist for tenant ${tenantId}.`);
     }
 

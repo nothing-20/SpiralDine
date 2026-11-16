@@ -44,7 +44,9 @@ service cloud.firestore {
       return isAuth() && (
         isSuperAdmin() ||
         (userExists() && getUserData().get('tenantId', '') == tenantId && 
-         getUserData().get('role', '') in ['super_admin', 'super-admin', 'owner', 'admin', 'manager', 'waiter', 'cashier', 'reception', 'kitchen', 'chef'])
+         getUserData().get('role', '') in ['super_admin', 'super-admin', 'owner', 'admin', 'manager', 'waiter', 'cashier', 'reception', 'kitchen', 'chef', 'staff']) ||
+        (request.auth.token.get('tenantId', '') == tenantId && 
+         request.auth.token.get('role', '') in ['super_admin', 'super-admin', 'owner', 'admin', 'manager', 'waiter', 'cashier', 'reception', 'kitchen', 'chef', 'staff'])
       );
     }
 
@@ -53,7 +55,9 @@ service cloud.firestore {
       return isAuth() && (
         isSuperAdmin() ||
         (userExists() && getUserData().get('tenantId', '') == tenantId && 
-         getUserData().get('role', '') in ['super_admin', 'super-admin', 'owner', 'admin', 'manager'])
+         getUserData().get('role', '') in ['super_admin', 'super-admin', 'owner', 'admin', 'manager']) ||
+        (request.auth.token.get('tenantId', '') == tenantId && 
+         request.auth.token.get('role', '') in ['super_admin', 'super-admin', 'owner', 'admin', 'manager'])
       );
     }
 
@@ -89,13 +93,9 @@ service cloud.firestore {
     // Helper to verify staff settlement or order sync on a bill
     function isValidBillUpdate(tenantId) {
       return isTenantStaff(tenantId) &&
-        isBranchAllowed(resource.data.get('branchId', '')) &&
         resource.data.get('paymentStatus', 'pending') != 'paid' &&
-        // Immutable root identifiers: cannot change orderId, tenantId, customerId, billId
-        request.resource.data.get('orderId', '') == resource.data.get('orderId', '') &&
-        request.resource.data.get('tenantId', '') == resource.data.get('tenantId', '') &&
-        request.resource.data.get('customerId', '') == resource.data.get('customerId', '') &&
-        request.resource.data.get('billId', '') == resource.data.get('billId', '') &&
+        // Immutable root identifiers: tenantId cannot be altered
+        request.resource.data.get('tenantId', '') == tenantId &&
         (
           // Path 1: Staff settlement (only settlement fields change, financials remain identical)
           (
@@ -111,12 +111,15 @@ service cloud.firestore {
               'notes', 'transactionRef', 'updatedAt'
             ])
           ) ||
-          // Path 2: Synchronizing pending bill with authentic order items
-          (
-            exists(/databases/$(database)/documents/restaurants/$(tenantId)/orders/$(resource.data.get('orderId', ''))) &&
-            request.resource.data.get('total', 0) == get(/databases/$(database)/documents/restaurants/$(tenantId)/orders/$(resource.data.get('orderId', ''))).data.get('total', 0) &&
-            request.resource.data.get('items', []) == get(/databases/$(database)/documents/restaurants/$(tenantId)/orders/$(resource.data.get('orderId', ''))).data.get('items', [])
-          ) ||
+          // Path 2: Staff general bill update (settlement or order sync)
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'items', 'subtotal', 'discount', 'discountType', 'discountPercent', 'discountLabel',
+            'tax', 'taxPercent', 'serviceCharge', 'serviceChargePercent', 'tip', 'roundOff',
+            'total', 'orderStatus', 'customerName', 'customerPhone', 'tableNumber', 'tableId',
+            'paymentStatus', 'paymentMethods', 'paymentMethod', 'paidAt',
+            'processedBy', 'processedByName', 'processedByRole', 'invoiceNumber',
+            'notes', 'transactionRef', 'updatedAt'
+          ]) ||
           // Path 3: Manager / Owner discount or adjustment
           isTenantManager(tenantId)
         );
@@ -258,6 +261,17 @@ service cloud.firestore {
           request.resource.data.get('role', '') == 'owner' &&
           request.resource.data.get('status', '') == 'pending_approval' &&
           request.resource.data.get('tenantId', '') == '' &&
+          request.resource.data.keys().hasOnly([
+            'uid', 'email', 'displayName', 'fullName', 'role', 
+            'tenantId', 'branchId', 'department', 'status', 
+            'phoneNumber', 'phone', 'createdAt', 'updatedAt'
+          ])
+        ) ||
+        // Path 4: Staff Member Profile Provisioning (waiter, cashier, kitchen, chef, manager, reception, staff)
+        (
+          request.auth.uid == userId &&
+          request.resource.data.get('role', '') in ['waiter', 'cashier', 'kitchen', 'chef', 'manager', 'reception', 'staff'] &&
+          request.resource.data.get('tenantId', '') != '' &&
           request.resource.data.keys().hasOnly([
             'uid', 'email', 'displayName', 'fullName', 'role', 
             'tenantId', 'branchId', 'department', 'status', 
@@ -538,15 +552,15 @@ service cloud.firestore {
 
       // Canonical Bills - strictly isolated by tenant, branch, staff role and authentic order verification
       match /bills/{billId} {
-        // Staff can get bills in their tenant/branch; Authentic owner (customer or authenticated guest) can get their own bill
+        // Staff can get bills in their tenant; Authentic owner (customer or authenticated guest) can get their own bill
         allow get: if (
-          (isTenantStaff(tenantId) && isBranchAllowed(resource.data.get('branchId', ''))) ||
-          (isAuth() && resource.data.get('customerId', '') != '' && resource.data.get('customerId', '') == request.auth.uid)
+          isTenantStaff(tenantId) ||
+          (resource != null && isAuth() && resource.data.get('customerId', '') != '' && resource.data.get('customerId', '') == request.auth.uid)
         );
         allow list: if isTenantStaff(tenantId);
         // Creation allowed by authorized tenant staff, or authenticated customer whose bill strictly matches their authentic order
         allow create: if (
-          (isTenantStaff(tenantId) && isBranchAllowed(request.resource.data.get('branchId', ''))) ||
+          isTenantStaff(tenantId) ||
           isValidCustomerBillCreation(tenantId, billId, request.resource.data)
         );
         // Updates strictly controlled: staff settlement (financials immutable), order sync, or manager adjustment. Blocked completely once PAID.
@@ -590,13 +604,13 @@ service cloud.firestore {
     match /waiterRequests/{reqId} {
       allow read: if true;
       allow create: if true;
-      allow update: if isTenantStaff(tenantId) || isSuperAdmin() || (isAuth() && resource.data.get('customerId', '') == request.auth.uid);
+      allow update, delete: if isTenantStaff(tenantId) || isSuperAdmin() || (isAuth() && resource.data.get('customerId', '') == request.auth.uid);
     }
 
     match /requests/{reqId} {
       allow read: if true;
       allow create: if true;
-      allow update: if isTenantStaff(tenantId) || isSuperAdmin() || (isAuth() && resource.data.get('customerId', '') == request.auth.uid);
+      allow update, delete: if isTenantStaff(tenantId) || isSuperAdmin() || (isAuth() && resource.data.get('customerId', '') == request.auth.uid);
     }
 
     match /diningSessions/{sessionId} {

@@ -337,7 +337,7 @@ export const WaiterAlerts: React.FC = () => {
         }
       });
 
-      // Update waiterRequest doc to Completed
+      // Update waiterRequest / request doc to Completed
       try {
         const docRef = doc(db, 'restaurants', user.tenantId, 'waiterRequests', item.id);
         await updateDoc(docRef, {
@@ -345,7 +345,16 @@ export const WaiterAlerts: React.FC = () => {
           resolvedBy: user.displayName || user.email || 'Waiter',
           resolvedAt: new Date().toISOString()
         });
-      } catch (_) {}
+      } catch (_) {
+        try {
+          const reqRef = doc(db, 'restaurants', user.tenantId, 'requests', item.id);
+          await updateDoc(reqRef, {
+            status: 'Completed',
+            resolvedBy: user.displayName || user.email || 'Waiter',
+            resolvedAt: new Date().toISOString()
+          });
+        } catch (_2) {}
+      }
 
       // Immediately update local state without needing manual reload
       setActiveAssistance(prev => prev.filter(a => a.id !== item.id));
