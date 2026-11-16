@@ -32,7 +32,7 @@ interface IWaiterOrderDetailsDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   table: ITable;
-  orders: IOrder[]; // active orders for this table (e.g. Round 1 + Add-ons)
+  orders: IOrder[]; // active orders for this table
   initialSelectedOrderId?: string;
   initialSelectReadyItems?: boolean;
   onSettleBill?: (order: IOrder) => void;

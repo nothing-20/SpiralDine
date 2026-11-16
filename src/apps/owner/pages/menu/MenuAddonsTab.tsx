@@ -93,7 +93,7 @@ export const MenuAddonsTab: React.FC<MenuAddonsTabProps> = ({ tenantId, menuItem
     if (!tenantId) return;
 
     if (!addonName.trim()) {
-      toast.error('Add-on name is required (e.g. Extra Cheese, Truffle Dip).');
+      toast.error('Add-on name is required.');
       return;
     }
     if (addonPrice === '' || Number(addonPrice) < 0) {
@@ -272,7 +272,6 @@ export const MenuAddonsTab: React.FC<MenuAddonsTabProps> = ({ tenantId, menuItem
         <form onSubmit={handleSubmit} className="space-y-4">
           <Input
             label="Add-on Name *"
-            placeholder="e.g. Extra Cheese, Truffle Dip, Bacon Bits"
             value={addonName}
             onChange={(e) => setAddonName(e.target.value)}
             disabled={isSubmitting}
@@ -283,7 +282,6 @@ export const MenuAddonsTab: React.FC<MenuAddonsTabProps> = ({ tenantId, menuItem
             label={`Add-on Price (${currencySymbol}) *`}
             type="number"
             step="0.01"
-            placeholder="e.g. 2.50"
             value={addonPrice}
             onChange={(e) => setAddonPrice(e.target.value === '' ? '' : Number(e.target.value))}
             disabled={isSubmitting}

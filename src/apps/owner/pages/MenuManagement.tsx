@@ -1873,7 +1873,6 @@ export const MenuManagement: React.FC = () => {
           <Input 
             label="Category Name *"
             type="text"
-            placeholder="e.g. Appetizers"
             error={categoryErrors.name?.message}
             disabled={isSubmitting}
             {...registerCategory('name')}
@@ -1888,7 +1887,6 @@ export const MenuManagement: React.FC = () => {
           <Input 
             label="Custom Image URL"
             type="text"
-            placeholder="https://example.com/image.jpg"
             error={categoryErrors.image?.message}
             disabled={isSubmitting}
             {...registerCategory('image')}
@@ -2202,7 +2200,6 @@ export const MenuManagement: React.FC = () => {
                       <Input 
                         label="Image URL"
                         type="text"
-                        placeholder="https://example.com/food.jpg"
                         error={itemErrors.image?.message}
                         disabled={isSubmitting}
                         {...registerItem('image')}
@@ -2309,7 +2306,6 @@ export const MenuManagement: React.FC = () => {
             type="number"
             value={refillAmount}
             onChange={(e) => setRefillAmount(Number(e.target.value))}
-            placeholder="e.g. 50"
           />
           <div className="flex items-center space-x-3 pt-3 border-t border-slate-800/40">
             <Button variant="secondary" className="flex-1" onClick={() => setIsRefillOpen(false)}>

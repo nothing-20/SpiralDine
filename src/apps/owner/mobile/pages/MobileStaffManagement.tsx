@@ -641,7 +641,6 @@ export const MobileStaffManagement: React.FC = () => {
                   required
                   value={invName}
                   onChange={(e) => setInvName(e.target.value)}
-                  placeholder="e.g. Rahul Sharma"
                   className="w-full h-10 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none"
                 />
               </div>
@@ -653,7 +652,6 @@ export const MobileStaffManagement: React.FC = () => {
                   required
                   value={invEmail}
                   onChange={(e) => setInvEmail(e.target.value)}
-                  placeholder="rahul@spiraldine.com"
                   className="w-full h-10 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none"
                 />
               </div>
@@ -664,7 +662,6 @@ export const MobileStaffManagement: React.FC = () => {
                   type="tel"
                   value={invPhone}
                   onChange={(e) => setInvPhone(e.target.value)}
-                  placeholder="+91 98765 43210"
                   className="w-full h-10 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none"
                 />
               </div>

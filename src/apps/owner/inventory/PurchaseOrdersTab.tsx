@@ -1260,7 +1260,6 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
               <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Supplier Instructions (Included in PO)</label>
               <textarea 
                 rows={2}
-                placeholder="e.g. Please send freshly harvested crates before 10 AM."
                 value={supplierInstructions}
                 onChange={e => setSupplierInstructions(e.target.value)}
                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl"
@@ -1270,7 +1269,6 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
               <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Internal Notes (Private)</label>
               <textarea 
                 rows={2}
-                placeholder="e.g. Budget approved for weekend event restocking."
                 value={internalNotes}
                 onChange={e => setInternalNotes(e.target.value)}
                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl"
@@ -1593,8 +1591,7 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
               <div>
                 <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Vendor Invoice # (Optional)</label>
                 <input 
-                  type="text" 
-                  placeholder="e.g. INV-2026-9921"
+                  type="text"
                   value={invoiceNumber}
                   onChange={e => setInvoiceNumber(e.target.value)}
                   className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-800"
@@ -1671,7 +1668,6 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
               <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Receiving & Quality Notes</label>
               <textarea 
                 rows={2}
-                placeholder="e.g. All cartons inspected, temperature OK, seal intact."
                 value={receiptNotes}
                 onChange={e => setReceiptNotes(e.target.value)}
                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl"
@@ -1767,7 +1763,6 @@ export const PurchaseOrdersTab: React.FC<PurchaseOrdersTabProps> = ({
               </label>
               <textarea
                 rows={2}
-                placeholder="e.g. Supplier unable to fulfill, cancelled by mutual consent..."
                 value={cancelReason}
                 onChange={e => setCancelReason(e.target.value)}
                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-rose-500"

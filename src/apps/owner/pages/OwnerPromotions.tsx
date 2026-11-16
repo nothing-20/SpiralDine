@@ -664,7 +664,6 @@ export const OwnerPromotions: React.FC = () => {
               </label>
               <input
                 type="text"
-                placeholder="e.g. Weekend Biryani Feast, Festive 20% Off"
                 value={formName}
                 onChange={(e) => setFormName(e.target.value)}
                 required
@@ -677,7 +676,7 @@ export const OwnerPromotions: React.FC = () => {
                 Description &amp; Terms
               </label>
               <textarea
-                placeholder="Explain the offer conditions to diners (e.g. Valid on all main course items above ₹499)..."
+                placeholder="Explain the offer conditions to diners..."
                 value={formDescription}
                 onChange={(e) => setFormDescription(e.target.value)}
                 rows={2}
@@ -732,7 +731,6 @@ export const OwnerPromotions: React.FC = () => {
                 <label className="font-bold text-[#202820] block text-xs">Coupon Code (Optional)</label>
                 <input
                   type="text"
-                  placeholder="e.g. BIRYANI20 (Auto-capitalized)"
                   value={formCode}
                   onChange={(e) => setFormCode(e.target.value.toUpperCase())}
                   className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-mono font-bold text-[#202820] placeholder-[#747C74] outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs uppercase"
@@ -743,7 +741,6 @@ export const OwnerPromotions: React.FC = () => {
                 <label className="font-bold text-[#202820] block text-xs">Badge Text</label>
                 <input
                   type="text"
-                  placeholder="e.g. 20% OFF, BOGO, CHEF SPECIAL"
                   value={formBadgeText}
                   onChange={(e) => setFormBadgeText(e.target.value)}
                   className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] placeholder-[#747C74] outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"
@@ -758,7 +755,6 @@ export const OwnerPromotions: React.FC = () => {
                 <input
                   type="number"
                   min={0}
-                  placeholder="e.g. 499 (optional)"
                   value={formMinOrderValue}
                   onChange={(e) => setFormMinOrderValue(e.target.value === '' ? '' : Number(e.target.value))}
                   className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] placeholder-[#747C74] outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"
@@ -770,7 +766,6 @@ export const OwnerPromotions: React.FC = () => {
                 <input
                   type="number"
                   min={0}
-                  placeholder="e.g. 150 (optional cap on % discounts)"
                   value={formMaxDiscount}
                   onChange={(e) => setFormMaxDiscount(e.target.value === '' ? '' : Number(e.target.value))}
                   className="w-full px-3 py-2.5 bg-white border border-[#D8DDD6] rounded-xl font-bold text-[#202820] placeholder-[#747C74] outline-none focus:border-[#D94F2B] focus:ring-2 focus:ring-[#D94F2B]/20 transition-all text-xs"

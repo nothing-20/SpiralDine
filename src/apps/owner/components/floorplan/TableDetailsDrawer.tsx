@@ -512,7 +512,6 @@ export const TableDetailsDrawer: React.FC<TableDetailsDrawerProps> = ({
                 <label className="block text-xs font-bold text-[#202820] mb-1">Guest Name (Optional)</label>
                 <input
                   type="text"
-                  placeholder="e.g. Ramesh"
                   value={guestName}
                   onChange={(e) => setGuestName(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl border border-[#D8DDD6] text-xs font-medium text-[#202820] outline-none"

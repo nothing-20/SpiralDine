@@ -881,7 +881,6 @@ export const MobileTablesQRCodes: React.FC = () => {
                   required
                   value={formNumber}
                   onChange={(e) => setFormNumber(e.target.value)}
-                  placeholder="e.g. 5, 10, T-01"
                   className="w-full h-10 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none"
                 />
               </div>
@@ -892,7 +891,6 @@ export const MobileTablesQRCodes: React.FC = () => {
                   type="text"
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
-                  placeholder="e.g. Window Booth, VIP Corner"
                   className="w-full h-10 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none"
                 />
               </div>
@@ -1008,7 +1006,6 @@ export const MobileTablesQRCodes: React.FC = () => {
                 <textarea
                   value={formNotes}
                   onChange={(e) => setFormNotes(e.target.value)}
-                  placeholder="e.g. Near AC, power outlet available"
                   rows={2}
                   className="w-full p-2.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none"
                 />

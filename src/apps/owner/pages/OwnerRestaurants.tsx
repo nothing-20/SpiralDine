@@ -1028,8 +1028,7 @@ export const OwnerRestaurants: React.FC = () => {
               <label className="block text-xs font-bold text-[#17202A] mb-1">Restaurant Name *</label>
               <Input 
                 value={formName} 
-                onChange={(e) => setFormName(e.target.value)} 
-                placeholder="e.g. SpiralDine Bistro - Madhapur"
+                onChange={(e) => setFormName(e.target.value)}
                 required
               />
             </div>
@@ -1039,8 +1038,7 @@ export const OwnerRestaurants: React.FC = () => {
                 <label className="block text-xs font-bold text-[#17202A] mb-1">City / Region *</label>
                 <Input 
                   value={formCity} 
-                  onChange={(e) => setFormCity(e.target.value)} 
-                  placeholder="e.g. Hyderabad"
+                  onChange={(e) => setFormCity(e.target.value)}
                   required
                 />
               </div>
@@ -1048,8 +1046,7 @@ export const OwnerRestaurants: React.FC = () => {
                 <label className="block text-xs font-bold text-[#17202A] mb-1">Contact Phone</label>
                 <Input 
                   value={formPhone} 
-                  onChange={(e) => setFormPhone(e.target.value)} 
-                  placeholder="e.g. +91 9876543210"
+                  onChange={(e) => setFormPhone(e.target.value)}
                 />
               </div>
             </div>
@@ -1058,8 +1055,7 @@ export const OwnerRestaurants: React.FC = () => {
               <label className="block text-xs font-bold text-[#17202A] mb-1">Street Address</label>
               <Input 
                 value={formAddress} 
-                onChange={(e) => setFormAddress(e.target.value)} 
-                placeholder="e.g. Plot 42, Hitech City Main Road"
+                onChange={(e) => setFormAddress(e.target.value)}
               />
             </div>
 
@@ -1068,8 +1064,7 @@ export const OwnerRestaurants: React.FC = () => {
                 <label className="block text-xs font-bold text-[#17202A] mb-1">Cuisine Type(s)</label>
                 <Input 
                   value={formCuisine} 
-                  onChange={(e) => setFormCuisine(e.target.value)} 
-                  placeholder="e.g. Biryani, North Indian, Continental"
+                  onChange={(e) => setFormCuisine(e.target.value)}
                 />
               </div>
               <div>
@@ -1199,7 +1194,6 @@ export const OwnerRestaurants: React.FC = () => {
               <Input
                 value={branchFormName}
                 onChange={(e) => setBranchFormName(e.target.value)}
-                placeholder="e.g. Madhapur Express Hub"
                 required
               />
             </div>
@@ -1210,7 +1204,6 @@ export const OwnerRestaurants: React.FC = () => {
                 <Input
                   value={branchFormCode}
                   onChange={(e) => setBranchFormCode(e.target.value)}
-                  placeholder="e.g. BR-01"
                 />
               </div>
               <div>
@@ -1218,7 +1211,6 @@ export const OwnerRestaurants: React.FC = () => {
                 <Input
                   value={branchFormCity}
                   onChange={(e) => setBranchFormCity(e.target.value)}
-                  placeholder="e.g. Hyderabad"
                 />
               </div>
             </div>
@@ -1228,7 +1220,6 @@ export const OwnerRestaurants: React.FC = () => {
               <Input
                 value={branchFormAddress}
                 onChange={(e) => setBranchFormAddress(e.target.value)}
-                placeholder="e.g. Ground Floor, Cyber Towers"
               />
             </div>
 
@@ -1238,7 +1229,6 @@ export const OwnerRestaurants: React.FC = () => {
                 <Input
                   value={branchFormManager}
                   onChange={(e) => setBranchFormManager(e.target.value)}
-                  placeholder="e.g. Ramesh Kumar"
                 />
               </div>
               <div>
@@ -1246,7 +1236,6 @@ export const OwnerRestaurants: React.FC = () => {
                 <Input
                   value={branchFormPhone}
                   onChange={(e) => setBranchFormPhone(e.target.value)}
-                  placeholder="e.g. +91 9876543210"
                 />
               </div>
             </div>

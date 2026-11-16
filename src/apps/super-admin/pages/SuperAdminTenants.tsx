@@ -439,7 +439,6 @@ export const SuperAdminTenants: React.FC = () => {
             <Input
               label="Street"
               type="text"
-              placeholder="123 Delicious Rd"
               error={errors.street?.message}
               disabled={isSubmitting}
               {...register('street')}

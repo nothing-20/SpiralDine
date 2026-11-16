@@ -602,7 +602,7 @@ export const CartPage: React.FC = () => {
         isAdditionalOrder: isAdditional,
         customerId: authenticUid,
         customerName: user?.displayName || 'Guest Diner',
-        phone: user?.phoneNumber || '+91 98765 43210',
+        phone: user?.phoneNumber || '',
         orderType: 'dine_in',
         orderSource: currentSession?.orderSource || 'app',
         specialInstructions: specialInstructions.trim(),
@@ -1035,7 +1035,6 @@ export const CartPage: React.FC = () => {
               <textarea
                 value={specialInstructions}
                 onChange={(e) => setSpecialInstructions(e.target.value.slice(0, 200))}
-                placeholder="e.g. No onions, extra spicy, separate packing, less oil..."
                 className="w-full p-3 bg-white border border-[#E5DCD5] rounded-xl text-xs text-[#202124] placeholder-[#756B64]/60 focus:outline-none focus:border-[#C85A3F] focus:ring-1 focus:ring-[#C85A3F] h-24 resize-none transition-all"
               />
             </div>

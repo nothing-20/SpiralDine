@@ -568,7 +568,7 @@ export const QrScannerModal: React.FC<QrScannerModalProps> = ({
           {showManualFallback && (
             <form onSubmit={handleManualSubmit} className="space-y-2 text-left pt-1 w-full animate-in fade-in duration-150">
               <label htmlFor="manual-table-code" className="text-[11px] font-bold text-[#756B64] block">
-                Restaurant & Table Code (e.g. bawarchi-restaurant/12 or table URL)
+                Restaurant & Table Code
               </label>
               <div className="flex flex-col min-[300px]:flex-row gap-2">
                 <input

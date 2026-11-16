@@ -4431,7 +4431,6 @@ export const WaiterMatrix: React.FC = () => {
                       <label className="text-[10px] font-bold text-[#5F6875] block mb-0.5">Customer Name</label>
                       <input
                         type="text"
-                        placeholder="Ravi Kumar"
                         value={customerName}
                         onChange={e => setCustomerName(e.target.value)}
                         className="w-full px-2.5 py-1 bg-[#F7F4EE] border border-[#E3DED5] rounded-lg text-xs text-[#18201D] outline-none focus:bg-white focus:border-[#C85A3F]"
@@ -4441,7 +4440,6 @@ export const WaiterMatrix: React.FC = () => {
                       <label className="text-[10px] font-bold text-[#5F6875] block mb-0.5">Phone (optional)</label>
                       <input
                         type="text"
-                        placeholder="9876543210"
                         value={customerPhone}
                         onChange={e => setCustomerPhone(e.target.value)}
                         className="w-full px-2.5 py-1 bg-[#F7F4EE] border border-[#E3DED5] rounded-lg text-xs text-[#18201D] outline-none focus:bg-white focus:border-[#C85A3F]"
@@ -4528,7 +4526,6 @@ export const WaiterMatrix: React.FC = () => {
                     </label>
                     <textarea
                       rows={2}
-                      placeholder="e.g. Less spicy, allergy to nuts, serve drinks first..."
                       value={orderNotes}
                       onChange={e => setOrderNotes(e.target.value)}
                       className="w-full px-2.5 py-1.5 bg-white border border-[#E3DED5] rounded-xl text-xs text-[#18201D] placeholder-[#9CA3AF] outline-none focus:border-[#C85A3F] resize-none"

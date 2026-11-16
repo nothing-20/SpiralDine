@@ -220,7 +220,6 @@ export const ForgotPasswordForm: React.FC = () => {
                       autoComplete="email"
                       autoFocus
                       required
-                      placeholder="e.g. marco@bellatavola.com"
                       value={email}
                       disabled={isLoading}
                       onChange={(e) => {

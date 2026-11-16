@@ -452,7 +452,6 @@ export const OwnerStaffManager: React.FC = () => {
       <Input
         label="Full Name *"
         type="text"
-        placeholder="John Doe"
         value={form.fullName}
         onChange={(e) => setForm((f) => ({ ...f, fullName: e.target.value }))}
         error={formErrors.fullName}
@@ -462,7 +461,6 @@ export const OwnerStaffManager: React.FC = () => {
       <Input
         label="Email Address *"
         type="email"
-        placeholder="john@restaurant.com"
         value={form.email}
         onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
         error={formErrors.email}
@@ -472,7 +470,6 @@ export const OwnerStaffManager: React.FC = () => {
       <Input
         label="Phone Number *"
         type="tel"
-        placeholder="+91 98765 43210"
         value={form.phone}
         onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
         error={formErrors.phone}
@@ -491,7 +488,6 @@ export const OwnerStaffManager: React.FC = () => {
         <Input
           label="Department (optional)"
           type="text"
-          placeholder="e.g. Main Floor"
           value={form.department}
           onChange={(e) => setForm((f) => ({ ...f, department: e.target.value }))}
           disabled={isSubmitting}

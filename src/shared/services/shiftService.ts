@@ -17,7 +17,7 @@ import { logEvent } from './eventEngine';
 
 export const shiftService = {
   /**
-   * Submit a shift closing request from staff (e.g. Waiter) to management.
+   * Submit a shift closing request from staff to management.
    */
   async requestShiftClosing(
     tenantId: string,

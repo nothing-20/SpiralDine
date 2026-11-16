@@ -401,7 +401,7 @@ export const SuperAdminSpecialBenefits: React.FC = () => {
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
             type="text"
-            placeholder="Search member, email, phone, or UID..."
+            placeholder="Search..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9.5 pr-4 py-2 bg-slate-900/80 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
@@ -607,10 +607,9 @@ export const SuperAdminSpecialBenefits: React.FC = () => {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Eligible Member #101"
                   value={memberName}
                   onChange={(e) => setMemberName(e.target.value)}
-                  className="w-full px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                  className="w-full px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-amber-500"
                 />
               </div>
 
@@ -622,10 +621,9 @@ export const SuperAdminSpecialBenefits: React.FC = () => {
                   </label>
                   <input
                     type="email"
-                    placeholder="member@domain.com"
                     value={memberEmail}
                     onChange={(e) => setMemberEmail(e.target.value)}
-                    className="w-full px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500 font-mono"
+                    className="w-full px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-amber-500 font-mono"
                   />
                   <span className="text-[10px] text-slate-500 mt-1 block">
                     Requires email_verified == true
@@ -638,10 +636,9 @@ export const SuperAdminSpecialBenefits: React.FC = () => {
                   </label>
                   <input
                     type="text"
-                    placeholder="+918096791778"
                     value={memberPhone}
                     onChange={(e) => setMemberPhone(e.target.value)}
-                    className="w-full px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500 font-mono"
+                    className="w-full px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-amber-500 font-mono"
                   />
                   <span className="text-[10px] text-slate-500 mt-1 block">
                     Standard E.164 phone format
@@ -773,10 +770,9 @@ export const SuperAdminSpecialBenefits: React.FC = () => {
                   <input
                     type="number"
                     min="1"
-                    placeholder="Unlimited"
                     value={maxUsageTotal}
                     onChange={(e) => setMaxUsageTotal(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-amber-500"
                   />
                 </div>
 
@@ -785,10 +781,9 @@ export const SuperAdminSpecialBenefits: React.FC = () => {
                   <input
                     type="number"
                     min="1"
-                    placeholder="No cap"
                     value={maxDiscountPerOrder}
                     onChange={(e) => setMaxDiscountPerOrder(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                    className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-amber-500"
                   />
                 </div>
               </div>
@@ -821,10 +816,9 @@ export const SuperAdminSpecialBenefits: React.FC = () => {
                 <label className="block text-slate-300 font-semibold mb-1">Administrative Notes</label>
                 <textarea
                   rows={2}
-                  placeholder="Internal remarks for compliance audit log..."
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  className="w-full px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                  className="w-full px-3.5 py-2 bg-slate-900 border border-slate-800 rounded-xl text-slate-200 focus:outline-none focus:border-amber-500"
                 />
               </div>
 

@@ -515,7 +515,6 @@ export const ContactPage: React.FC = () => {
                         setName(e.target.value);
                         clearFieldError('name');
                       }}
-                      placeholder="e.g. Alex Sharma"
                       className={`w-full px-3.5 py-2.5 rounded-xl border bg-[#FCFAF7] text-xs text-[#17202A] placeholder-[#8A817A] focus:outline-none focus:bg-white transition-all ${
                         fieldErrors.name
                           ? 'border-red-400 focus:border-red-500'
@@ -542,7 +541,6 @@ export const ContactPage: React.FC = () => {
                         setEmail(e.target.value);
                         clearFieldError('email');
                       }}
-                      placeholder="alex@restaurant.com"
                       className={`w-full px-3.5 py-2.5 rounded-xl border bg-[#FCFAF7] text-xs text-[#17202A] placeholder-[#8A817A] focus:outline-none focus:bg-white transition-all ${
                         fieldErrors.email
                           ? 'border-red-400 focus:border-red-500'
@@ -570,7 +568,6 @@ export const ContactPage: React.FC = () => {
                         setPhone(e.target.value);
                         clearFieldError('phone');
                       }}
-                      placeholder="+91 98765 43210"
                       className={`w-full px-3.5 py-2.5 rounded-xl border bg-[#FCFAF7] text-xs text-[#17202A] placeholder-[#8A817A] focus:outline-none focus:bg-white transition-all ${
                         fieldErrors.phone
                           ? 'border-red-400 focus:border-red-500'
@@ -597,7 +594,6 @@ export const ContactPage: React.FC = () => {
                         setRestaurantName(e.target.value);
                         clearFieldError('restaurantName');
                       }}
-                      placeholder="e.g. Gourmet Bistro"
                       className={`w-full px-3.5 py-2.5 rounded-xl border bg-[#FCFAF7] text-xs text-[#17202A] placeholder-[#8A817A] focus:outline-none focus:bg-white transition-all ${
                         fieldErrors.restaurantName
                           ? 'border-red-400 focus:border-red-500'

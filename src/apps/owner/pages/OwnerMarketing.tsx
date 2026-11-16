@@ -600,8 +600,7 @@ export const OwnerMarketing: React.FC = () => {
               <label className="block text-xs font-bold text-[#17202A] mb-1">Campaign Name *</label>
               <Input 
                 value={formName} 
-                onChange={(e) => setFormName(e.target.value)} 
-                placeholder="e.g. Weekend Biryani Festival"
+                onChange={(e) => setFormName(e.target.value)}
                 required
               />
             </div>
@@ -610,8 +609,7 @@ export const OwnerMarketing: React.FC = () => {
               <label className="block text-xs font-bold text-[#17202A] mb-1">Description / Offer Summary</label>
               <Input 
                 value={formDescription} 
-                onChange={(e) => setFormDescription(e.target.value)} 
-                placeholder="e.g. 20% discount on all family platters over $30"
+                onChange={(e) => setFormDescription(e.target.value)}
               />
             </div>
 
@@ -635,8 +633,7 @@ export const OwnerMarketing: React.FC = () => {
                 <label className="block text-xs font-bold text-[#17202A] mb-1">Promo Code</label>
                 <Input 
                   value={formPromoCode} 
-                  onChange={(e) => setFormPromoCode(e.target.value.toUpperCase())} 
-                  placeholder="e.g. FESTIVAL20"
+                  onChange={(e) => setFormPromoCode(e.target.value.toUpperCase())}
                 />
               </div>
             </div>

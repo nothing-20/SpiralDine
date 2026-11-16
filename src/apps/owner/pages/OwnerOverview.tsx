@@ -1369,7 +1369,7 @@ export const OwnerOverview: React.FC = () => {
       });
     });
 
-    // Next add any day orders not yet represented in transactions (e.g. pending or newly placed)
+    // Next add any day orders not yet represented in transactions
     dayOrders.forEach(o => {
       const key = o.orderId || o.id;
       if (key && !processedKeys.has(key)) {
@@ -2924,8 +2924,7 @@ export const OwnerOverview: React.FC = () => {
                         <input 
                           type="text" 
                           value={resTimeInput} 
-                          onChange={(e) => setResTimeInput(e.target.value)} 
-                          placeholder="e.g. 12:00 PM or 7:30 PM"
+                          onChange={(e) => setResTimeInput(e.target.value)}
                           className="w-full p-3 bg-white border border-[#E5E0D9] focus:border-[#C85A3F] focus:ring-2 focus:ring-[#C85A3F]/15 text-[#17202A] rounded-xl outline-none font-semibold text-xs transition-all"
                         />
                         {/* Quick select pills */}
@@ -3153,7 +3152,7 @@ export const OwnerOverview: React.FC = () => {
                       {waiterEmployees.length === 0 ? (
                         <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-800 space-y-1">
                           <p className="font-extrabold text-amber-900">No Waitstaff Found</p>
-                          <p className="text-[11px] text-amber-700">All registered employees currently have other roles (e.g. kitchen/chef). You can add or assign the "waiter" role in Staff Management.</p>
+                          <p className="text-[11px] text-amber-700">All registered employees currently have other roles. You can add or assign the "waiter" role in Staff Management.</p>
                         </div>
                       ) : (
                         waiterEmployees.map(w => {
@@ -4118,7 +4117,6 @@ export const OwnerOverview: React.FC = () => {
         <form onSubmit={handleSendInvite} className="space-y-4 text-left">
           <Input
             label="Full Name"
-            placeholder="John Doe"
             value={inviteForm.fullName}
             onChange={(e) => setInviteForm(prev => ({ ...prev, fullName: e.target.value }))}
             error={inviteErrors.fullName}
@@ -4126,14 +4124,12 @@ export const OwnerOverview: React.FC = () => {
           <Input
             label="Email Address"
             type="email"
-            placeholder="john@restaurant.com"
             value={inviteForm.email}
             onChange={(e) => setInviteForm(prev => ({ ...prev, email: e.target.value }))}
             error={inviteErrors.email}
           />
           <Input
             label="Phone Number"
-            placeholder="+1 555-0199"
             value={inviteForm.phone}
             onChange={(e) => setInviteForm(prev => ({ ...prev, phone: e.target.value }))}
           />

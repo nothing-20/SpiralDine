@@ -389,7 +389,6 @@ export const LivePreparedInventory: React.FC<ILivePreparedInventoryProps> = ({
             type="number"
             value={batchSize}
             onChange={(e) => setBatchSize(Number(e.target.value))}
-            placeholder="e.g. 50"
             disabled={isSubmitting}
           />
 

@@ -1000,7 +1000,6 @@ export const SuperAdminApplications: React.FC = () => {
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Welcome aboard! Your starter tier is ready."
                       value={reviewNotes}
                       onChange={(e) => setReviewNotes(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
@@ -1026,7 +1025,7 @@ export const SuperAdminApplications: React.FC = () => {
                     </label>
                     <textarea
                       rows={3}
-                      placeholder="Explain why the registration was not approved (e.g. Incomplete business address, duplicate restaurant entity, unverified contact)."
+                      placeholder="Explain why the registration was not approved."
                       value={rejectionReason}
                       onChange={(e) => setRejectionReason(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-900 border border-rose-500/40 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-rose-500"
@@ -1052,7 +1051,6 @@ export const SuperAdminApplications: React.FC = () => {
                     </label>
                     <textarea
                       rows={3}
-                      placeholder="e.g. Please provide your business registration number or commercial kitchen operating license."
                       value={reviewNotes}
                       onChange={(e) => setReviewNotes(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-900 border border-blue-500/40 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"

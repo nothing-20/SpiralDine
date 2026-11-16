@@ -45,7 +45,7 @@ export const ResetPasswordPage: React.FC = () => {
     const directCode = searchParams.get('oobCode') || searchParams.get('code');
     if (directCode) return directCode.trim();
 
-    // Parse hash parameters if redirected via hash fragment (e.g. /#/reset-password?oobCode=...)
+    // Parse hash parameters if redirected via hash fragment
     if (typeof window !== 'undefined' && window.location.hash) {
       try {
         const hashQuery = window.location.hash.split('?')[1];

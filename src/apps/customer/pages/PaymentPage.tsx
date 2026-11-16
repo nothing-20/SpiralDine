@@ -199,8 +199,7 @@ export const PaymentPage: React.FC = () => {
             
             {payMethod === 'upi' && (
               <Input 
-                label="UPI VPA ID Address" 
-                placeholder="sarah@okaxis"
+                label="UPI VPA ID Address"
                 value={upiVpa}
                 onChange={(e) => setUpiVpa(e.target.value)}
                 required

@@ -96,7 +96,7 @@ export const MenuVariantsTab: React.FC<MenuVariantsTabProps> = ({ tenantId, menu
       return;
     }
     if (!variantName.trim()) {
-      toast.error('Variant name is required (e.g. Small, Regular, Large).');
+      toast.error('Variant name is required.');
       return;
     }
     if (variantPrice === '' || Number(variantPrice) < 0) {
@@ -312,7 +312,6 @@ export const MenuVariantsTab: React.FC<MenuVariantsTabProps> = ({ tenantId, menu
 
           <Input
             label="Variant / Size Name *"
-            placeholder="e.g. Regular, Large, Half, Full"
             value={variantName}
             onChange={(e) => setVariantName(e.target.value)}
             disabled={isSubmitting}
@@ -323,7 +322,6 @@ export const MenuVariantsTab: React.FC<MenuVariantsTabProps> = ({ tenantId, menu
             label={`Variant Price (${currencySymbol}) *`}
             type="number"
             step="0.01"
-            placeholder="e.g. 14.99"
             value={variantPrice}
             onChange={(e) => setVariantPrice(e.target.value === '' ? '' : Number(e.target.value))}
             disabled={isSubmitting}

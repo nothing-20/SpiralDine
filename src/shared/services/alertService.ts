@@ -79,7 +79,7 @@ export const alertService = {
   },
 
   /**
-   * Purge alerts based on criteria (e.g. all, resolved, read, or automated expiry checks).
+   * Purge alerts based on criteria.
    */
   async purgeAlerts(
     tenantId: string, 

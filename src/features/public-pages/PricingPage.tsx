@@ -107,7 +107,7 @@ export const PricingPage: React.FC = () => {
   const faqs = [
     {
       q: 'How does SpiralDine pricing work?',
-      a: 'SpiralDine plans are configured based on your restaurant type, table count, and operational requirements (e.g. single-location café vs. multi-branch group). Contact our team to receive a tailored quotation that fits your business.',
+      a: 'SpiralDine plans are configured based on your restaurant type, table count, and operational requirements. Contact our team to receive a tailored quotation that fits your business.',
     },
     {
       q: 'Do I need special POS hardware or proprietary tablets to use SpiralDine?',

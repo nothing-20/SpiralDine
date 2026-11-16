@@ -2331,7 +2331,6 @@ export const OwnerInventoryManager: React.FC = () => {
               <label className="font-bold text-slate-500 uppercase block">Ingredient Name</label>
               <input
                 type="text"
-                placeholder="E.g. Boneless Chicken"
                 value={ingName}
                 onChange={(e) => setIngName(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none"
@@ -2573,7 +2572,6 @@ export const OwnerInventoryManager: React.FC = () => {
             </label>
             <input
               type="text"
-              placeholder="E.g. Margherita Pizza Standard Recipe, Chef Special Burger"
               value={recipeName}
               onChange={(e) => setRecipeName(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 focus:border-[#C9533B] focus:bg-white rounded-xl p-3 text-xs font-semibold text-slate-800 outline-none transition-colors"
@@ -2588,7 +2586,6 @@ export const OwnerInventoryManager: React.FC = () => {
               </label>
               <input
                 type="text"
-                placeholder="E.g. 250g, 1 plate, Regular, Large"
                 value={recipePortionSize}
                 onChange={(e) => setRecipePortionSize(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 focus:border-[#C9533B] focus:bg-white rounded-xl p-3 text-xs font-semibold text-slate-800 outline-none transition-colors"
@@ -2709,7 +2706,7 @@ export const OwnerInventoryManager: React.FC = () => {
                       </div>
                       <input
                         type="text"
-                        placeholder="Optional prep note (e.g. diced finely, peeled, chilled)"
+                        placeholder="Optional prep note"
                         value={row.notes || ''}
                         onChange={(e) => handleUpdateRecipeRow(idx, 'notes', e.target.value)}
                         className="w-full bg-white border border-slate-200 focus:border-[#C9533B] rounded-lg p-1.5 px-2.5 text-[11px] text-slate-600 outline-none"
@@ -2956,7 +2953,6 @@ export const OwnerInventoryManager: React.FC = () => {
             <label className="font-bold text-slate-500 uppercase block">Supplier Name</label>
             <input
               type="text"
-              placeholder="E.g. Apex Meat Distribs"
               value={supName}
               onChange={(e) => setSupName(e.target.value)}
               className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none"
@@ -2968,7 +2964,6 @@ export const OwnerInventoryManager: React.FC = () => {
               <label className="font-bold text-slate-500 uppercase block">Phone</label>
               <input
                 type="text"
-                placeholder="+1 555-0199"
                 value={supPhone}
                 onChange={(e) => setSupPhone(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none"
@@ -2978,7 +2973,6 @@ export const OwnerInventoryManager: React.FC = () => {
               <label className="font-bold text-slate-500 uppercase block">Email</label>
               <input
                 type="email"
-                placeholder="orders@apexmeat.com"
                 value={supEmail}
                 onChange={(e) => setSupEmail(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none font-mono"
@@ -2990,7 +2984,6 @@ export const OwnerInventoryManager: React.FC = () => {
             <label className="font-bold text-slate-500 uppercase block">Supplier Address</label>
             <input
               type="text"
-              placeholder="12 Logistics Way, Suite A"
               value={supAddress}
               onChange={(e) => setSupAddress(e.target.value)}
               className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none"
@@ -3026,7 +3019,6 @@ export const OwnerInventoryManager: React.FC = () => {
               <label className="font-bold text-slate-500 uppercase block">Company Name</label>
               <input
                 type="text"
-                placeholder="E.g. Apex Foods Private Limited"
                 value={supCompanyName}
                 onChange={(e) => setSupCompanyName(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none"
@@ -3036,7 +3028,6 @@ export const OwnerInventoryManager: React.FC = () => {
               <label className="font-bold text-slate-500 uppercase block">GST Registration</label>
               <input
                 type="text"
-                placeholder="GSTIN99AABBCC11"
                 value={supGstNumber}
                 onChange={(e) => setSupGstNumber(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none font-mono"

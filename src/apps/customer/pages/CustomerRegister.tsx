@@ -86,7 +86,6 @@ export const CustomerRegister: React.FC = () => {
           <Input
             label="Full Name"
             type="text"
-            placeholder="John Doe"
             error={errors.fullName?.message}
             disabled={isSubmitting}
             {...register('fullName')}
@@ -95,7 +94,6 @@ export const CustomerRegister: React.FC = () => {
           <Input
             label="Email Address"
             type="email"
-            placeholder="john@example.com"
             error={errors.email?.message}
             disabled={isSubmitting}
             {...register('email')}
@@ -104,7 +102,6 @@ export const CustomerRegister: React.FC = () => {
           <Input
             label="Phone Number (Optional)"
             type="tel"
-            placeholder="+1 555-0199"
             error={errors.phoneNumber?.message}
             disabled={isSubmitting}
             {...register('phoneNumber')}

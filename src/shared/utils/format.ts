@@ -154,8 +154,8 @@ export function formatCurrency(value: number | string | null | undefined, curren
 
 /**
  * Formats a price in cents to a human-readable currency string.
- * @param priceInCents The price amount in cents/paisa (e.g. 1250 for ₹12.50)
- * @param currencyCode Optional override for the currency code (e.g. 'INR', 'USD')
+ * @param priceInCents The price amount in cents/paisa
+ * @param currencyCode Optional override for the currency code
  * @param locale Optional override for the formatting locale
  */
 export function formatPrice(priceInCents: number, currencyCode?: string, locale?: string): string {

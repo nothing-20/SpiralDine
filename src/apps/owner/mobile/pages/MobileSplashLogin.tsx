@@ -126,7 +126,6 @@ export const MobileSplashLogin: React.FC = () => {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="owner@paradisebiryani.com"
                 className="w-full h-11 pl-10 pr-3.5 rounded-xl border border-[#D1D5DB] focus:border-[#FF7518] focus:ring-2 focus:ring-[#FF7518]/20 text-xs text-[#202124] outline-none transition-all placeholder:text-[#9E9E9E]"
               />
             </div>

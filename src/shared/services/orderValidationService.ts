@@ -457,7 +457,7 @@ export const orderValidationService = {
       isAdditionalOrder: isAdditional,
       customerId,
       customerName: (request.customerName || 'Guest Diner').trim(),
-      phone: (request.phone || '+91 98765 43210').trim(),
+      phone: (request.phone || '').trim(),
       tenantId,
       restaurantId: tenantId,
       branchId: request.branchId || 'main',

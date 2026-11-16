@@ -912,7 +912,6 @@ export const CustomerPortal: React.FC = () => {
 
             <TextArea 
               label="Preparation Instructions (optional)"
-              placeholder="E.g. Extra spicy, No onions, Sauce on the side."
               value={itemNotes}
               onChange={(e) => setItemNotes(e.target.value)}
               rows={2}
@@ -1020,7 +1019,6 @@ export const CustomerPortal: React.FC = () => {
           <Input 
             label="Your Name"
             type="text"
-            placeholder="John Doe"
             value={customerName}
             onChange={(e) => setCustomerName(e.target.value)}
             disabled={isPlacingOrder}
@@ -1030,7 +1028,6 @@ export const CustomerPortal: React.FC = () => {
           <Input 
             label="Phone Number"
             type="tel"
-            placeholder="123-456-7890"
             value={phoneNumber}
             onChange={(e) => setPhoneNumber(e.target.value)}
             disabled={isPlacingOrder}
@@ -1048,7 +1045,6 @@ export const CustomerPortal: React.FC = () => {
 
           <TextArea 
             label="Special Cooking Instructions"
-            placeholder="E.g. Ring once ready, Sauce separately."
             value={specialInstructions}
             onChange={(e) => setSpecialInstructions(e.target.value)}
             disabled={isPlacingOrder}

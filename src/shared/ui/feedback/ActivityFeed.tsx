@@ -137,7 +137,6 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({ maxEvents = 100 }) =
               type="text"
               value={tableSearch}
               onChange={e => setTableSearch(e.target.value)}
-              placeholder="e.g. 5"
               className="w-full bg-slate-950 border border-slate-850 rounded-lg p-2 text-slate-300 outline-none placeholder:opacity-30"
             />
           </div>

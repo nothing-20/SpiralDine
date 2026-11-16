@@ -109,7 +109,7 @@ export const CookiePolicyPage: React.FC = () => {
                   </span>
                 </div>
                 <p className="text-xs text-[#667085] mb-3">
-                  Saves display customizations such as dark mode preferences and dietary filter selections (e.g., Pure Veg only).
+                  Saves display customizations such as dark mode preferences and dietary filter selections.
                 </p>
               </div>
             </div>

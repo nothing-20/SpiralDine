@@ -416,13 +416,12 @@ export const StaffShiftApprovalsCard: React.FC<StaffShiftApprovalsCardProps> = (
       >
         <div className="space-y-4 text-left text-xs">
           <p className="text-[#5F6875]">
-            Specify the discrepancy or reason requiring staff action before shift sign-off (e.g., cash drawer shortage, unserved open orders, or unassigned tables):
+            Specify the discrepancy or reason requiring staff action before shift sign-off:
           </p>
           <textarea
             value={revisionReason}
             onChange={(e) => setRevisionReason(e.target.value)}
             rows={3}
-            placeholder="e.g. Please verify Table 3 cash bill payment and re-count cash drawer (short by ₹50)..."
             className="w-full p-3 border border-[#E5E0D9] rounded-xl text-xs text-[#17202A] focus:outline-hidden focus:ring-2 focus:ring-rose-500"
           />
           <div className="flex justify-end gap-2 pt-2">

@@ -96,7 +96,7 @@ export const CustomerOrdersPage: React.FC = () => {
             };
           } else {
             // Non-authoritative snapshot (from customers/{uid}/orders or initial localStorage cache)
-            // NEVER allow a stale status (e.g. 'NEW') to overwrite an already terminal order!
+            // NEVER allow a stale status to overwrite an already terminal order!
             if (isOrderTerminal(existing) && !isOrderTerminal(order)) {
               next[key] = {
                 ...order,

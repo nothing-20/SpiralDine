@@ -663,8 +663,7 @@ export const OwnerReservations: React.FC = () => {
                 <label className="block text-xs font-bold text-[#17202A] mb-1">Customer Name *</label>
                 <Input 
                   value={formName} 
-                  onChange={(e) => setFormName(e.target.value)} 
-                  placeholder="e.g. Rahul Sharma"
+                  onChange={(e) => setFormName(e.target.value)}
                   required
                 />
               </div>
@@ -672,8 +671,7 @@ export const OwnerReservations: React.FC = () => {
                 <label className="block text-xs font-bold text-[#17202A] mb-1">Contact Phone</label>
                 <Input 
                   value={formPhone} 
-                  onChange={(e) => setFormPhone(e.target.value)} 
-                  placeholder="e.g. +91 9876543210"
+                  onChange={(e) => setFormPhone(e.target.value)}
                 />
               </div>
             </div>
@@ -747,8 +745,7 @@ export const OwnerReservations: React.FC = () => {
               <label className="block text-xs font-bold text-[#17202A] mb-1">Special Notes / Dietary Requests</label>
               <Input 
                 value={formNotes} 
-                onChange={(e) => setFormNotes(e.target.value)} 
-                placeholder="e.g. Window table requested, anniversary celebration"
+                onChange={(e) => setFormNotes(e.target.value)}
               />
             </div>
 

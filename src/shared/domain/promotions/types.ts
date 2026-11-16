@@ -2,7 +2,7 @@ export type PromotionType =
   | 'percentage'          // e.g. 20% off
   | 'fixed_amount'        // e.g. ₹100 off
   | 'bogo'                // Buy 1 Get 1
-  | 'fixed_price_combo'   // Combo meal fixed price (e.g. ₹299)
+  | 'fixed_price_combo'   // Combo meal fixed price
   | 'item_specific'       // Discount on specific dishes
   | 'category_specific'   // Discount on specific category
   | 'restaurant_wide'     // Store-wide offer
@@ -59,7 +59,7 @@ export interface IPromotion {
   type: PromotionType;
   value: number; // percentage (1-100) or fixed amount in INR
   discountValue?: number; // alias for value
-  code?: string; // uppercase coupon code (e.g. 'SPIRAL20')
+  code?: string; // uppercase coupon code
   couponCode?: string; // alias for code
   badgeText?: string; // e.g. '20% OFF', 'BOGO', 'COMBO'
   imageUrl?: string | null;
@@ -84,7 +84,7 @@ export interface IPromotion {
 
   // Limits
   globalUsageLimit?: number; // Total redemptions allowed across all diners
-  perCustomerLimit?: number; // Max redemptions per customer (e.g. 1)
+  perCustomerLimit?: number; // Max redemptions per customer
   redemptionCount: number;   // Current successful redemptions
 
   // Display & Stacking

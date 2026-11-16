@@ -529,7 +529,6 @@ export const VendorDirectoryTab: React.FC<VendorDirectoryTabProps> = ({ supplier
               <input 
                 type="text" 
                 required 
-                placeholder="e.g. Fresh Farms Poultry Ltd." 
                 value={formName}
                 onChange={e => setFormName(e.target.value)}
                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:outline-none focus:border-[#16845B]"
@@ -539,7 +538,6 @@ export const VendorDirectoryTab: React.FC<VendorDirectoryTabProps> = ({ supplier
               <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Company Registered Name</label>
               <input 
                 type="text" 
-                placeholder="e.g. Fresh Farms Enterprises Pvt Ltd" 
                 value={formCompany}
                 onChange={e => setFormCompany(e.target.value)}
                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-[#16845B]"
@@ -552,7 +550,6 @@ export const VendorDirectoryTab: React.FC<VendorDirectoryTabProps> = ({ supplier
               <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Contact Person</label>
               <input 
                 type="text" 
-                placeholder="e.g. Rajesh Sharma" 
                 value={formContactPerson}
                 onChange={e => setFormContactPerson(e.target.value)}
                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-[#16845B]"
@@ -562,8 +559,7 @@ export const VendorDirectoryTab: React.FC<VendorDirectoryTabProps> = ({ supplier
               <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Phone Number *</label>
               <input 
                 type="text" 
-                required
-                placeholder="e.g. +91 98765 43210" 
+                required 
                 value={formPhone}
                 onChange={e => setFormPhone(e.target.value)}
                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-[#16845B]"
@@ -573,7 +569,6 @@ export const VendorDirectoryTab: React.FC<VendorDirectoryTabProps> = ({ supplier
               <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Email Address</label>
               <input 
                 type="email" 
-                placeholder="vendor@freshfarms.in" 
                 value={formEmail}
                 onChange={e => setFormEmail(e.target.value)}
                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-[#16845B]"
@@ -586,7 +581,6 @@ export const VendorDirectoryTab: React.FC<VendorDirectoryTabProps> = ({ supplier
               <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">GSTIN / Tax ID</label>
               <input 
                 type="text" 
-                placeholder="e.g. 29AAAAA0000A1Z5" 
                 value={formGst}
                 onChange={e => setFormGst(e.target.value.toUpperCase())}
                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-slate-800 focus:outline-none focus:border-[#16845B]"
@@ -596,7 +590,6 @@ export const VendorDirectoryTab: React.FC<VendorDirectoryTabProps> = ({ supplier
               <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Business Address</label>
               <input 
                 type="text" 
-                placeholder="e.g. Plot 45, APMC Market, Bangalore" 
                 value={formAddress}
                 onChange={e => setFormAddress(e.target.value)}
                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-[#16845B]"
@@ -651,7 +644,6 @@ export const VendorDirectoryTab: React.FC<VendorDirectoryTabProps> = ({ supplier
             <label className="text-[10px] font-extrabold uppercase text-slate-500 block mb-1">Vendor Notes / Instructions</label>
             <textarea
               rows={2}
-              placeholder="e.g. Deliver before 10 AM, call supervisor at gate."
               value={formNotes}
               onChange={e => setFormNotes(e.target.value)}
               className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:outline-none focus:border-[#16845B]"
@@ -836,8 +828,7 @@ export const VendorDirectoryTab: React.FC<VendorDirectoryTabProps> = ({ supplier
                 type="number" 
                 step="0.01" 
                 min="0"
-                required
-                placeholder="e.g. 120.00" 
+                required 
                 value={priceAmount}
                 onChange={e => setPriceAmount(e.target.value)}
                 className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-800 focus:outline-none focus:border-[#16845B]"

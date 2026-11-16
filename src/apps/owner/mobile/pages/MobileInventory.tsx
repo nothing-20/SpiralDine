@@ -891,7 +891,6 @@ export const MobileInventory: React.FC = () => {
                   required
                   value={ingName}
                   onChange={(e) => setIngName(e.target.value)}
-                  placeholder="e.g. Tomatoes, Cheddar Cheese"
                   className="w-full h-10 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none"
                 />
               </div>
@@ -989,7 +988,6 @@ export const MobileInventory: React.FC = () => {
                   type="text"
                   value={ingSupplier}
                   onChange={(e) => setIngSupplier(e.target.value)}
-                  placeholder="e.g. Metro Produce"
                   className="w-full h-10 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none"
                 />
               </div>
@@ -1055,7 +1053,6 @@ export const MobileInventory: React.FC = () => {
                   required
                   value={wasteQty}
                   onChange={(e) => setWasteQty(e.target.value)}
-                  placeholder="e.g. 1.5"
                   className="w-full h-10 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#DC2626] focus:bg-white text-xs text-[#202124] outline-none"
                 />
               </div>
@@ -1081,7 +1078,6 @@ export const MobileInventory: React.FC = () => {
                   type="text"
                   value={wasteNotes}
                   onChange={(e) => setWasteNotes(e.target.value)}
-                  placeholder="e.g. Refrigerator temperature failure"
                   className="w-full h-10 px-3.5 rounded-xl bg-[#F7F7F7] text-xs text-[#202124] outline-none"
                 />
               </div>
@@ -1121,7 +1117,6 @@ export const MobileInventory: React.FC = () => {
                   required
                   value={supName}
                   onChange={(e) => setSupName(e.target.value)}
-                  placeholder="e.g. Organic Farms Co"
                   className="w-full h-10 px-3.5 rounded-xl bg-[#F7F7F7] text-xs text-[#202124] outline-none"
                 />
               </div>
@@ -1132,7 +1127,6 @@ export const MobileInventory: React.FC = () => {
                   type="tel"
                   value={supPhone}
                   onChange={(e) => setSupPhone(e.target.value)}
-                  placeholder="+91 98765 00000"
                   className="w-full h-10 px-3.5 rounded-xl bg-[#F7F7F7] text-xs text-[#202124] outline-none"
                 />
               </div>
@@ -1143,7 +1137,6 @@ export const MobileInventory: React.FC = () => {
                   type="email"
                   value={supEmail}
                   onChange={(e) => setSupEmail(e.target.value)}
-                  placeholder="orders@organicfarms.com"
                   className="w-full h-10 px-3.5 rounded-xl bg-[#F7F7F7] text-xs text-[#202124] outline-none"
                 />
               </div>

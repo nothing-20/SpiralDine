@@ -777,7 +777,6 @@ export const MobileBilling: React.FC = () => {
                   required
                   value={refundReason}
                   onChange={(e) => setRefundReason(e.target.value)}
-                  placeholder="e.g. Returned dish, billing error"
                   className="w-full h-10 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#DC2626] focus:bg-white text-xs text-[#202124] outline-none"
                 />
               </div>
@@ -898,7 +897,6 @@ export const MobileBilling: React.FC = () => {
                   type="text"
                   value={closingNotes}
                   onChange={(e) => setClosingNotes(e.target.value)}
-                  placeholder="e.g. All receipts tallied correctly"
                   className="w-full h-10 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none"
                 />
               </div>

@@ -226,7 +226,6 @@ export const MobilePromotions: React.FC = () => {
                   required
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Weekend Feast Special"
                   className="w-full h-11 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none transition-all"
                 />
               </div>
@@ -238,7 +237,6 @@ export const MobilePromotions: React.FC = () => {
                   required
                   value={code}
                   onChange={(e) => setCode(e.target.value.toUpperCase())}
-                  placeholder="e.g. SPIRAL20"
                   className="w-full h-11 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none transition-all font-mono font-bold"
                 />
               </div>

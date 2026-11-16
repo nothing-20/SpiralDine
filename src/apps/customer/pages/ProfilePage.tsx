@@ -834,8 +834,7 @@ export const ProfilePage: React.FC = () => {
           <Input 
             label="Phone Number" 
             value={phoneNumber} 
-            onChange={(e) => setPhoneNumber(e.target.value)} 
-            placeholder="+91 98765 43210"
+            onChange={(e) => setPhoneNumber(e.target.value)}
             className="bg-[#FAFAFA] border-[#EEE7E1] text-[#242424]"
           />
 
@@ -1543,10 +1542,9 @@ export const ProfilePage: React.FC = () => {
           <form onSubmit={handleAddAddress} className="bg-white border border-[#EEE7E1] p-6 rounded-3xl space-y-3 shadow-xs">
             <h4 className="text-xs font-bold text-[#242424] uppercase tracking-wider">Register New Address</h4>
             <Input 
-              label="Address Label (e.g. Home, Office)" 
+              label="Address Label" 
               value={newAddrName} 
               onChange={e => setNewAddrName(e.target.value)} 
-              placeholder="e.g. Work, Residence" 
               required
               className="bg-[#FAFAFA] border-[#EEE7E1]"
             />
@@ -1613,7 +1611,6 @@ export const ProfilePage: React.FC = () => {
               label="Related Order ID or Booking ID (Optional)"
               value={supportRefId}
               onChange={e => setSupportRefId(e.target.value)}
-              placeholder="e.g. ORD-12345 or RES-67890"
               className="bg-[#FAFAFA] border-[#EEE7E1]"
             />
 
@@ -1684,7 +1681,7 @@ export const ProfilePage: React.FC = () => {
                 type="number" 
                 value={topUpAmount}
                 onChange={e => setTopUpAmount(e.target.value)}
-                placeholder={`Enter amount (e.g. ${formatCurrency(500)})`}
+                placeholder="Enter amount"
                 className="flex-1 bg-white border border-[#EEE7E1] focus:border-[#E85D3F] focus:outline-none rounded-xl text-xs px-3.5 py-3 text-[#242424]"
               />
               <button 

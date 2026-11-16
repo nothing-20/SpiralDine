@@ -635,7 +635,6 @@ export const OwnerBranchTransfers: React.FC = () => {
               <Input 
                 value={transferNotes}
                 onChange={(e) => setTransferNotes(e.target.value)}
-                placeholder="e.g. Weekend stock rebalance due to private event reservation."
               />
             </div>
 

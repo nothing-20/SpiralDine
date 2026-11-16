@@ -229,7 +229,7 @@ export const MenuCombosTab: React.FC<MenuCombosTabProps> = ({ tenantId, menuItem
           <ShoppingBag className="w-10 h-10 text-slate-600 mx-auto mb-2" />
           <h4 className="text-sm font-bold text-textPearl">No combo meals created</h4>
           <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-            Combos allow you to group popular dishes together as bundled meals (e.g. Burger + Fries + Shake).
+            Combos allow you to group popular dishes together as bundled meals.
           </p>
           <Button onClick={openAddModal} className="mt-4 inline-flex items-center space-x-1.5" size="sm">
             <Plus className="w-4 h-4" />
@@ -348,7 +348,6 @@ export const MenuCombosTab: React.FC<MenuCombosTabProps> = ({ tenantId, menuItem
         <form onSubmit={handleSubmit} className="space-y-4">
           <Input
             label="Combo Name *"
-            placeholder="e.g. Burger Bonanza, Dinner for Two"
             value={comboName}
             onChange={(e) => setComboName(e.target.value)}
             disabled={isSubmitting}
@@ -369,7 +368,6 @@ export const MenuCombosTab: React.FC<MenuCombosTabProps> = ({ tenantId, menuItem
               label={`Combo Price (${currencySymbol}) *`}
               type="number"
               step="0.01"
-              placeholder="e.g. 24.99"
               value={comboPrice}
               onChange={(e) => setComboPrice(e.target.value === '' ? '' : Number(e.target.value))}
               disabled={isSubmitting}
@@ -377,7 +375,6 @@ export const MenuCombosTab: React.FC<MenuCombosTabProps> = ({ tenantId, menuItem
 
             <Input
               label="Image URL"
-              placeholder="https://..."
               value={comboImage}
               onChange={(e) => setComboImage(e.target.value)}
               disabled={isSubmitting}

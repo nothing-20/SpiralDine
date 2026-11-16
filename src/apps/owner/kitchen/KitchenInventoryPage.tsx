@@ -948,7 +948,6 @@ export const KitchenInventoryPage: React.FC = () => {
                     required
                     value={actionQuantity}
                     onChange={(e) => setActionQuantity(e.target.value)}
-                    placeholder={activeAction === 'adjust' ? `e.g. ${selectedIngredient.currentStock}` : 'e.g. 5'}
                     className="w-full px-3.5 py-2.5 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] rounded-xl text-sm font-bold focus:outline-none focus:border-[#18201D] focus:bg-white transition-all font-mono"
                   />
                   <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-[#6F746F] uppercase">
@@ -1004,7 +1003,6 @@ export const KitchenInventoryPage: React.FC = () => {
                   type="text"
                   value={actionReason}
                   onChange={(e) => setActionReason(e.target.value)}
-                  placeholder="e.g. Morning vendor delivery PO#104"
                   className="w-full px-3.5 py-2.5 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] placeholder-[#6F746F]/70 rounded-xl text-xs font-medium focus:outline-none focus:border-[#18201D] focus:bg-white transition-all"
                 />
               </div>
@@ -1059,7 +1057,6 @@ export const KitchenInventoryPage: React.FC = () => {
                   required
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder="e.g. Heavy Cream 36%"
                   className="w-full px-3.5 py-2.5 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] placeholder-[#6F746F]/70 rounded-xl text-xs font-medium focus:outline-none focus:border-[#18201D] focus:bg-white"
                 />
               </div>
@@ -1148,7 +1145,6 @@ export const KitchenInventoryPage: React.FC = () => {
                     type="text"
                     value={newStorage}
                     onChange={(e) => setNewStorage(e.target.value)}
-                    placeholder="e.g. Walk-in Chiller"
                     className="w-full px-3 py-2 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] rounded-xl text-xs font-medium focus:outline-none focus:border-[#18201D]"
                   />
                 </div>
@@ -1161,7 +1157,6 @@ export const KitchenInventoryPage: React.FC = () => {
                     min="0"
                     value={newCost}
                     onChange={(e) => setNewCost(e.target.value)}
-                    placeholder="e.g. 2.50"
                     className="w-full px-3 py-2 bg-[#F7F4EE] border border-[#E3DED5] text-[#18201D] rounded-xl text-xs font-mono focus:outline-none focus:border-[#18201D]"
                   />
                 </div>

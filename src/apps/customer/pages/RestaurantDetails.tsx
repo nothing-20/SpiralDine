@@ -116,7 +116,7 @@ export const RestaurantDetails: React.FC = () => {
 
   const handleOrderNow = () => {
     if (!restaurant) return;
-    // 1. Direct URL table parameter (e.g. from QR scan) bypasses table modal
+    // 1. Direct URL table parameter bypasses table modal
     const urlTable = searchParams.get('table') || searchParams.get('t');
     if (urlTable) {
       navigate(`/customer/restaurant/${restaurant.id}/menu?table=${urlTable}`);

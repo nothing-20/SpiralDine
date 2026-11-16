@@ -1280,7 +1280,6 @@ export const WaiterAssignedTablesPage: React.FC = () => {
                   type="text"
                   value={tableNotesInput}
                   onChange={e => setTableNotesInput(e.target.value)}
-                  placeholder="e.g., VIP, peanut allergy, baby high chair"
                   className="w-full px-4 py-2.5 bg-[#FAF8F5] border border-[#E3DED5] text-[#18201D] font-medium placeholder-[#9CA3AF] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#C85A3F]/30 focus:border-[#C85A3F] transition-all"
                 />
               </div>
@@ -1587,7 +1586,6 @@ export const WaiterAssignedTablesPage: React.FC = () => {
                       <label className="text-[10px] font-bold text-[#5F6875] block mb-0.5">Customer Name</label>
                       <input
                         type="text"
-                        placeholder="Ravi Kumar"
                         value={customerName}
                         onChange={e => setCustomerName(e.target.value)}
                         className="w-full px-2.5 py-1 bg-[#F7F4EE] border border-[#E3DED5] rounded-lg text-xs text-[#18201D] outline-none focus:bg-white focus:border-[#C85A3F]"
@@ -1597,7 +1595,6 @@ export const WaiterAssignedTablesPage: React.FC = () => {
                       <label className="text-[10px] font-bold text-[#5F6875] block mb-0.5">Phone (optional)</label>
                       <input
                         type="text"
-                        placeholder="9876543210"
                         value={customerPhone}
                         onChange={e => setCustomerPhone(e.target.value)}
                         className="w-full px-2.5 py-1 bg-[#F7F4EE] border border-[#E3DED5] rounded-lg text-xs text-[#18201D] outline-none focus:bg-white focus:border-[#C85A3F]"
@@ -1684,7 +1681,6 @@ export const WaiterAssignedTablesPage: React.FC = () => {
                     </label>
                     <textarea
                       rows={2}
-                      placeholder="e.g. Less spicy, allergy to nuts, serve drinks first..."
                       value={orderNotes}
                       onChange={e => setOrderNotes(e.target.value)}
                       className="w-full px-2.5 py-1.5 bg-white border border-[#E3DED5] rounded-xl text-xs text-[#18201D] placeholder-[#9CA3AF] outline-none focus:border-[#C85A3F] resize-none"
@@ -1807,7 +1803,6 @@ export const WaiterAssignedTablesPage: React.FC = () => {
               label="Context Notes"
               value={feedbackNotes}
               onChange={e => setFeedbackNotes(e.target.value)}
-              placeholder="e.g. food was amazing, minor wait time"
             />
 
             <div className="flex items-center space-x-2.5">

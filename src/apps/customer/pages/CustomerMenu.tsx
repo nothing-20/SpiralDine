@@ -985,7 +985,7 @@ export const CustomerMenu: React.FC = () => {
         customerId: authenticUid,
         customerName: customerName.trim() || user?.displayName || 'Guest Diner',
         customerEmail: user?.email || '',
-        phone: customerPhone.trim() || user?.phoneNumber || '+91 98765 43210',
+        phone: customerPhone.trim() || user?.phoneNumber || '',
         tenantId,
         restaurantId: tenantId,
         branchId: resolvedBranchId,
@@ -2103,7 +2103,7 @@ export const CustomerMenu: React.FC = () => {
                     />
                     <input
                       type="text"
-                      placeholder="Special instructions (e.g. Less spicy)"
+                      placeholder="Special instructions"
                       value={orderInstructions}
                       onChange={(e) => setOrderInstructions(e.target.value)}
                       className="w-full bg-white border border-[#E5DCD5] focus:border-[#C85A3F] rounded-xl px-3 py-2 text-xs text-[#202124] placeholder-[#756B64] outline-none"
@@ -2298,7 +2298,7 @@ export const CustomerMenu: React.FC = () => {
                 />
                 <input
                   type="text"
-                  placeholder="Cooking instructions (e.g. Less spicy)"
+                  placeholder="Cooking instructions"
                   value={orderInstructions}
                   onChange={(e) => setOrderInstructions(e.target.value)}
                   className="w-full bg-white border border-[#E5DCD5] rounded-xl px-3 py-2.5 text-xs text-[#202124] outline-none"
@@ -2422,7 +2422,6 @@ export const CustomerMenu: React.FC = () => {
                 Cooking instructions
               </label>
               <textarea
-                placeholder="E.g. Less spicy, no onions, extra crispy..."
                 value={specialItemNotes}
                 onChange={(e) => setSpecialItemNotes(e.target.value)}
                 rows={2}

@@ -2491,7 +2491,6 @@ export const OwnerBilling: React.FC = () => {
           <Input 
             label="Manager Approval PIN *" 
             type="password" 
-            placeholder="E.g. 1234" 
             value={managerPin}
             onChange={(e) => setManagerPin(e.target.value)}
             className="py-2"
@@ -2581,8 +2580,7 @@ export const OwnerBilling: React.FC = () => {
 
             <Input 
               label="Auditable Return Reason *" 
-              type="text" 
-              placeholder="E.g. Guest complained about cold food / wrong order"
+              type="text"
               value={refundReason}
               onChange={(e) => setRefundReason(e.target.value)}
               className="py-2"
@@ -2753,8 +2751,7 @@ export const OwnerBilling: React.FC = () => {
             <p className="text-xs text-slate-400">Marking items as complimentary will set their pricing effect to ₹0 on this bill check. This action will be audited.</p>
             <Input 
               label="Complimentary Reason / Occasion *" 
-              type="text" 
-              placeholder="E.g. Guest Birthday / VIP Customer / Customer Satisfaction recovery"
+              type="text"
               value={complimentaryReason}
               onChange={(e) => setComplimentaryReason(e.target.value)}
               className="py-2"
@@ -2797,8 +2794,7 @@ export const OwnerBilling: React.FC = () => {
           <p className="text-xs text-slate-400">Specify reason to reprint invoice for audit logging tracking files.</p>
           <Input 
             label="Reprint Reason (Optional)" 
-            type="text" 
-            placeholder="E.g. Customer copy damaged / Print correction"
+            type="text"
             value={reprintReason}
             onChange={(e) => setReprintReason(e.target.value)}
             className="py-2"

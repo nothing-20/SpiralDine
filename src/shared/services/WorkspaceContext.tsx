@@ -333,7 +333,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       }
 
-      // 6b. If branchData is not yet resolved (e.g. branchId was 'main', not found in subcollection, or not on profile)
+      // 6b. If branchData is not yet resolved
       if (!branchData) {
         try {
           const branchesSnap = await getDocs(collection(db, 'restaurants', tenantId, 'branches'));

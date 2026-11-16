@@ -339,7 +339,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ onClose }) => {
                         <span className="truncate">{link.label}</span>
                       </div>
 
-                      {/* Badge (e.g. active tickets or alerts count) */}
+                      {/* Badge */}
                       {link.badge !== undefined && (
                         <span className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded-full transition-all ${
                           isActive 

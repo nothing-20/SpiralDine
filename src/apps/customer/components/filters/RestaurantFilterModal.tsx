@@ -359,7 +359,7 @@ export const RestaurantFilterModal: React.FC<RestaurantFilterModalProps> = ({
                     <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[#756B64]" />
                     <input
                       type="text"
-                      placeholder="Search within cuisines (e.g. Italian, South Indian, Asian)..."
+                      placeholder="Search within cuisines..."
                       value={cuisineSearch}
                       onChange={(e) => setCuisineSearch(e.target.value)}
                       className="w-full pl-10 pr-9 py-2.5 bg-white border border-[#E5DCD5] focus:border-[#C85A3F] rounded-xl text-xs text-[#202124] outline-none shadow-2xs"

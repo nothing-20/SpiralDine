@@ -82,7 +82,7 @@ export const SuperAdminSetup: React.FC = () => {
 
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailPattern.test(cleanEmail)) {
-      setErrorMessage('Please provide a valid email format (e.g., admin@spiraldine.internal).');
+      setErrorMessage('Please provide a valid email format.');
       return;
     }
 
@@ -299,7 +299,6 @@ export const SuperAdminSetup: React.FC = () => {
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      placeholder="admin@spiraldine.internal"
                       className="w-full pl-10 pr-4 py-2.5 bg-[#FAF8F5] border border-[#E5E0D8] rounded-xl text-sm text-[#15211E] placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-[#12352D]/20 focus:border-[#12352D] transition-all"
                       disabled={isSubmitting}
                     />

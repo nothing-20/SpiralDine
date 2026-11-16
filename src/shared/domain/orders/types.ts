@@ -83,7 +83,7 @@ export interface IOrder {
   items: IOrderItem[];
   subtotal: number; // in cents
   tax: number; // in cents
-  taxPercent?: number; // raw % (e.g. 5)
+  taxPercent?: number; // raw %
   total: number; // in cents
   totalAmount?: number; // for backward compatibility
   status: TOrderStatus;
@@ -149,7 +149,7 @@ export interface IOrder {
   discountPercent?: number;       // raw % entered (0-100)
   discountLabel?: string;         // e.g. 'Staff 10%', 'Coupon SAVE20'
   serviceCharge?: number;         // in cents
-  serviceChargePercent?: number;  // raw % (e.g. 5)
+  serviceChargePercent?: number;  // raw %
   roundOff?: number;              // in cents — can be negative
   billRequestedAt?: string;       // ISO — when waiter clicked Request Bill
   diningCompletedAt?: string;     // ISO — when customer or staff marked dining completed
@@ -354,7 +354,7 @@ export interface IKitchenTicket {
   isSupplementary: boolean;
   items: IKotItem[];
   specialInstructions?: string;
-  station: string;                 // Station assignment (e.g. 'Main Kitchen', 'Grill', etc.)
+  station: string;                 // Station assignment
   status: TKotStatus;
   source: 'customer_qr' | 'customer_app' | 'waiter' | 'pos';
   customerName?: string;

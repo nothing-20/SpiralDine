@@ -34,7 +34,7 @@ export const MobileOwnerLayout: React.FC = () => {
     }
   }, [tenantId]);
 
-  // Determine if current route is a sub-page where bottom nav should be hidden (e.g. order details or login)
+  // Determine if current route is a sub-page where bottom nav should be hidden
   const hideBottomNavRoutes = ['/login', '/owner/login', '/owner/mobile/login', '/owner/orders/', '/owner/mobile/orders/'];
   const shouldHideBottomNav = hideBottomNavRoutes.some(p => location.pathname.startsWith(p) && location.pathname !== '/owner/orders' && location.pathname !== '/owner/mobile/orders');
 

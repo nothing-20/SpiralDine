@@ -1016,7 +1016,7 @@ export const OwnerAlerts: React.FC = () => {
                 <div>
                   <h4 className="text-xs font-bold text-[#17202A]">Purge Automated Expiry Warnings</h4>
                   <p className="text-[11px] text-[#6B7280] mt-0.5">
-                    Deletes all background expiry alerts (e.g. "Expired ingredient: boneless chicken", tomato).
+                    Deletes all background expiry alerts.
                   </p>
                 </div>
                 <Button

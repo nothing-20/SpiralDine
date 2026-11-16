@@ -51,8 +51,8 @@ export interface IFloorPlanConfig {
   tablePositions: Record<string, ITableVisualConfig>; // Keyed by tableId or table document ID
   canvasWidth?: number;             // Default 1000
   canvasHeight?: number;            // Default 700
-  physicalWidth?: number;           // Real floor width (e.g. 20)
-  physicalHeight?: number;          // Real floor height (e.g. 14)
+  physicalWidth?: number;           // Real floor width
+  physicalHeight?: number;          // Real floor height
   measurementUnit?: 'meters' | 'feet';
   gridSnap?: boolean;
   gridSize?: number;                // e.g. 20

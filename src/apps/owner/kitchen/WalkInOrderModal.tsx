@@ -202,7 +202,6 @@ export const WalkInOrderModal: React.FC<IWalkInOrderModalProps> = ({
                 type="text"
                 value={tableNumber}
                 onChange={e => setTableNumber(e.target.value)}
-                placeholder="e.g. 2, 5, Patio 1"
                 required
                 className="w-full px-3 py-2 text-xs border border-[#E3DED5] rounded-xl outline-none focus:border-[#183B2B] bg-[#FAF8F5]"
               />
@@ -300,7 +299,6 @@ export const WalkInOrderModal: React.FC<IWalkInOrderModalProps> = ({
               rows={2}
               value={notes}
               onChange={e => setNotes(e.target.value)}
-              placeholder="e.g. Less spicy, extra sauce, allergy info..."
               className="w-full px-3 py-2 text-xs border border-[#E3DED5] rounded-xl outline-none focus:border-[#183B2B] bg-[#FAF8F5]"
             />
           </div>

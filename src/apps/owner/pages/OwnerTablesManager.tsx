@@ -1463,7 +1463,6 @@ export const OwnerTablesManager: React.FC = () => {
                 type="text"
                 value={newFloorName}
                 onChange={(e) => setNewFloorName(e.target.value)}
-                placeholder="e.g. Ground Floor, Terrace"
                 className="flex-1 bg-white border border-[#D8DDD6] rounded-xl px-3 py-1.5 text-xs text-[#202820] outline-none"
               />
               <Button size="xs" onClick={handleAddFloor} className="flex items-center space-x-1 bg-[#12352D] text-white">
@@ -1515,7 +1514,6 @@ export const OwnerTablesManager: React.FC = () => {
                   type="text"
                   value={newSectionName}
                   onChange={(e) => setNewSectionName(e.target.value)}
-                  placeholder="e.g. Indoor Main, Patio"
                   className="flex-1 bg-white border border-[#D8DDD6] rounded-xl px-3 py-1.5 text-xs text-[#202820] outline-none"
                 />
                 <Button size="xs" onClick={handleAddSection} className="flex items-center space-x-1 bg-[#12352D] text-white">
@@ -1562,7 +1560,6 @@ export const OwnerTablesManager: React.FC = () => {
             <Input 
               label="Table Number/Code *"
               type="text"
-              placeholder="e.g. 5, Bar-2"
               error={errors.tableNumber?.message}
               disabled={isSubmitting}
               {...register('tableNumber')}
@@ -1570,7 +1567,6 @@ export const OwnerTablesManager: React.FC = () => {
             <Input 
               label="Table Name *"
               type="text"
-              placeholder="e.g. Garden Table 1"
               error={errors.tableName?.message}
               disabled={isSubmitting}
               {...register('tableName')}

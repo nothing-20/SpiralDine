@@ -352,7 +352,6 @@ export const OwnerStrategyCenter: React.FC = () => {
                   type="text"
                   value={newGoalTarget}
                   onChange={(e) => setNewGoalTarget(e.target.value)}
-                  placeholder={newGoalType === 'revenue' || newGoalType === 'waste' ? 'e.g. 2000' : newGoalType === 'csat' ? 'e.g. 4.9' : 'e.g. 10'}
                   className="w-full bg-slate-950 border border-slate-850 focus:border-primary rounded-xl p-3 text-xs font-semibold text-textPearl outline-none"
                 />
               </div>

@@ -780,7 +780,6 @@ export const OwnerSettings: React.FC = () => {
                 value={websiteUrl}
                 onChange={(e) => setWebsiteUrl(e.target.value)}
                 onBlur={triggerAutoSave}
-                placeholder="https://gourmet.com"
                 error={errors.websiteUrl}
               />
             </div>
@@ -1182,7 +1181,6 @@ export const OwnerSettings: React.FC = () => {
                 value={gstNumber}
                 onChange={(e) => setGstNumber(e.target.value)}
                 onBlur={triggerAutoSave}
-                placeholder="22AAAAA0000A1Z5"
                 required
               />
               <Input 
@@ -1191,7 +1189,6 @@ export const OwnerSettings: React.FC = () => {
                 value={pan}
                 onChange={(e) => setPan(e.target.value)}
                 onBlur={triggerAutoSave}
-                placeholder="ABCDE1234F"
               />
               <Input 
                 label="FSSAI License *"
@@ -1199,7 +1196,6 @@ export const OwnerSettings: React.FC = () => {
                 value={fssaiNumber}
                 onChange={(e) => setFssaiNumber(e.target.value)}
                 onBlur={triggerAutoSave}
-                placeholder="12345678901234"
                 required
               />
             </div>

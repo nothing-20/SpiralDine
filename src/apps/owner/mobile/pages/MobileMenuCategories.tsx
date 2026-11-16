@@ -362,7 +362,6 @@ export const MobileMenuCategories: React.FC = () => {
                   required
                   value={categoryName}
                   onChange={(e) => setCategoryName(e.target.value)}
-                  placeholder="e.g. Starters, Appetizers"
                   className="w-full h-11 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none transition-all"
                 />
               </div>
@@ -387,7 +386,6 @@ export const MobileMenuCategories: React.FC = () => {
                     setCategoryImageUrl(e.target.value);
                     if (!imageFile) setImagePreview(e.target.value);
                   }}
-                  placeholder="https://example.com/category.jpg"
                   className="w-full h-11 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none transition-all"
                 />
               </div>

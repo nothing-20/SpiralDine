@@ -739,7 +739,7 @@ export const OwnerReviews: React.FC = () => {
           onClose={() => setIsPurgeDialogOpen(false)}
           onConfirm={handleConfirmPurgeTest}
           title="Purge All Test Reviews?"
-          message="This will scan your restaurant satisfaction ratings and permanently remove all testing, sample, and duplicate reviews (e.g. repeated test submissions) from Firestore. Only genuine diner reviews will remain."
+          message="This will scan your restaurant satisfaction ratings and permanently remove all testing, sample, and duplicate reviews from Firestore. Only genuine diner reviews will remain."
           confirmLabel={isPurging ? 'Purging...' : 'Purge Test Reviews'}
           isDangerous={true}
         />

@@ -43,19 +43,19 @@ interface ICountryCode {
 }
 
 const COUNTRY_CODES: ICountryCode[] = [
-  { code: '+91', country: 'India', flag: '🇮🇳', placeholder: '98765 43210', maxLength: 10 },
-  { code: '+1', country: 'USA / Canada', flag: '🇺🇸', placeholder: '202 555 0123', maxLength: 10 },
-  { code: '+44', country: 'United Kingdom', flag: '🇬🇧', placeholder: '7911 123456', maxLength: 10 },
-  { code: '+971', country: 'UAE', flag: '🇦🇪', placeholder: '50 123 4567', maxLength: 9 },
-  { code: '+61', country: 'Australia', flag: '🇦🇺', placeholder: '412 345 678', maxLength: 9 },
-  { code: '+65', country: 'Singapore', flag: '🇸🇬', placeholder: '8123 4567', maxLength: 8 },
-  { code: '+966', country: 'Saudi Arabia', flag: '🇸🇦', placeholder: '50 123 4567', maxLength: 9 },
-  { code: '+974', country: 'Qatar', flag: '🇶🇦', placeholder: '3312 3456', maxLength: 8 },
-  { code: '+49', country: 'Germany', flag: '🇩🇪', placeholder: '151 12345678', maxLength: 11 },
-  { code: '+33', country: 'France', flag: '🇫🇷', placeholder: '6 12 34 56 78', maxLength: 9 },
-  { code: '+81', country: 'Japan', flag: '🇯🇵', placeholder: '90 1234 5678', maxLength: 10 },
-  { code: '+60', country: 'Malaysia', flag: '🇲🇾', placeholder: '12 345 6789', maxLength: 10 },
-  { code: '+64', country: 'New Zealand', flag: '🇳🇿', placeholder: '21 123 4567', maxLength: 9 }
+  { code: '+91', country: 'India', flag: '🇮🇳', placeholder: '', maxLength: 10 },
+  { code: '+1', country: 'USA / Canada', flag: '🇺🇸', placeholder: '', maxLength: 10 },
+  { code: '+44', country: 'United Kingdom', flag: '🇬🇧', placeholder: '', maxLength: 10 },
+  { code: '+971', country: 'UAE', flag: '🇦🇪', placeholder: '', maxLength: 9 },
+  { code: '+61', country: 'Australia', flag: '🇦🇺', placeholder: '', maxLength: 9 },
+  { code: '+65', country: 'Singapore', flag: '🇸🇬', placeholder: '', maxLength: 8 },
+  { code: '+966', country: 'Saudi Arabia', flag: '🇸🇦', placeholder: '', maxLength: 9 },
+  { code: '+974', country: 'Qatar', flag: '🇶🇦', placeholder: '', maxLength: 8 },
+  { code: '+49', country: 'Germany', flag: '🇩🇪', placeholder: '', maxLength: 11 },
+  { code: '+33', country: 'France', flag: '🇫🇷', placeholder: '', maxLength: 9 },
+  { code: '+81', country: 'Japan', flag: '🇯🇵', placeholder: '', maxLength: 10 },
+  { code: '+60', country: 'Malaysia', flag: '🇲🇾', placeholder: '', maxLength: 10 },
+  { code: '+64', country: 'New Zealand', flag: '🇳🇿', placeholder: '', maxLength: 9 }
 ];
 
 export const LoginForm: React.FC = () => {
@@ -576,7 +576,6 @@ export const LoginForm: React.FC = () => {
                   <input
                     id="owner-email"
                     type="email"
-                    placeholder="you@restaurant.com"
                     value={email}
                     onChange={(e) => {
                       setEmail(e.target.value);
@@ -713,7 +712,6 @@ export const LoginForm: React.FC = () => {
                           id="phone-number-input"
                           type="tel"
                           inputMode="numeric"
-                          placeholder={selectedCountry.placeholder}
                           value={rawPhoneNumber}
                           onChange={(e) => {
                             setRawPhoneNumber(e.target.value);

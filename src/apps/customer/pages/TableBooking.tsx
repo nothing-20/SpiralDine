@@ -1837,7 +1837,6 @@ export const TableBooking: React.FC = () => {
                 value={specialNotes}
                 maxLength={200}
                 onChange={(e) => setSpecialNotes(e.target.value)}
-                placeholder="E.g. Table near window, baby chair, anniversary celebration..."
                 className="w-full p-3.5 bg-[#FCFAF7] border border-[#E5DCD5] focus:border-[#C85A3F] rounded-xl text-xs text-[#202124] placeholder-[#756B64] focus:outline-none h-24 resize-none transition-colors shadow-2xs"
               />
             </div>

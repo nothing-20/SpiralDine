@@ -232,7 +232,6 @@ export const RegisterForm: React.FC = () => {
                 <input
                   id="reg-restaurant-name"
                   type="text"
-                  placeholder="e.g. Bella Tavola Ristorante"
                   value={restaurantName}
                   onChange={(e) => setRestaurantName(e.target.value)}
                   disabled={isLoading}
@@ -257,7 +256,6 @@ export const RegisterForm: React.FC = () => {
                 <input
                   id="reg-owner-name"
                   type="text"
-                  placeholder="e.g. Marco Rossi"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   disabled={isLoading}
@@ -329,7 +327,6 @@ export const RegisterForm: React.FC = () => {
                 <input
                   id="reg-email"
                   type="email"
-                  placeholder="owner@restaurant.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   disabled={isLoading}

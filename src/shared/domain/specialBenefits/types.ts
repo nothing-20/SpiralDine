@@ -5,10 +5,10 @@ export type TSpecialBenefitFrequency = 'unlimited' | 'once_per_day' | 'once_per_
 
 export interface ISpecialBenefit {
   id: string;                               // Document ID: "BENEFIT-<nanoid|uuid>"
-  memberEmail?: string;                     // Normalized lowercase email (e.g. "member@domain.com")
-  memberPhone?: string;                     // Normalized E.164 phone (e.g. "+918096791778")
+  memberEmail?: string;                     // Normalized lowercase email
+  memberPhone?: string;                     // Normalized E.164 phone
   memberUid?: string;                       // Populated upon authentic matching or pre-association
-  memberName: string;                       // Professional administrative label (e.g. "Eligible Member #104")
+  memberName: string;                       // Professional administrative label
   
   // Benefit terms
   discountPercentage: number;               // Range: 1 to 100 (Default: 50)

@@ -315,7 +315,6 @@ export const StaffLogin: React.FC = () => {
                 <input
                   id="staff-email"
                   type="email"
-                  placeholder="you@restaurant.com"
                   value={email}
                   onChange={(e) => {
                     setEmail(e.target.value);

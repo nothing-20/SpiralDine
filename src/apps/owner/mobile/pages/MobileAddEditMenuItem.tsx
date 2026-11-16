@@ -338,7 +338,6 @@ export const MobileAddEditMenuItem: React.FC = () => {
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Butter Chicken Masala, Truffle Fries"
               className="w-full h-11 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none transition-all placeholder:text-[#9E9E9E]"
             />
           </div>
@@ -374,7 +373,6 @@ export const MobileAddEditMenuItem: React.FC = () => {
                 type="text"
                 value={categoryName}
                 onChange={(e) => setCategoryName(e.target.value)}
-                placeholder="e.g. Mains"
                 className="w-full h-11 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none transition-all"
               />
             )}
@@ -414,7 +412,6 @@ export const MobileAddEditMenuItem: React.FC = () => {
                 min="0"
                 value={discountPrice}
                 onChange={(e) => setDiscountPrice(e.target.value)}
-                placeholder="e.g. 219.00"
                 className="w-full h-11 px-3.5 rounded-xl bg-[#F7F7F7] border border-transparent focus:border-[#FF7518] focus:bg-white text-xs text-[#202124] outline-none transition-all"
               />
             </div>

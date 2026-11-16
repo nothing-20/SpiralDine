@@ -268,7 +268,7 @@ export const KitchenMenuControl: React.FC = () => {
         <div className="flex flex-col md:flex-row gap-3">
           <div className="flex-1">
             <SearchBar 
-              placeholder="Search dishes by name, category, or station (e.g. Grill, Curry, Biryani)..." 
+              placeholder="Search dishes by name, category, or station..." 
               value={searchQuery}
               onSearchChange={setSearchQuery}
             />

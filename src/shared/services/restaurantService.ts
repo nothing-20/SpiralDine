@@ -132,7 +132,7 @@ export const restaurantService = {
 
   /**
    * Validates whether a given user has authorization to access a target restaurant ID.
-   * Prevents URL parameter tampering (e.g. ?restaurantId=otherRestaurant).
+   * Prevents URL parameter tampering.
    */
   async isTenantAuthorized(
     user: { uid: string; tenantId?: string; role?: string } | null, 

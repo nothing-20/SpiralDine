@@ -665,7 +665,6 @@ export const OwnerFeedback: React.FC = () => {
                 <Input 
                   value={newInternalNote}
                   onChange={(e) => setNewInternalNote(e.target.value)}
-                  placeholder="e.g. Contacted diner, offered 15% voucher for dessert compensation."
                 />
               </div>
             </div>
@@ -745,7 +744,7 @@ export const OwnerFeedback: React.FC = () => {
           onClose={() => setIsPurgeFeedbackOpen(false)}
           onConfirm={handlePurgeTestFeedback}
           title="Purge All Test Feedback?"
-          message="This will scan your satisfaction ratings collection and permanently remove all testing and duplicate feedback records (e.g. repeated test submissions) from Firestore. Only genuine diner reviews will remain."
+          message="This will scan your satisfaction ratings collection and permanently remove all testing and duplicate feedback records from Firestore. Only genuine diner reviews will remain."
           confirmLabel={isPurgingFeedback ? 'Purging...' : 'Purge Test Feedback'}
           isDangerous={true}
         />

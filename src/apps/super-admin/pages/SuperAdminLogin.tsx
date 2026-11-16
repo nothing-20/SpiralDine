@@ -214,7 +214,6 @@ export const SuperAdminLogin: React.FC = () => {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@spiraldine.internal"
                   className="w-full pl-10 pr-4 py-2.5 bg-[#FAF8F5] border border-[#E5E0D8] rounded-xl text-sm text-[#15211E] placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-[#12352D]/20 focus:border-[#12352D] transition-all"
                   disabled={isLoading}
                 />
@@ -344,7 +343,6 @@ export const SuperAdminLogin: React.FC = () => {
                     required
                     value={resetEmail}
                     onChange={(e) => setResetEmail(e.target.value)}
-                    placeholder="admin@spiraldine.internal"
                     className="w-full px-3.5 py-2.5 bg-[#FAF8F5] border border-[#E5E0D8] rounded-xl text-sm text-[#15211E] placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-[#12352D]/20 focus:border-[#12352D] transition-all"
                     disabled={resetStatus === 'loading'}
                   />
