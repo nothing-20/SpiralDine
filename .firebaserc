@@ -1,5 +1,6 @@
 {
   "projects": {
+    "default": "spiral-restaurant-saas-v1",
     "prod": "spiral-restaurant-saas-v1"
   },
   "targets": {},

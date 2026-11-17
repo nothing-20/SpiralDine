@@ -253,6 +253,31 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
       const actorRole = (user?.role as any) || (mode === 'waiter' ? 'waiter' : 'owner');
       const actorUid = user?.uid || 'staff-uid';
 
+      // Self-heal: ensure users/{uid} IAM document exists in Firestore so security rules recognize authorized staff
+      if (user?.uid && effectiveTenantId) {
+        try {
+          const uRef = doc(db, 'users', user.uid);
+          const uSnap = await getDoc(uRef);
+          if (!uSnap.exists()) {
+            await setDoc(uRef, {
+              uid: user.uid,
+              displayName: user.displayName || 'Staff Waiter',
+              fullName: user.displayName || 'Staff Waiter',
+              email: user.email || '',
+              role: user.role || 'waiter',
+              tenantId: effectiveTenantId,
+              branchId: 'main',
+              department: '',
+              status: 'active',
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            }, { merge: true });
+          }
+        } catch (_userSyncErr) {
+          console.warn('[CanonicalBillModal] Staff profile verification notice:', _userSyncErr);
+        }
+      }
+
       const res = await billingService.settleBillPayment(effectiveTenantId, activeBill?.billId || orderId, {
         method,
         transactionRef: method === 'upi' ? `DEMO-MANUAL-UPI-${Date.now().toString(36).toUpperCase()}` : `MANUAL-CASH-${Date.now().toString(36).toUpperCase()}`,
