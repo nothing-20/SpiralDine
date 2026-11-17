@@ -883,6 +883,28 @@ export const WaiterLiveOrdersPage: React.FC = () => {
                 </div>
               </div>
 
+              {Boolean(Number(selectedOrder.discount || 0) > 0) && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 space-y-1 text-xs text-amber-950">
+                  <div className="flex items-center justify-between font-extrabold">
+                    <span className="text-amber-900">
+                      ⭐ {selectedOrder.discountLabel || 'Special Member Discount'} ({selectedOrder.discountPercent || 50}%)
+                    </span>
+                    <span className="font-mono text-emerald-700">-{formatPrice(Number(selectedOrder.discount || 0))}</span>
+                  </div>
+                  <div className="text-[11px] text-amber-800">
+                    {(selectedOrder as any).discountFunding === 'platform' || !(selectedOrder as any).discountFunding
+                      ? '💡 Platform Funded: 100% subsidized by SpiralDine. Restaurant receives full bill amount during settlement.'
+                      : 'Restaurant Promotion'}
+                  </div>
+                  <div className="flex justify-between text-[11px] font-bold pt-1 border-t border-amber-500/20 text-stone-700">
+                    <span>Restaurant Settlement:</span>
+                    <span className="font-bold text-stone-900 font-mono">
+                      {formatPrice(Number((selectedOrder as any).restaurantReceivable || ((selectedOrder.subtotal || 0) + (selectedOrder.tax || 0) + (selectedOrder.serviceCharge || 0))))}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Items List */}
               <div className="space-y-2">
                 <span className="font-bold text-[#18201D] block uppercase text-[10px] tracking-wider text-[#5F6762]">

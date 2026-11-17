@@ -737,6 +737,28 @@ export const WaiterOrderDetailsDrawer: React.FC<IWaiterOrderDetailsDrawerProps> 
                 <span className="font-bold text-[#18201D]">{table.assignedWaiterName || currentOrder.waiterName || 'Unassigned'}</span>
               </div>
 
+              {Boolean(Number(currentOrder.discount || 0) > 0) && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl space-y-1.5 my-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-extrabold text-amber-900 flex items-center gap-1">
+                      ⭐ {currentOrder.discountLabel || 'Special Member Discount'} ({currentOrder.discountPercent || 50}%)
+                    </span>
+                    <span className="font-mono font-bold text-emerald-700">-{formatPrice(Number(currentOrder.discount || 0))}</span>
+                  </div>
+                  <div className="text-[11px] text-amber-800 leading-tight">
+                    {(currentOrder as any).discountFunding === 'platform' || !(currentOrder as any).discountFunding 
+                      ? '💡 Platform Funded: 100% subsidized by SpiralDine. Restaurant receives full bill amount during settlement.' 
+                      : 'Restaurant Promotion Discount'}
+                  </div>
+                  <div className="flex justify-between text-[11px] font-bold pt-1 border-t border-amber-500/20 text-stone-700">
+                    <span>Restaurant Settlement:</span>
+                    <span className="font-bold text-stone-900 font-mono">
+                      {formatPrice(Number((currentOrder as any).restaurantReceivable || ((currentOrder.subtotal || 0) + (currentOrder.tax || 0) + (currentOrder.serviceCharge || 0))))}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-between items-center pt-1 text-sm font-bold">
                 <span className="text-[#18201D]">Total Amount:</span>
                 <span className="text-[#183B2B] text-base">{formatPrice(totalBill)}</span>

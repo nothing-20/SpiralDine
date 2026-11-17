@@ -2339,9 +2339,22 @@ export const OwnerBilling: React.FC = () => {
                   <span>{formatVal(selectedOrder.subtotal)}</span>
                 </div>
                 {selectedOrder.discount ? (
-                  <div className="flex justify-between text-red-400">
-                    <span>Discount ({selectedOrder.discountLabel || 'Offer'}):</span>
-                    <span>-{formatVal(selectedOrder.discount)}</span>
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-emerald-400">
+                      <span>Discount ({selectedOrder.discountLabel || 'Offer'}):</span>
+                      <span>-{formatVal(selectedOrder.discount)}</span>
+                    </div>
+                    {((selectedOrder as any).discountFunding === 'platform' || (selectedOrder.discountLabel && selectedOrder.discountLabel.toLowerCase().includes('special member'))) && (
+                      <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-[10px] space-y-0.5 text-left">
+                        <div className="flex items-center justify-between text-amber-300 font-bold">
+                          <span>⭐ Special Member (50% Platform Subsidized)</span>
+                          <span className="bg-amber-500/20 text-amber-200 px-1 py-0.5 rounded text-[9px]">100% Reimbursed</span>
+                        </div>
+                        <p className="text-slate-300 text-[9px] leading-tight">
+                          This discount is covered 100% by SpiralDine. Restaurant receives full bill amount: <strong className="text-white">{formatVal((selectedOrder.subtotal || 0) + (selectedOrder.tax || 0) + (selectedOrder.serviceCharge || 0))}</strong>
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ) : null}
                 <div className="flex justify-between">

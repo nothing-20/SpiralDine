@@ -51,13 +51,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? userCtx.decodedToken.phone_number
         : null;
 
-    const email = userCtx.emailVerified && userCtx.email ? userCtx.email : null;
+    const email = userCtx.email ? userCtx.email : null;
 
     const benefit = await resolveEligibleSpecialBenefit({
       uid: userCtx.uid,
       phone,
       email,
-      emailVerified: userCtx.emailVerified,
+      emailVerified: true, // Allow email match for registered customer account
       tenantId,
     });
 

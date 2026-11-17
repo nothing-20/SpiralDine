@@ -982,6 +982,12 @@ export const WaiterAlerts: React.FC = () => {
                         <p className="font-medium leading-relaxed">
                           {item.description || `Customer at Table ${item.tableNumber} requested ${reqType}.`}
                         </p>
+                        {(item.discountFunding === 'platform' || (item.discountLabel && item.discountLabel.toLowerCase().includes('special member'))) && (
+                          <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-900 font-bold flex items-center gap-1.5">
+                            <span>⭐</span>
+                            <span>Special Member: 50% discount is 100% platform-funded by SpiralDine. Restaurant receives full amount!</span>
+                          </div>
+                        )}
                       </div>
 
                       {/* Lifecycle Status & Server Assignment */}

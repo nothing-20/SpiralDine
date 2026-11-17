@@ -27,6 +27,7 @@ import {
 import toast from 'react-hot-toast';
 import { IPromotion } from '../../../shared/domain/promotions/types';
 import { promotionService, validateCoupon, isPromotionActive } from '../../../shared/services/promotionEngine';
+import { clientSpecialBenefitsService } from '../../../shared/services/clientSpecialBenefitsService';
 
 
 // Safe Food Thumbnail with Graceful Fallback
@@ -284,8 +285,28 @@ export const CartPage: React.FC = () => {
       }
       try {
         setIsLoadingBenefit(true);
+
+        // 1. Direct authoritative evaluation via client Firestore
+        const directResult = await clientSpecialBenefitsService.checkEligibility(
+          user,
+          activeTenantId,
+          cartSubtotal
+        );
+
+        if (directResult.eligible && !isCancelled) {
+          setSpecialBenefit(directResult);
+          setAppliedPromotion(null);
+          setAppliedCouponCode('');
+          setCouponDiscountVal(0);
+          return;
+        }
+
+        // 2. Secondary API fallback
         const idToken = await auth.currentUser?.getIdToken();
-        if (!idToken) return;
+        if (!idToken) {
+          if (!isCancelled) setSpecialBenefit(null);
+          return;
+        }
 
         const res = await fetch('/api/special-benefits/eligibility', {
           method: 'POST',
@@ -311,9 +332,12 @@ export const CartPage: React.FC = () => {
               setSpecialBenefit(null);
             }
           }
+        } else {
+          if (!isCancelled) setSpecialBenefit(null);
         }
       } catch (err) {
         console.warn('[CartPage] Special benefit check notice:', err);
+        if (!isCancelled) setSpecialBenefit(null);
       } finally {
         if (!isCancelled) setIsLoadingBenefit(false);
       }
@@ -627,6 +651,33 @@ export const CartPage: React.FC = () => {
           discountVal
         ).catch(err => {
           console.warn('[CartPage] Non-blocking promo redemption record warning:', err);
+        });
+      }
+
+      // If Special Benefit was applied, auto-bind memberUid and record redemption
+      if (specialBenefit?.eligible && specialBenefit.benefitId && authenticUid) {
+        clientSpecialBenefitsService.bindMemberUid(specialBenefit.benefitId, authenticUid).catch((bErr) => {
+          console.warn('[CartPage] Bind member UID notice:', bErr);
+        });
+        clientSpecialBenefitsService.recordRedemption(specialBenefit.benefitId, {
+          benefitId: specialBenefit.benefitId,
+          orderId,
+          tenantId,
+          restaurantName: restaurantName || restaurantData?.name || tenantId,
+          customerUid: authenticUid,
+          customerEmail: user?.email || '',
+          customerPhone: user?.phoneNumber || '',
+          originalSubtotal: subtotal,
+          discountPercentage: specialBenefit.discountPercentage || 50,
+          discountAmount: memberBenefitDiscount,
+          finalPayableAmount: grandTotal,
+          fundingModel: (specialBenefit as any).fundingModel || 'platform_funded',
+          platformFundedAmount: (specialBenefit as any).fundingModel === 'platform_funded' ? memberBenefitDiscount : 0,
+          restaurantFundedAmount: (specialBenefit as any).fundingModel === 'restaurant_funded' ? memberBenefitDiscount : 0,
+          status: 'reserved',
+          reservedAt: new Date().toISOString(),
+        }).catch((rErr) => {
+          console.warn('[CartPage] Record redemption notice:', rErr);
         });
       }
 

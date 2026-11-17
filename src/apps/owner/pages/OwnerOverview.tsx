@@ -3895,7 +3895,16 @@ export const OwnerOverview: React.FC = () => {
                               <td className="py-3 text-right text-slate-400 font-mono">{formatPrice(o.subtotal)}</td>
                               <td className="py-3 text-right text-amber-400 font-mono">{formatPrice(o.tax)}</td>
                               <td className="py-3 text-right text-slate-500 font-mono">
-                                {o.discount > 0 ? formatPrice(o.discount) : '-'}
+                                {o.discount > 0 ? (
+                                  <div className="flex flex-col items-end">
+                                    <span className="text-emerald-400 font-bold">-{formatPrice(o.discount)}</span>
+                                    {((o as any).discountFunding === 'platform' || (o as any).discountLabel?.toLowerCase().includes('special member')) && (
+                                      <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 py-0.5 rounded font-sans whitespace-nowrap">
+                                        Platform Subsidized
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : '-'}
                               </td>
                               <td className="py-3 text-right text-emerald-400 font-mono font-bold">{formatPrice(o.total)}</td>
                             </tr>

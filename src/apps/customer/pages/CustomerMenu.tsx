@@ -65,11 +65,13 @@ import {
   Eye,
   Receipt,
   Tag,
-  Gift
+  Gift,
+  Award
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { IPromotion } from '../../../shared/domain/promotions/types';
 import { promotionService, calculateItemDiscount, isPromotionActive } from '../../../shared/services/promotionEngine';
+import { clientSpecialBenefitsService, IEligibleBenefitResult } from '../../../shared/services/clientSpecialBenefitsService';
 
 
 export const CustomerMenu: React.FC = () => {
@@ -166,6 +168,35 @@ export const CustomerMenu: React.FC = () => {
   const [isOrderSuccess, setIsOrderSuccess] = useState(false);
   const [placedOrderId, setPlacedOrderId] = useState('');
   const [placedOrderPrepTime, setPlacedOrderPrepTime] = useState('15-20 mins');
+
+  // Special Membership Benefits State
+  const [specialBenefit, setSpecialBenefit] = useState<IEligibleBenefitResult | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function evaluateSpecialBenefit() {
+      if (!user || (!user.uid && !user.email && !user.phoneNumber && !(user as any)?.phone)) {
+        if (isMounted) setSpecialBenefit(null);
+        return;
+      }
+      try {
+        const result = await clientSpecialBenefitsService.checkEligibility(
+          user,
+          tenantId || '',
+          cartSubtotal
+        );
+        if (isMounted) {
+          setSpecialBenefit(result.eligible ? result : null);
+        }
+      } catch (err) {
+        console.warn('[CustomerMenu] Special benefits evaluation error:', err);
+      }
+    }
+    evaluateSpecialBenefit();
+    return () => {
+      isMounted = false;
+    };
+  }, [user, tenantId]);
 
   // Cross-tenant cart guard state
   const [cartTenantId, setCartTenantId] = useState<string | null>(() => {
@@ -778,12 +809,19 @@ export const CustomerMenu: React.FC = () => {
   };
 
   // -------------------------------------------------------------
-  // 7. Bill Breakdown Calculation
+  // 7. Bill Breakdown Calculation (with Special Benefits support)
   // -------------------------------------------------------------
   const totalCartCount = cartItems.reduce((acc, curr) => acc + curr.count, 0);
-  const gstCharge = Math.round(cartSubtotal * 0.05);
-  const serviceCharge = Math.round(cartSubtotal * 0.05);
-  const totalCartCost = cartSubtotal + gstCharge + serviceCharge;
+  const specialBenefitDiscount = (specialBenefit?.eligible && specialBenefit.discountPercentage)
+    ? Math.round(cartSubtotal * (specialBenefit.discountPercentage / 100))
+    : 0;
+  const effectiveSpecialDiscount = (specialBenefit?.maxDiscountPerOrder && specialBenefit.maxDiscountPerOrder > 0)
+    ? Math.min(specialBenefitDiscount, specialBenefit.maxDiscountPerOrder)
+    : specialBenefitDiscount;
+  const netCartSubtotal = Math.max(0, cartSubtotal - effectiveSpecialDiscount);
+  const gstCharge = Math.round(netCartSubtotal * 0.05);
+  const serviceCharge = Math.round(netCartSubtotal * 0.05);
+  const totalCartCost = netCartSubtotal + gstCharge + serviceCharge;
 
   // -------------------------------------------------------------
   // 8. Order Placement Flow (QR / Table Session)
@@ -927,10 +965,17 @@ export const CustomerMenu: React.FC = () => {
         });
       }
 
-      // Re-derive canonical taxes and totals
-      const verifiedTax = Math.round(verifiedSubtotal * 0.05);
-      const verifiedServiceCharge = Math.round(verifiedSubtotal * 0.05);
-      const verifiedTotal = verifiedSubtotal + verifiedTax + verifiedServiceCharge;
+      // Re-derive canonical taxes and totals (with Special Benefits support)
+      const verifiedSpecialDiscount = (specialBenefit?.eligible && specialBenefit.discountPercentage)
+        ? Math.round(verifiedSubtotal * (specialBenefit.discountPercentage / 100))
+        : 0;
+      const effectiveVerifiedDiscount = (specialBenefit?.maxDiscountPerOrder && specialBenefit.maxDiscountPerOrder > 0)
+        ? Math.min(verifiedSpecialDiscount, specialBenefit.maxDiscountPerOrder)
+        : verifiedSpecialDiscount;
+      const verifiedNetSubtotal = Math.max(0, verifiedSubtotal - effectiveVerifiedDiscount);
+      const verifiedTax = Math.round(verifiedNetSubtotal * 0.05);
+      const verifiedServiceCharge = Math.round(verifiedNetSubtotal * 0.05);
+      const verifiedTotal = verifiedNetSubtotal + verifiedTax + verifiedServiceCharge;
 
       // Hard validation: An order cannot be placed if there are zero verified items or total <= 0
       if (!verifiedItems || verifiedItems.length === 0) {
@@ -985,7 +1030,7 @@ export const CustomerMenu: React.FC = () => {
         customerId: authenticUid,
         customerName: customerName.trim() || user?.displayName || 'Guest Diner',
         customerEmail: user?.email || '',
-        phone: customerPhone.trim() || user?.phoneNumber || '',
+        phone: customerPhone.trim() || user?.phoneNumber || (user as any)?.phone || '',
         tenantId,
         restaurantId: tenantId,
         branchId: resolvedBranchId,
@@ -998,7 +1043,14 @@ export const CustomerMenu: React.FC = () => {
         subtotal: verifiedSubtotal,
         tax: verifiedTax,
         serviceCharge: verifiedServiceCharge,
-        discount: 0,
+        discount: effectiveVerifiedDiscount,
+        discountPercent: specialBenefit?.discountPercentage || 0,
+        discountType: 'percentage',
+        discountLabel: specialBenefit?.eligible ? `Special member discount applied (${specialBenefit.discountPercentage}%)` : '',
+        discountFunding: specialBenefit?.fundingModel || 'platform_funded',
+        specialBenefitId: specialBenefit?.benefitId || '',
+        platformSubsidy: specialBenefit?.fundingModel === 'platform_funded' ? effectiveVerifiedDiscount : 0,
+        restaurantReceivable: verifiedSubtotal + verifiedTax + verifiedServiceCharge,
         totalAmount: verifiedTotal,
         total: verifiedTotal,
         status: 'NEW',
@@ -1012,6 +1064,33 @@ export const CustomerMenu: React.FC = () => {
       };
 
       await setDoc(orderRef, orderPayload);
+
+      // If Special Benefit was applied, auto-bind memberUid and record redemption
+      if (specialBenefit?.eligible && specialBenefit.benefitId && authenticUid) {
+        clientSpecialBenefitsService.bindMemberUid(specialBenefit.benefitId, authenticUid).catch((bErr) => {
+          console.warn('[CustomerMenu] Bind member UID notice:', bErr);
+        });
+        clientSpecialBenefitsService.recordRedemption(specialBenefit.benefitId, {
+          benefitId: specialBenefit.benefitId,
+          orderId,
+          tenantId,
+          restaurantName: restaurantName || tenantId,
+          customerUid: authenticUid,
+          customerEmail: user?.email || '',
+          customerPhone: customerPhone.trim() || user?.phoneNumber || '',
+          originalSubtotal: verifiedSubtotal,
+          discountPercentage: specialBenefit.discountPercentage || 50,
+          discountAmount: effectiveVerifiedDiscount,
+          finalPayableAmount: verifiedTotal,
+          fundingModel: specialBenefit.fundingModel || 'platform_funded',
+          platformFundedAmount: specialBenefit.fundingModel === 'platform_funded' ? effectiveVerifiedDiscount : 0,
+          restaurantFundedAmount: specialBenefit.fundingModel === 'restaurant_funded' ? effectiveVerifiedDiscount : 0,
+          status: 'reserved',
+          reservedAt: new Date().toISOString(),
+        }).catch((rErr) => {
+          console.warn('[CustomerMenu] Record redemption notice:', rErr);
+        });
+      }
 
       // Primary Kitchen Workflow: Create persistent canonical KOT record
       try {
@@ -1041,7 +1120,8 @@ export const CustomerMenu: React.FC = () => {
             tenantId,
             restaurantName: restaurantName || tenantId,
             tableNumber: cleanTableNum,
-            total: totalCartCost,
+            total: verifiedTotal,
+            discount: effectiveVerifiedDiscount,
             status: 'NEW',
             itemsCount: cartItems.length,
             createdAt: orderPayload.createdAt,
@@ -1063,7 +1143,8 @@ export const CustomerMenu: React.FC = () => {
             tenantId,
             restaurantName: restaurantName || tenantId,
             tableNumber: cleanTableNum,
-            total: totalCartCost,
+            total: verifiedTotal,
+            discount: effectiveVerifiedDiscount,
             status: 'NEW',
             itemsCount: cartItems.length,
             createdAt: orderPayload.createdAt
@@ -2062,12 +2143,37 @@ export const CustomerMenu: React.FC = () => {
                   </button>
                 </div>
 
+                {/* Special Membership Discount Banner */}
+                {specialBenefit?.eligible && (
+                  <div className="p-3 bg-gradient-to-r from-amber-500/10 via-amber-500/15 to-amber-600/10 border border-amber-500/30 rounded-2xl flex items-center justify-between gap-2 shadow-xs">
+                    <div className="flex items-center gap-2">
+                      <Award className="w-5 h-5 text-amber-600 shrink-0" />
+                      <div>
+                        <span className="text-xs font-bold text-amber-950 block">Special Member Discount Applied</span>
+                        <span className="text-[11px] text-amber-800">{specialBenefit.discountPercentage}% automatic membership benefit</span>
+                      </div>
+                    </div>
+                    <span className="text-xs font-black text-amber-700 bg-amber-100/80 px-2 py-1 rounded-lg shrink-0">
+                      -{specialBenefit.discountPercentage}%
+                    </span>
+                  </div>
+                )}
+
                 {/* Bill Breakdown */}
                 <div className="bg-[#FCFAF7] border border-[#E5DCD5] p-3.5 rounded-2xl text-xs space-y-1.5 font-semibold text-[#756B64]">
                   <div className="flex justify-between">
                     <span>Subtotal</span>
                     <span className="text-[#202124] font-bold">{formatPrice(cartSubtotal)}</span>
                   </div>
+                  {effectiveSpecialDiscount > 0 && (
+                    <div className="flex justify-between text-emerald-600 font-bold">
+                      <span className="flex items-center gap-1">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                        <span>Special Member Discount ({specialBenefit?.discountPercentage}%)</span>
+                      </span>
+                      <span>-{formatPrice(effectiveSpecialDiscount)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between">
                     <span>Taxes & Fees (5% GST)</span>
                     <span className="text-[#202124] font-bold">{formatPrice(gstCharge)}</span>
@@ -2264,12 +2370,37 @@ export const CustomerMenu: React.FC = () => {
               ))}
             </div>
 
+            {/* Special Membership Discount Banner */}
+            {specialBenefit?.eligible && (
+              <div className="p-3 bg-gradient-to-r from-amber-500/10 via-amber-500/15 to-amber-600/10 border border-amber-500/30 rounded-2xl flex items-center justify-between gap-2 shadow-xs">
+                <div className="flex items-center gap-2">
+                  <Award className="w-5 h-5 text-amber-600 shrink-0" />
+                  <div>
+                    <span className="text-xs font-bold text-amber-950 block">Special Member Discount Applied</span>
+                    <span className="text-[11px] text-amber-800">{specialBenefit.discountPercentage}% automatic membership benefit</span>
+                  </div>
+                </div>
+                <span className="text-xs font-black text-amber-700 bg-amber-100/80 px-2 py-1 rounded-lg shrink-0">
+                  -{specialBenefit.discountPercentage}%
+                </span>
+              </div>
+            )}
+
             {/* Invoicing summary */}
             <div className="bg-[#FCFAF7] border border-[#E5DCD5] p-3.5 rounded-2xl text-xs space-y-1.5 font-semibold text-[#756B64]">
               <div className="flex justify-between">
                 <span>Subtotal</span>
                 <span className="text-[#202124] font-bold">{formatPrice(cartSubtotal)}</span>
               </div>
+              {effectiveSpecialDiscount > 0 && (
+                <div className="flex justify-between text-emerald-600 font-bold">
+                  <span className="flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Special Member Discount ({specialBenefit?.discountPercentage}%)</span>
+                  </span>
+                  <span>-{formatPrice(effectiveSpecialDiscount)}</span>
+                </div>
+              )}
               <div className="flex justify-between">
                 <span>Taxes & Fees (5% GST)</span>
                 <span className="text-[#202124] font-bold">{formatPrice(gstCharge)}</span>

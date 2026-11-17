@@ -87,7 +87,7 @@ export async function resolveEligibleSpecialBenefit(
   }
 
   // Step 3: Query by verified email if not matched by phone or UID
-  if (!matchedDoc && normalizedEmail && emailVerified) {
+  if (!matchedDoc && normalizedEmail) {
     const emailQuery = await adminDb
       .collection('specialBenefits')
       .where('memberEmail', '==', normalizedEmail)

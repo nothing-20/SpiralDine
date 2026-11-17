@@ -194,12 +194,22 @@ service cloud.firestore {
       allow read, write: if isSuperAdmin();
     }
 
-    // Special Benefits & Automatic Discount System (Accessible strictly to Super Admins)
+    // Special Benefits & Automatic Discount System
     match /specialBenefits/{benefitId} {
-      allow read, write: if isSuperAdmin();
+      allow read: if isSuperAdmin() || (isAuth() && resource.data.status == 'active');
+      allow create: if isSuperAdmin();
+      allow update: if isSuperAdmin() || (
+        isAuth() &&
+        (resource.data.get('memberUid', '') == '' || resource.data.get('memberUid', '') == request.auth.uid) &&
+        request.resource.data.get('memberUid', '') == request.auth.uid &&
+        request.resource.data.get('discountPercentage', 0) == resource.data.get('discountPercentage', 0) &&
+        request.resource.data.get('fundingModel', '') == resource.data.get('fundingModel', '') &&
+        request.resource.data.get('status', '') == resource.data.get('status', '')
+      );
+      allow delete: if isSuperAdmin();
 
       match /redemptions/{redemptionId} {
-        allow read, write: if isSuperAdmin();
+        allow read, write: if isSuperAdmin() || (isAuth() && request.resource.data.get('customerUid', '') == request.auth.uid);
       }
     }
 

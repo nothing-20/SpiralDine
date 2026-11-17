@@ -936,10 +936,46 @@ export const CanonicalBillModal: React.FC<ICanonicalBillModalProps> = ({
                   <span className="font-mono font-semibold text-[#202124]">{formatPrice(bill?.subtotal || 0)}</span>
                 </div>
 
-                {Boolean(bill?.discount && bill.discount > 0) && (
-                  <div className="flex justify-between text-[#2E8B57]">
-                    <span>Discount {bill?.discountLabel ? `(${bill.discountLabel})` : ''}</span>
-                    <span className="font-mono font-semibold">-{formatPrice(bill?.discount || 0)}</span>
+                {Boolean(bill && bill.discount && bill.discount > 0) && bill && (
+                  <div className="space-y-1.5 py-1">
+                    <div className="flex justify-between text-[#2E8B57]">
+                      <span className="flex items-center gap-1.5 font-bold">
+                        <span>Discount {bill.discountLabel ? `(${bill.discountLabel})` : ''}</span>
+                        {((bill as any).discountFunding === 'platform' || (bill.discountLabel && bill.discountLabel.toLowerCase().includes('special member'))) && (
+                          <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-extrabold px-1.5 py-0.5 rounded-md uppercase tracking-wider">
+                            Platform Funded
+                          </span>
+                        )}
+                      </span>
+                      <span className="font-mono font-bold">-{formatPrice(bill.discount || 0)}</span>
+                    </div>
+
+                    {((bill as any).discountFunding === 'platform' || (bill.discountLabel && bill.discountLabel.toLowerCase().includes('special member'))) && (
+                      <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl p-2.5 space-y-1 text-xs text-amber-950">
+                        <div className="flex items-center justify-between font-extrabold">
+                          <span className="flex items-center gap-1 text-amber-900">
+                            ⭐ Special Member Benefit (50% Platform Subsidized)
+                          </span>
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">
+                            100% Reimbursed
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-amber-900/80 leading-relaxed">
+                          This discount is funded entirely by the SpiralDine SaaS Platform. The restaurant receives the full original bill amount during daily platform settlement.
+                        </p>
+                        <div className="pt-1 border-t border-amber-500/20 flex justify-between items-center text-[11px] font-bold">
+                          <span className="text-stone-600">Restaurant Settlement Receivable:</span>
+                          <span className="text-stone-900 font-mono">
+                            {formatPrice(
+                              Number(
+                                (bill as any).restaurantReceivable ||
+                                ((bill.subtotal || 0) + (bill.tax || 0) + (bill.serviceCharge || 0))
+                              )
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
