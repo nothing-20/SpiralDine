@@ -182,18 +182,15 @@ export async function dispatchCustomDomainPasswordReset(
 
     const resendFn = deps.sendResendMail ?? sendMailWithLogging;
     try {
-      const resendRes = await resendFn(
-        {
-          to: cleanRecipient,
-          subject,
-          html,
-          text,
-          from: resendFrom,
-          type: 'password_reset',
-          retries: 1,
-        },
-        {}
-      );
+      const resendRes = await resendFn({
+        to: cleanRecipient,
+        subject,
+        html,
+        text,
+        from: resendFrom,
+        type: 'password_reset',
+        retries: 1,
+      });
 
       if (resendRes.success) {
         return {
