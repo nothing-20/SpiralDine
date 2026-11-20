@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import { createRequire } from 'node:module';
 import {
   App,
   ServiceAccount,
@@ -8,7 +7,7 @@ import {
   getApps,
   initializeApp,
 } from 'firebase-admin/app';
-import type { Auth } from 'firebase-admin/auth';
+import { getAuth, type Auth } from 'firebase-admin/auth';
 import {
   FieldValue,
   Firestore,
@@ -280,18 +279,15 @@ export function getAdminDb(
   return getFirebaseAdmin(env).db;
 }
 
-const nodeRequire = createRequire(import.meta.url);
-
 export function getAdminAuth(
   env: Record<string, string | undefined> = process.env
 ): Auth {
   const admin = getFirebaseAdmin(env);
   if (!admin.auth) {
     try {
-      const { getAuth } = nodeRequire('firebase-admin/auth');
       admin.auth = getAuth(admin.app);
     } catch (err) {
-      console.warn('[firebaseAdmin] firebase-admin/auth could not be loaded dynamically:', err);
+      console.warn('[firebaseAdmin] Failed to initialize firebase-admin/auth:', err);
       throw err;
     }
   }

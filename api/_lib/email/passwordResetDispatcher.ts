@@ -44,6 +44,9 @@ export function buildCustomDomainResetLink(
   rawActionLink: string,
   appPublicUrl?: string
 ): string {
+  if (!rawActionLink || typeof rawActionLink !== 'string') {
+    return '';
+  }
   const safeBase =
     appPublicUrl && appPublicUrl.trim() && appPublicUrl !== 'undefined' && appPublicUrl !== 'null'
       ? appPublicUrl.trim()
@@ -60,12 +63,12 @@ export function buildCustomDomainResetLink(
   }
 
   // If already pointing to /reset-password on publicUrl, return cleanBase URL
-  if (rawActionLink.startsWith(cleanBase)) {
+  if (rawActionLink && rawActionLink.startsWith(cleanBase)) {
     return rawActionLink;
   }
 
   // Fallback if no oobCode query param present
-  return rawActionLink;
+  return rawActionLink || '';
 }
 
 function createNodemailerTransport(config: SmtpContactConfig): Transporter {

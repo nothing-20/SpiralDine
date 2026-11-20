@@ -136,6 +136,9 @@ export default async function handler(
         }
       }
     }
+    if (!rawActionLink) {
+      throw new Error('Action link was not generated.');
+    }
   } catch (err: unknown) {
     const errObj = (err && typeof err === 'object' ? err : {}) as Record<string, unknown>;
     const code = String(errObj.code || '');
