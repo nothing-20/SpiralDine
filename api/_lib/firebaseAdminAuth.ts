@@ -284,15 +284,25 @@ export async function generateFirebaseAuthResetLink(
     }
   );
 
-  const data = await res.json();
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
-    const err = new Error(data.error?.message || 'Failed to generate password reset link.');
-    (err as unknown as Record<string, unknown>).code = data.error?.message;
+    const errorObj = (data.error && typeof data.error === 'object' ? data.error : {}) as Record<string, unknown>;
+    const errorMsg = String(errorObj.message || data.error || 'Failed to generate password reset link.');
+    const err = new Error(errorMsg);
+    (err as unknown as Record<string, unknown>).code = errorMsg;
     throw err;
   }
 
+  const oobCode = typeof data.oobCode === 'string' ? data.oobCode : '';
+  const oobLink =
+    typeof data.oobLink === 'string' && data.oobLink
+      ? data.oobLink
+      : oobCode
+      ? `${continueUrl}?oobCode=${encodeURIComponent(oobCode)}`
+      : '';
+
   return {
-    oobCode: data.oobCode,
-    oobLink: data.oobLink,
+    oobCode,
+    oobLink,
   };
 }

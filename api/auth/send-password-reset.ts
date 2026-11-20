@@ -127,7 +127,11 @@ export default async function handler(
         cleanEmail,
         actionCodeSettings.url
       );
-      rawActionLink = restResult.oobLink;
+      rawActionLink =
+        restResult.oobLink ||
+        (restResult.oobCode
+          ? `${actionCodeSettings.url}?oobCode=${encodeURIComponent(restResult.oobCode)}`
+          : '');
     }
     if (!rawActionLink) {
       throw new Error('Action link was not generated.');

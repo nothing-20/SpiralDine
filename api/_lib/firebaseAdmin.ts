@@ -48,7 +48,7 @@ export interface ResolvedAdminConfig {
 
 export interface FirebaseAdminBundle {
   app: App;
-  auth?: Auth;
+  auth?: unknown;
   db: Firestore;
   FieldValue: typeof FieldValue;
   Timestamp: typeof Timestamp;
