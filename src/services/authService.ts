@@ -32,6 +32,22 @@ export const authService = {
     return firebaseAuth.resetPassword(email);
   },
 
+  async verifyPasswordResetCode(actionCode: string): Promise<string> {
+    return firebaseAuth.verifyPasswordResetCode(actionCode);
+  },
+
+  async confirmPasswordReset(actionCode: string, newPassword: string): Promise<void> {
+    return firebaseAuth.confirmPasswordReset(actionCode, newPassword);
+  },
+
+  async applyActionCode(actionCode: string): Promise<void> {
+    return firebaseAuth.applyActionCode(actionCode);
+  },
+
+  async checkActionCode(actionCode: string): Promise<any> {
+    return firebaseAuth.checkActionCode(actionCode);
+  },
+
   async signOutUser(): Promise<void> {
     return firebaseAuth.signOut();
   },

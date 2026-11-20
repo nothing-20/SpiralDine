@@ -1,21 +1,6 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, collection, addDoc } from 'firebase/firestore';
 import { Resend } from 'resend';
+import { getAdminDb } from './firebaseAdmin.js';
 
-const firebaseConfig = {
-  apiKey: process.env.VITE_FIREBASE_API_KEY || 'AIzaSyCKE7c57Boi_5dpK53FaZOtTu6m6Kz1vHg',
-  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN || 'spiral-restaurant-saas-v1.firebaseapp.com',
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'spiral-restaurant-saas-v1',
-  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET || 'spiral-restaurant-saas-v1.firebasestorage.app',
-  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '917630391162',
-  appId: process.env.VITE_FIREBASE_APP_ID || '1:917630391162:web:6e4c127734b84ca6977cc3',
-};
-
-// Initialize Firebase App
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
-export const db = getFirestore(app);
-
-// Safe Resend API Key resolver
 const getResendApiKey = (): string | null => {
   const key = process.env.RESEND_API_KEY;
   if (!key) {
@@ -26,83 +11,185 @@ const getResendApiKey = (): string | null => {
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface SendMailOptions {
   to: string;
   subject: string;
   html: string;
+  text?: string;
+  from?: string;
   tenantId?: string;
   type: string;
   retries?: number;
 }
 
+export interface SendMailResult {
+  success: boolean;
+  id?: string;
+  error?: string;
+  errorCategory?: 'domain_verification_required' | 'provider_error' | 'config_missing';
+  statusCode?: number;
+  isDomainRestriction?: boolean;
+}
+
+interface ResendMailPayload {
+  from: string;
+  to: string[];
+  subject: string;
+  html: string;
+  text?: string;
+}
+
+interface ProviderError extends Error {
+  statusCode?: number;
+  status?: number;
+}
+
+export interface SendMailDependencies {
+  sendEmail?: (
+    payload: ResendMailPayload,
+    apiKey: string
+  ) => Promise<{
+    data?: { id?: string } | null;
+    error?: { message: string; name?: string; statusCode?: number | null } | null;
+  }>;
+  writeLog?: (entry: Record<string, unknown>) => Promise<void>;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+async function defaultWriteEmailLog(entry: Record<string, unknown>): Promise<void> {
+  await getAdminDb().collection('emailLogs').add(entry);
+}
+
+async function defaultSendEmail(
+  payload: ResendMailPayload,
+  apiKey: string
+): Promise<{
+  data?: { id?: string } | null;
+  error?: { message: string; name?: string; statusCode?: number | null } | null;
+}> {
+  const resend = new Resend(apiKey);
+  return resend.emails.send(payload);
+}
+
 export const sendMailWithLogging = async (
-  options: SendMailOptions
-): Promise<{ success: boolean; id?: string; error?: string }> => {
-  const { to, subject, html, tenantId, type } = options;
+  options: SendMailOptions,
+  deps: SendMailDependencies = {}
+): Promise<SendMailResult> => {
+  const { to, subject, html, text, from, tenantId, type } = options;
   const retriesLeft = options.retries ?? MAX_RETRIES;
   const timestamp = new Date().toISOString();
 
   const apiKey = getResendApiKey();
   if (!apiKey) {
     console.warn('[Vercel API] RESEND_API_KEY is not configured. Email dispatch skipped.');
-    return { success: false, error: 'RESEND_API_KEY is not configured on the server.' };
+    return {
+      success: false,
+      error: 'RESEND_API_KEY is not configured on the server.',
+      errorCategory: 'config_missing',
+      statusCode: 500,
+    };
   }
 
-  try {
-    const resend = new Resend(apiKey);
+  const sendFn = deps.sendEmail ?? defaultSendEmail;
+  const logFn = deps.writeLog ?? defaultWriteEmailLog;
+  const sleepFn = deps.sleep ?? delay;
 
-    const response = await resend.emails.send({
-      from: 'Spiral Dine <onboarding@resend.dev>',
-      to: [to],
-      subject: subject,
-      html: html,
-    });
+  const fromAddress = from || process.env.RESEND_FROM_EMAIL || 'Spiral Dine <onboarding@resend.dev>';
+  const mailPayload: ResendMailPayload = {
+    from: fromAddress,
+    to: [to],
+    subject,
+    html,
+  };
+  if (text) {
+    mailPayload.text = text;
+  }
+
+  let emailId: string | undefined;
+
+  try {
+    const response = await sendFn(mailPayload, apiKey);
 
     if (response.error) {
-      throw new Error(response.error.message);
+      const customErr: ProviderError = new Error(response.error.message);
+      customErr.name = response.error.name || 'ResendError';
+      customErr.statusCode = response.error.statusCode || 500;
+      throw customErr;
     }
 
-    // Task 9: Log success in Firestore emailLogs
-    await addDoc(collection(db, 'emailLogs'), {
-      recipient: to,
-      subject: subject,
-      tenant: tenantId || null,
-      status: 'success',
-      provider: 'resend',
-      timestamp: timestamp,
-      type: type,
-      emailId: response.data?.id || null,
-      error: null,
-    });
+    emailId = response.data?.id;
+  } catch (err: unknown) {
+    const providerErr = err as ProviderError;
+    const errMsg = providerErr?.message || 'Unknown Resend API error';
+    const statusCode = providerErr?.statusCode || providerErr?.status || 500;
+    const lowerErr = errMsg.toLowerCase();
+    const isDomainRestriction = Boolean(
+      (statusCode === 403 || statusCode === 422) &&
+        (lowerErr.includes('verify a domain') ||
+          lowerErr.includes('testing emails to your own email address') ||
+          lowerErr.includes('testing email address instead of domains') ||
+          lowerErr.includes('validation_error'))
+    );
 
-    return { success: true, id: response.data?.id };
-  } catch (err: any) {
-    const errMsg = err.message || 'Unknown Resend API error';
-    console.warn(`[Vercel API] Failed to send email (${retriesLeft} retries remaining): ${errMsg}`);
+    console.warn(
+      `[Vercel API] Email dispatch error (status: ${statusCode}, domainRestriction: ${isDomainRestriction}): ${errMsg}`
+    );
 
-    if (retriesLeft > 0) {
-      await delay(RETRY_DELAY_MS);
-      return sendMailWithLogging({ ...options, retries: retriesLeft - 1 });
+    const isRetryable =
+      !isDomainRestriction && statusCode !== 401 && statusCode !== 403 && statusCode !== 422;
+
+    if (retriesLeft > 0 && isRetryable) {
+      await sleepFn(RETRY_DELAY_MS);
+      return sendMailWithLogging({ ...options, retries: retriesLeft - 1 }, deps);
     }
 
-    // Task 9 & 12: Log failure in Firestore emailLogs on final retry exhaust
+    const category = isDomainRestriction ? 'domain_verification_required' : 'provider_error';
+
+    // Isolate Firestore failure logging so logging errors cannot affect return shape or cause retries
     try {
-      await addDoc(collection(db, 'emailLogs'), {
+      await logFn({
         recipient: to,
-        subject: subject,
+        subject,
         tenant: tenantId || null,
         status: 'failed',
         provider: 'resend',
-        timestamp: timestamp,
-        type: type,
+        timestamp,
+        type,
         error: errMsg,
+        errorCategory: category,
+        statusCode,
       });
     } catch (logErr) {
       console.error('[Vercel API] Failed to write failure log to Firestore:', logErr);
     }
 
-    return { success: false, error: errMsg };
+    return {
+      success: false,
+      error: errMsg,
+      errorCategory: category,
+      statusCode,
+      isDomainRestriction,
+    };
   }
+
+  // Isolate Firestore success logging AFTER dispatch succeeds so logging errors never trigger duplicate sends
+  try {
+    await logFn({
+      recipient: to,
+      subject,
+      tenant: tenantId || null,
+      status: 'success',
+      provider: 'resend',
+      timestamp,
+      type,
+      emailId: emailId || null,
+      error: null,
+    });
+  } catch (logErr) {
+    console.error('[Vercel API] Email sent, but failed to write success log to Firestore:', logErr);
+  }
+
+  return { success: true, id: emailId };
 };

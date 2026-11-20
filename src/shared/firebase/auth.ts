@@ -16,7 +16,13 @@ import {
   ApplicationVerifier,
   linkWithPhoneNumber,
   linkWithCredential,
-  EmailAuthProvider
+  EmailAuthProvider,
+  ActionCodeSettings,
+  verifyPasswordResetCode as firebaseVerifyPasswordResetCode,
+  confirmPasswordReset as firebaseConfirmPasswordReset,
+  applyActionCode as firebaseApplyActionCode,
+  checkActionCode as firebaseCheckActionCode,
+  ActionCodeInfo
 } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { auth, db } from './config';
@@ -219,8 +225,69 @@ export const signUpCustomer = async (
   return userCredential;
 };
 
-export const resetPassword = async (email: string): Promise<void> => {
-  return sendPasswordResetEmail(auth, email);
+export const getResetActionCodeSettings = (): ActionCodeSettings => {
+  const origin = typeof window !== 'undefined' && window.location.origin
+    ? window.location.origin
+    : 'https://dine.spiralworld.in';
+  return {
+    url: `${origin}/reset-password`,
+    handleCodeInApp: true,
+  };
+};
+
+export const resetPassword = async (
+  email: string,
+  _actionCodeSettings?: ActionCodeSettings
+): Promise<void> => {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail) {
+    const err = new Error('Email address is required.');
+    (err as unknown as Record<string, unknown>).code = 'auth/invalid-email';
+    throw err;
+  }
+
+  const response = await fetch('/api/auth/send-password-reset', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email: cleanEmail }),
+  });
+
+  const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+
+  if (!response.ok) {
+    const message =
+      typeof data.error === 'string'
+        ? data.error
+        : typeof data.message === 'string'
+        ? data.message
+        : 'Failed to dispatch password reset email.';
+    const err = new Error(message);
+    (err as unknown as Record<string, unknown>).code =
+      typeof data.code === 'string'
+        ? data.code
+        : response.status === 429
+        ? 'auth/too-many-requests'
+        : 'auth/internal-error';
+    throw err;
+  }
+};
+
+export const verifyPasswordResetCode = async (actionCode: string): Promise<string> => {
+  return firebaseVerifyPasswordResetCode(auth, actionCode);
+};
+
+export const confirmPasswordReset = async (actionCode: string, newPassword: string): Promise<void> => {
+  return firebaseConfirmPasswordReset(auth, actionCode, newPassword);
+};
+
+export const applyActionCode = async (actionCode: string): Promise<void> => {
+  return firebaseApplyActionCode(auth, actionCode);
+};
+
+export const checkActionCode = async (actionCode: string): Promise<ActionCodeInfo> => {
+  return firebaseCheckActionCode(auth, actionCode);
 };
 
 export const signOut = async (): Promise<void> => {

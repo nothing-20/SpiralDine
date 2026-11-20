@@ -1,6 +1,7 @@
 # Vercel deployment ignore file
-# Exclude health check lambda to comply with Vercel Hobby plan 12-function limit
+# Exclude health check lambda and static invitation stub to comply with Vercel Hobby plan 12-function limit
 api/health.ts
+api/verify-invitation.ts
 
 # Exclude Android native project and Gradle artifacts (saves ~250MB per upload)
 android/
