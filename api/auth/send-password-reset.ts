@@ -128,6 +128,15 @@ export default async function handler(
         actionCodeSettings.url
       );
       console.info('[send-password-reset restResult]', JSON.stringify(restResult));
+      if (!restResult.oobCode && !restResult.oobLink) {
+        // Firebase Email Enumeration Protection: user does not exist in Auth.
+        // Return standard success to protect account privacy without dispatching email.
+        console.info(`[send-password-reset] Reset requested for non-existent user: ${cleanEmail}`);
+        return res.status(200).json({
+          success: true,
+          message: 'If an account is associated with this email, password reset instructions have been sent.',
+        });
+      }
       rawActionLink =
         restResult.oobLink ||
         (restResult.oobCode
