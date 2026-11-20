@@ -237,14 +237,22 @@ export const CustomerLogin: React.FC = () => {
 
       if (err.code === 'auth/invalid-phone-number') {
         friendlyError = 'Invalid mobile phone number format. Please check the country code and number.';
+      } else if (err.code === 'auth/operation-not-allowed') {
+        friendlyError = 'Phone sign-in is not enabled in Firebase Console. Please enable Phone provider in Firebase Authentication -> Sign-in method.';
+      } else if (err.code === 'auth/unauthorized-domain' || err.code === 'auth/app-not-authorized') {
+        friendlyError = 'Domain dine.spiralworld.in is not authorized in Firebase. Please add it to Firebase Console -> Authentication -> Settings -> Authorized Domains.';
       } else if (err.code === 'auth/too-many-requests') {
         friendlyError = 'Too many requests. Please wait a few minutes before trying again.';
       } else if (err.code === 'auth/quota-exceeded') {
         friendlyError = 'SMS quota exceeded for this Firebase project. Contact administrator.';
+      } else if (err.code === 'auth/billing-not-enabled') {
+        friendlyError = 'Phone authentication requires SMS configuration in Firebase. Please sign in with email or contact administrator.';
       } else if (err.code === 'auth/captcha-check-failed' || err.message?.includes('reCAPTCHA')) {
         friendlyError = 'Security verification failed. Please try again.';
         // Reset verifier so subsequent attempt has a clean challenge
         recaptchaManagerRef.current?.destroy();
+      } else if (err.code === 'auth/internal-error') {
+        friendlyError = 'Firebase security verification error. Please ensure dine.spiralworld.in is added to Authorized Domains and Phone provider is enabled in Firebase Console.';
       } else if (err.message) {
         friendlyError = err.message;
       }
