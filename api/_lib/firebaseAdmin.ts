@@ -7,7 +7,6 @@ import {
   getApps,
   initializeApp,
 } from 'firebase-admin/app';
-import { getAuth, type Auth } from 'firebase-admin/auth';
 import {
   FieldValue,
   Firestore,
@@ -279,24 +278,6 @@ export function getAdminDb(
   return getFirebaseAdmin(env).db;
 }
 
-export function getAdminAuth(
-  env: Record<string, string | undefined> = process.env
-): Auth {
-  const admin = getFirebaseAdmin(env);
-  if (!admin.auth) {
-    try {
-      admin.auth = getAuth(admin.app);
-    } catch (err) {
-      console.warn('[firebaseAdmin] Failed to initialize firebase-admin/auth:', err);
-      throw err;
-    }
-  }
-  if (!admin.auth) {
-    throw new FirebaseAdminInitError('INIT_FAILED', 'Firebase Auth could not be initialized.');
-  }
-  return admin.auth;
-}
-
 function createLazyAdminProxy<T extends object>(resolveTarget: () => T): T {
   return new Proxy({} as T, {
     get(_unused, prop) {
@@ -311,6 +292,5 @@ function createLazyAdminProxy<T extends object>(resolveTarget: () => T): T {
 }
 
 export const adminDb: Firestore = createLazyAdminProxy<Firestore>(() => getAdminDb());
-export const adminAuth: Auth = createLazyAdminProxy<Auth>(() => getAdminAuth());
 
 export { FieldValue, Timestamp };

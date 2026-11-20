@@ -1,6 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { enforceRateLimit } from '../_lib/rateLimiter.js';
-import { adminAuth } from '../_lib/firebaseAdmin.js';
 import {
   getServiceAccountCredentials,
   generateFirebaseAuthResetLink,
@@ -119,22 +118,16 @@ export default async function handler(
     if (deps.generateResetLink) {
       rawActionLink = await deps.generateResetLink(cleanEmail, actionCodeSettings);
     } else {
-      try {
-        rawActionLink = await adminAuth.generatePasswordResetLink(cleanEmail, actionCodeSettings);
-      } catch (adminErr: unknown) {
-        // Fallback to Google REST API if adminAuth failed or creds are raw
-        const creds = getServiceAccountCredentials();
-        if (creds) {
-          const restResult = await generateFirebaseAuthResetLink(
-            creds,
-            cleanEmail,
-            actionCodeSettings.url
-          );
-          rawActionLink = restResult.oobLink;
-        } else {
-          throw adminErr;
-        }
+      const creds = getServiceAccountCredentials();
+      if (!creds) {
+        throw new Error('Missing Firebase Admin service account credentials. Configure FIREBASE_SERVICE_ACCOUNT in production environment.');
       }
+      const restResult = await generateFirebaseAuthResetLink(
+        creds,
+        cleanEmail,
+        actionCodeSettings.url
+      );
+      rawActionLink = restResult.oobLink;
     }
     if (!rawActionLink) {
       throw new Error('Action link was not generated.');
