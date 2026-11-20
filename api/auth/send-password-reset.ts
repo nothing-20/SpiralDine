@@ -127,6 +127,7 @@ export default async function handler(
         cleanEmail,
         actionCodeSettings.url
       );
+      console.info('[send-password-reset restResult]', JSON.stringify(restResult));
       rawActionLink =
         restResult.oobLink ||
         (restResult.oobCode

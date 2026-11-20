@@ -285,6 +285,7 @@ export async function generateFirebaseAuthResetLink(
   );
 
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  console.info('[sendOobCode raw response]', res.status, JSON.stringify(data));
   if (!res.ok) {
     const errorObj = (data.error && typeof data.error === 'object' ? data.error : {}) as Record<string, unknown>;
     const errorMsg = String(errorObj.message || data.error || 'Failed to generate password reset link.');
