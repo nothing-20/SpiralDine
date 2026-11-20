@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { assertServerProjectSafe, resolveOptionalServerProjectId } from './firebaseEnv.js';
 
 /**
  * Lightweight, zero-dependency Firebase Authentication Admin client using standard Google REST API.
@@ -16,39 +17,53 @@ interface ServiceAccountCredentials {
 }
 
 export function getServiceAccountCredentials(): ServiceAccountCredentials | null {
-  const projectId = 
-    process.env.FIREBASE_PROJECT_ID || 
-    process.env.VITE_FIREBASE_PROJECT_ID || 
-    'spiral-restaurant-saas-v1';
+  const configuredProjectId = resolveOptionalServerProjectId(process.env);
 
   // 1. Parse FIREBASE_SERVICE_ACCOUNT
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     try {
-      let raw = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
-      let parsed: any;
+      const raw = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+      let parsed: Record<string, string | undefined>;
       if (raw.startsWith('{')) {
-        parsed = JSON.parse(raw);
+        parsed = JSON.parse(raw) as Record<string, string | undefined>;
       } else {
         const decoded = Buffer.from(raw, 'base64').toString('utf-8');
-        parsed = JSON.parse(decoded);
+        parsed = JSON.parse(decoded) as Record<string, string | undefined>;
       }
 
       if (parsed.client_email && parsed.private_key) {
+        const resolvedProjectId = parsed.project_id || configuredProjectId;
+        if (!resolvedProjectId) {
+          throw new Error(
+            '[firebaseAdminAuth] Service account credentials lack project_id and neither FIREBASE_PROJECT_ID nor VITE_FIREBASE_PROJECT_ID is configured.'
+          );
+        }
+        assertServerProjectSafe(resolvedProjectId, '', '', process.env);
         return {
-          projectId: parsed.project_id || projectId,
+          projectId: resolvedProjectId,
           clientEmail: parsed.client_email,
           privateKey: parsed.private_key,
         };
       }
-    } catch (err: any) {
-      console.warn('[firebaseAdminAuth] Could not parse FIREBASE_SERVICE_ACCOUNT:', err?.message);
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : '';
+      if (errMsg.includes('[firebaseAdminAuth]') || errMsg.includes('[firebaseEnv]')) {
+        throw err;
+      }
+      console.warn('[firebaseAdminAuth] Could not parse FIREBASE_SERVICE_ACCOUNT:', errMsg);
     }
   }
 
   // 2. Individual env variables
   if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+    if (!configuredProjectId) {
+      throw new Error(
+        '[firebaseAdminAuth] FIREBASE_PROJECT_ID or VITE_FIREBASE_PROJECT_ID must be explicitly configured when using FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY.'
+      );
+    }
+    assertServerProjectSafe(configuredProjectId, '', '', process.env);
     return {
-      projectId,
+      projectId: configuredProjectId,
       clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
       privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
     };
@@ -149,7 +164,7 @@ export async function createFirebaseAuthUser(
 export async function lookupFirebaseAuthUser(
   creds: ServiceAccountCredentials, 
   email: string
-): Promise<{ uid: string; email: string; customAttributes?: any } | null> {
+): Promise<{ uid: string; email: string; customAttributes?: Record<string, unknown> } | null> {
   const token = await getGoogleAccessToken(creds);
 
   const res = await fetch(`https://identitytoolkit.googleapis.com/v1/projects/${creds.projectId}/accounts:lookup`, {
@@ -220,7 +235,7 @@ export async function updateFirebaseAuthUser(
 export async function setFirebaseAuthCustomClaims(
   creds: ServiceAccountCredentials,
   uid: string,
-  claims: Record<string, any>
+  claims: Record<string, unknown>
 ): Promise<void> {
   const token = await getGoogleAccessToken(creds);
 
@@ -240,4 +255,44 @@ export async function setFirebaseAuthCustomClaims(
     const data = await res.json();
     throw new Error(data.error?.message || 'Failed to assign custom claims to user.');
   }
+}
+
+/**
+ * Generate password reset link via Google Identity Toolkit REST API
+ */
+export async function generateFirebaseAuthResetLink(
+  creds: ServiceAccountCredentials,
+  email: string,
+  continueUrl: string
+): Promise<{ oobCode: string; oobLink: string }> {
+  const token = await getGoogleAccessToken(creds);
+
+  const res = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/projects/${creds.projectId}/accounts:sendOobCode`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        requestType: 'PASSWORD_RESET',
+        email,
+        returnOobLink: true,
+        continueUrl,
+      }),
+    }
+  );
+
+  const data = await res.json();
+  if (!res.ok) {
+    const err = new Error(data.error?.message || 'Failed to generate password reset link.');
+    (err as unknown as Record<string, unknown>).code = data.error?.message;
+    throw err;
+  }
+
+  return {
+    oobCode: data.oobCode,
+    oobLink: data.oobLink,
+  };
 }

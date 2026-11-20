@@ -1,4 +1,4 @@
-import { User, UserCredential } from 'firebase/auth';
+import { User, UserCredential, ActionCodeSettings, ActionCodeInfo } from 'firebase/auth';
 import { TUserRole } from '../types';
 import * as firebaseAuth from '../firebase/auth';
 
@@ -71,12 +71,37 @@ export const authService = {
 
   /**
    * Triggers a password reset email for the given email address.
-   * 
-   * @param email - The email address to reset the password for.
-   * @returns A promise that resolves when the reset email is sent.
    */
-  async resetPassword(email: string): Promise<void> {
-    return firebaseAuth.resetPassword(email);
+  async resetPassword(email: string, actionCodeSettings?: ActionCodeSettings): Promise<void> {
+    return firebaseAuth.resetPassword(email, actionCodeSettings);
+  },
+
+  /**
+   * Verifies a password reset oobCode and retrieves the associated email.
+   */
+  async verifyPasswordResetCode(actionCode: string): Promise<string> {
+    return firebaseAuth.verifyPasswordResetCode(actionCode);
+  },
+
+  /**
+   * Confirms a password reset with the valid oobCode and new password.
+   */
+  async confirmPasswordReset(actionCode: string, newPassword: string): Promise<void> {
+    return firebaseAuth.confirmPasswordReset(actionCode, newPassword);
+  },
+
+  /**
+   * Applies an action code to verify email or complete account recovery.
+   */
+  async applyActionCode(actionCode: string): Promise<void> {
+    return firebaseAuth.applyActionCode(actionCode);
+  },
+
+  /**
+   * Checks the validity and metadata of a Firebase action code.
+   */
+  async checkActionCode(actionCode: string): Promise<ActionCodeInfo> {
+    return firebaseAuth.checkActionCode(actionCode);
   },
 
   /**
