@@ -84,7 +84,64 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
           const applyProfileUpdate = async () => {
             try {
-              // 1. Staff/Owner in users/{uid} takes precedence
+              const isCustomerRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/customer');
+
+              // 1. If currently in customer portal, customer profile takes precedence if present
+              if (isCustomerRoute && latestCustExists && latestCustData) {
+                const data = latestCustData;
+                const resolvedUser: IUser = {
+                  uid: fUser.uid,
+                  email: (fUser.email || data.email || '').toLowerCase(),
+                  displayName: data.fullName || data.displayName || fUser.displayName || 'Customer',
+                  tenantId: data.tenantId || '',
+                  role: 'customer' as TUserRole,
+                  status: (data.status === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
+                  phoneNumber: data.phoneNumber || data.phone || '',
+                  createdAt: data.createdAt || fUser.metadata.creationTime || new Date().toISOString()
+                };
+
+                console.log('[AUTH Context] Profile loaded via customers snapshot (customer portal context):', {
+                  uid: resolvedUser.uid,
+                  role: resolvedUser.role
+                });
+
+                setUser(resolvedUser);
+                setRole('customer');
+                setTenantId(resolvedUser.tenantId);
+                setProfileError(null);
+                setIsLoading(false);
+                setAuthStatus('AUTHORIZED');
+                return;
+              }
+
+              // 1b. If currently in customer portal and diner doc does not exist yet, auto-provision from user doc
+              if (isCustomerRoute && !latestCustExists && latestUserExists && latestUserData) {
+                const cleanEmail = (fUser.email || latestUserData.email || '').toLowerCase().trim();
+                const displayName = latestUserData.fullName || latestUserData.displayName || fUser.displayName || 'Diner';
+                try {
+                  const custRef = doc(db, 'customers', fUser.uid);
+                  await setDoc(custRef, {
+                    uid: fUser.uid,
+                    fullName: displayName,
+                    displayName,
+                    email: cleanEmail,
+                    role: 'customer' as TUserRole,
+                    tenantId: null,
+                    phoneNumber: fUser.phoneNumber || latestUserData.phoneNumber || '',
+                    walletBalance: 0,
+                    loyaltyPoints: 0,
+                    status: 'active',
+                    isAnonymous: false,
+                    tier: 'bronze',
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                  }, { merge: true });
+                } catch (autoCustErr) {
+                  console.warn('[AUTH Context] Note auto-provisioning diner profile:', autoCustErr);
+                }
+              }
+
+              // 2. Staff/Owner in users/{uid} takes precedence for non-customer portals
               if (latestUserExists && latestUserData?.role && latestUserData.role !== 'customer') {
                 const data = latestUserData;
                 let roleCandidate = data.role;
@@ -121,7 +178,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 return;
               }
 
-              // 2. Customer in customers/{uid}
+              // 3. Customer in customers/{uid} (fallback when outside customer route or only customer profile exists)
               if (latestCustExists && latestCustData) {
                 const data = latestCustData;
                 const resolvedUser: IUser = {

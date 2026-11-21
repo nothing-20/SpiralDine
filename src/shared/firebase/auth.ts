@@ -583,7 +583,7 @@ export const signUpOwnerWithGoogle = async (
 
 /**
  * Onboards or logs in a customer diner using Google authentication.
- * If user has staff/owner credentials, reports it so the user can be directed to the business portal.
+ * Guarantees a customer diner profile in customers/{uid} is always created or refreshed.
  */
 export const signInOrRegisterCustomerWithGoogle = async (
   googleUser: User,
@@ -593,50 +593,37 @@ export const signInOrRegisterCustomerWithGoogle = async (
     throw new Error('Google user is required.');
   }
 
-  // 1. Check if user already has an owner or staff account in users/{uid}
-  const userRef = doc(db, 'users', googleUser.uid);
-  const userSnap = await getDoc(userRef);
-  if (userSnap.exists()) {
-    const userData = userSnap.data();
-    if (userData.role && userData.role !== 'customer') {
-      return {
-        uid: googleUser.uid,
-        role: userData.role as TUserRole,
-        isStaff: true
-      };
-    }
-  }
-
-  // 2. Check if customer profile exists in customers/{uid}
-  const customerRef = doc(db, 'customers', googleUser.uid);
-  const custSnap = await getDoc(customerRef);
-  if (custSnap.exists()) {
-    return {
-      uid: googleUser.uid,
-      role: 'customer' as TUserRole,
-      isStaff: false
-    };
-  }
-
-  // 3. Create new customer profile
   const cleanEmail = (googleUser.email || '').toLowerCase().trim();
   const displayName = googleUser.displayName || cleanEmail.split('@')[0] || 'Customer';
 
-  await setDoc(customerRef, {
-    uid: googleUser.uid,
-    fullName: displayName,
-    displayName,
-    email: cleanEmail,
-    role: 'customer' as TUserRole,
-    tenantId: null,
-    phoneNumber: phoneNumber?.trim() || googleUser.phoneNumber || '',
-    walletBalance: 0,
-    loyaltyPoints: 0,
-    status: 'active',
-    isAnonymous: false,
-    updatedAt: new Date().toISOString(),
-    createdAt: new Date().toISOString()
-  }, { merge: true });
+  // Ensure customer profile exists or is merged in customers/{uid}
+  const customerRef = doc(db, 'customers', googleUser.uid);
+  const custSnap = await getDoc(customerRef);
+
+  if (!custSnap.exists()) {
+    await setDoc(customerRef, {
+      uid: googleUser.uid,
+      fullName: displayName,
+      displayName,
+      email: cleanEmail,
+      role: 'customer' as TUserRole,
+      tenantId: null,
+      phoneNumber: phoneNumber?.trim() || googleUser.phoneNumber || '',
+      walletBalance: 0,
+      loyaltyPoints: 0,
+      status: 'active',
+      isAnonymous: false,
+      authProvider: 'google.com',
+      tier: 'bronze',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+  } else {
+    await setDoc(customerRef, {
+      lastLoginAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+  }
 
   return {
     uid: googleUser.uid,

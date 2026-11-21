@@ -62,13 +62,7 @@ export const CustomerRegister: React.FC = () => {
         const result = await authService.getGoogleRedirectResult();
         if (result?.user && isMounted) {
           setIsLoadingGoogle(true);
-          const res = await authService.signInOrRegisterCustomerWithGoogle(result.user);
-          if (res.isStaff) {
-            const destination = getDashboardRoute(res.role);
-            toast.success(`Welcome back, ${result.user.displayName || 'Owner'}!`);
-            navigate(destination, { replace: true });
-            return;
-          }
+          await authService.signInOrRegisterCustomerWithGoogle(result.user);
           toast.success('Account connected successfully! Welcome to Spiral Dine.');
           navigate('/customer/restaurants');
         }
@@ -114,13 +108,7 @@ export const CustomerRegister: React.FC = () => {
 
     try {
       const cred = await authService.signInWithGoogle();
-      const res = await authService.signInOrRegisterCustomerWithGoogle(cred.user);
-      if (res.isStaff) {
-        const destination = getDashboardRoute(res.role);
-        toast.success(`Welcome back, ${cred.user.displayName || 'Owner'}!`);
-        navigate(destination, { replace: true });
-        return;
-      }
+      await authService.signInOrRegisterCustomerWithGoogle(cred.user);
       toast.success('Account connected successfully! Welcome to Spiral Dine.');
       navigate('/customer/restaurants');
     } catch (e: any) {
@@ -314,13 +302,7 @@ export const CustomerRegister: React.FC = () => {
         onClose={() => setLinkingModalState({ isOpen: false, email: '', credential: null })}
         onSuccess={async (linkedUser) => {
           setLinkingModalState({ isOpen: false, email: '', credential: null });
-          const res = await authService.signInOrRegisterCustomerWithGoogle(linkedUser);
-          if (res.isStaff) {
-            const destination = getDashboardRoute(res.role);
-            toast.success(`Welcome back, ${linkedUser.displayName || 'Owner'}!`);
-            navigate(destination, { replace: true });
-            return;
-          }
+          await authService.signInOrRegisterCustomerWithGoogle(linkedUser);
           toast.success('Account connected successfully! Welcome to Spiral Dine.');
           navigate('/customer/restaurants');
         }}

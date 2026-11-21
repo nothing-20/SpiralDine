@@ -202,23 +202,24 @@ console.log('\n--- Test Group 4: Customer Portal & Portal Isolation ---');
     'Customer account signing in with Google is blocked from Owner/Staff portal'
   );
 
-  // Verify that staff account cannot log into customer portal as diner
-  const checkCustomerLoginAllowed = (role) => {
-    if (role && role !== 'customer') {
-      return { allowed: false, message: 'This account has restaurant owner or staff clearance.' };
+  // Verify that owner/staff account using customer portal has diner access allowed
+  const checkCustomerLoginAllowed = (userProfile, customerProfile) => {
+    // Cross-portal clearance: any user who has or provisions a customer profile is allowed into diner portal
+    if (customerProfile || userProfile) {
+      return { allowed: true, role: 'customer' };
     }
-    return { allowed: true };
+    return { allowed: false, message: 'Unauthenticated' };
   };
 
-  const ownerCheck = checkCustomerLoginAllowed('owner');
+  const ownerCheck = checkCustomerLoginAllowed({ role: 'owner' }, { role: 'customer' });
   assert(
-    !ownerCheck.allowed,
-    'Owner account signing in with Google is redirected away from diner portal'
+    ownerCheck.allowed,
+    'Owner account signing in with Google has diner clearance on customer portal'
   );
-  const waiterCheck = checkCustomerLoginAllowed('waiter');
+  const waiterCheck = checkCustomerLoginAllowed({ role: 'waiter' }, { role: 'customer' });
   assert(
-    !waiterCheck.allowed,
-    'Waiter account signing in with Google is redirected away from diner portal'
+    waiterCheck.allowed,
+    'Waiter account signing in with Google has diner clearance on customer portal'
   );
 }
 

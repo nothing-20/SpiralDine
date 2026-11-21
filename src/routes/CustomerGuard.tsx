@@ -23,11 +23,8 @@ export const CustomerGuard: React.FC = () => {
     return <Navigate to="/unauthorized" replace />;
   }
 
-  if (role !== 'customer') {
-    const destination = getDashboardRoute(role);
-    return <Navigate to={destination} replace />;
-  }
-
+  // Any authenticated non-anonymous user (including cross-portal diners who also own or work at restaurants)
+  // is cleared to browse and use the diner portal.
   return <Outlet />;
 };
 

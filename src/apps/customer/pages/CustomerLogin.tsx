@@ -23,10 +23,10 @@ import basilLeaf1 from '../../../assets/basil_leaf_1.png';
 import basilLeaf2 from '../../../assets/basil_leaf_2.png';
 
 // Lucide icons
-import { 
-  Utensils, 
-  ShieldAlert, 
-  Eye, 
+import {
+  Utensils,
+  ShieldAlert,
+  Eye,
   EyeOff,
   TrendingUp,
   Settings,
@@ -182,28 +182,7 @@ export const CustomerLogin: React.FC = () => {
           setIsLoadingGoogle(true);
           const fUser = result.user;
 
-          const staffUserSnap = await getDoc(doc(db, 'users', fUser.uid));
-          if (staffUserSnap.exists()) {
-            const staffData = staffUserSnap.data();
-            if (staffData.role && staffData.role !== 'customer') {
-              const destination = getDashboardRoute(staffData.role as TUserRole);
-              if (isMounted) {
-                addToast(`Welcome back, ${staffData.displayName || staffData.fullName || 'User'}!`, 'success');
-                navigate(destination, { replace: true });
-              }
-              return;
-            }
-          }
-
-          const res = await authService.signInOrRegisterCustomerWithGoogle(fUser);
-          if (res.isStaff) {
-            const destination = getDashboardRoute(res.role);
-            if (isMounted) {
-              addToast('Welcome back!', 'success');
-              navigate(destination, { replace: true });
-            }
-            return;
-          }
+          await authService.signInOrRegisterCustomerWithGoogle(fUser);
 
           if (isMounted) {
             addToast('Signed in successfully with Google!', 'success');
@@ -226,7 +205,7 @@ export const CustomerLogin: React.FC = () => {
               setGoogleCustomerError('An account already exists with this email address. Please sign in with email/password.');
             }
           } else if (
-            e.code !== 'auth/popup-closed-by-user' && 
+            e.code !== 'auth/popup-closed-by-user' &&
             e.code !== 'auth/cancelled-popup-request' &&
             e.code !== 'auth/argument-error' &&
             e.code !== 'auth/null-user'
@@ -254,24 +233,7 @@ export const CustomerLogin: React.FC = () => {
       const cred = await authService.signInWithGoogle();
       const fUser = cred.user;
 
-      const staffUserSnap = await getDoc(doc(db, 'users', fUser.uid));
-      if (staffUserSnap.exists()) {
-        const staffData = staffUserSnap.data();
-        if (staffData.role && staffData.role !== 'customer') {
-          const destination = getDashboardRoute(staffData.role as TUserRole);
-          addToast(`Welcome back, ${staffData.displayName || staffData.fullName || 'User'}!`, 'success');
-          navigate(destination, { replace: true });
-          return;
-        }
-      }
-
-      const res = await authService.signInOrRegisterCustomerWithGoogle(fUser);
-      if (res.isStaff) {
-        const destination = getDashboardRoute(res.role);
-        addToast('Welcome back!', 'success');
-        navigate(destination, { replace: true });
-        return;
-      }
+      await authService.signInOrRegisterCustomerWithGoogle(fUser);
 
       addToast('Signed in successfully with Google!', 'success');
       navigate(getSuccessRedirect(), { replace: true });
@@ -447,19 +409,6 @@ export const CustomerLogin: React.FC = () => {
       const fUser = credentials.user;
       console.log('[AUTH Customer Phone Login] OTP verified. UID:', fUser.uid);
 
-      // Check if this UID is associated with a restaurant owner/staff account
-      const staffUserSnap = await getDoc(doc(db, 'users', fUser.uid));
-      if (staffUserSnap.exists()) {
-        const staffData = staffUserSnap.data();
-        if (staffData.role && staffData.role !== 'customer') {
-          const destination = getDashboardRoute(staffData.role as TUserRole);
-          addToast(`Welcome back, ${staffData.displayName || staffData.fullName || 'User'}!`, 'success');
-          navigate(destination, { replace: true });
-          setIsVerifyingOtp(false);
-          return;
-        }
-      }
-
       // Check or provision customer document in customers/{uid}
       const custDocRef = doc(db, 'customers', fUser.uid);
       const custSnap = await getDoc(custDocRef);
@@ -528,20 +477,7 @@ export const CustomerLogin: React.FC = () => {
       const credentials = await authService.signInWithEmail(cleanEmail, data.password, true);
       const fUser = credentials.user;
 
-      // 1. Verify this UID is not a restaurant owner or staff account
-      const staffUserSnap = await getDoc(doc(db, 'users', fUser.uid));
-      if (staffUserSnap.exists()) {
-        const staffData = staffUserSnap.data();
-        if (staffData.role && staffData.role !== 'customer') {
-          const destination = getDashboardRoute(staffData.role as TUserRole);
-          addToast(`Welcome back, ${staffData.displayName || staffData.fullName || 'User'}!`, 'success');
-          navigate(destination, { replace: true });
-          setIsSubmittingEmail(false);
-          return;
-        }
-      }
-
-      // 2. Check or provision customer profile in customers/{uid}
+      // Check or provision customer profile in customers/{uid}
       const custDocRef = doc(db, 'customers', fUser.uid);
       const custSnap = await getDoc(custDocRef);
 
@@ -623,9 +559,9 @@ export const CustomerLogin: React.FC = () => {
 
       {/* LEFT SIDE: Food plate */}
       <div className="hidden sm:block absolute left-[-240px] md:left-[-220px] lg:left-[-190px] xl:left-[-150px] top-[22%] md:top-[24%] w-[420px] md:w-[480px] lg:w-[540px] pointer-events-none select-none z-0">
-        <img 
-          src={leftPlateImg} 
-          alt="Gourmet Pasta Plate" 
+        <img
+          src={leftPlateImg}
+          alt="Gourmet Pasta Plate"
           className="w-full h-auto drop-shadow-xl transform -rotate-12"
         />
       </div>
@@ -648,9 +584,9 @@ export const CustomerLogin: React.FC = () => {
 
       {/* RIGHT SIDE: Food plate */}
       <div className="hidden sm:block absolute right-[-240px] md:right-[-220px] lg:right-[-190px] xl:right-[-150px] bottom-[10%] md:bottom-[12%] w-[420px] md:w-[480px] lg:w-[540px] pointer-events-none select-none z-0">
-        <img 
-          src={rightPlateImg} 
-          alt="Artisanal Salmon Dish" 
+        <img
+          src={rightPlateImg}
+          alt="Artisanal Salmon Dish"
           className="w-full h-auto drop-shadow-xl transform rotate-6"
         />
       </div>
@@ -687,8 +623,8 @@ export const CustomerLogin: React.FC = () => {
           </div>
         </Link>
 
-        <Link 
-          to="/" 
+        <Link
+          to="/"
           className="inline-flex items-center space-x-1 text-xs font-bold text-[#667085] hover:text-[#17202A] transition-colors py-2 px-3.5 rounded-xl hover:bg-[#F7F0EA]"
         >
           <span>← Back to Home</span>
@@ -697,10 +633,10 @@ export const CustomerLogin: React.FC = () => {
 
       {/* 3. MAIN CONTENT: CENTERED LOGIN CARD */}
       <main className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 md:py-10 flex flex-col items-center justify-center flex-1 relative z-10 space-y-8">
-        
+
         {/* Centered White Card */}
         <div className="max-w-md w-full p-6 sm:p-8 md:p-10 bg-white border border-[#E9DED6] rounded-[24px] shadow-md relative overflow-hidden text-left">
-          
+
           {/* Card Icon & Header */}
           <div className="space-y-3 text-center mb-6">
             <div className="w-14 h-14 bg-[#FCEDE7] rounded-2xl flex items-center justify-center mx-auto shadow-2xs">
@@ -981,7 +917,7 @@ export const CustomerLogin: React.FC = () => {
                   </div>
                   {errorState.showRegister && (
                     <div className="pt-2 border-t border-red-100 flex justify-end">
-                      <button 
+                      <button
                         type="button"
                         onClick={() => navigate('/customer/register')}
                         className="bg-[#D65336] hover:bg-[#B9432D] text-white text-[11px] py-1.5 px-3 font-bold rounded-lg transition-colors cursor-pointer"
@@ -1055,14 +991,14 @@ export const CustomerLogin: React.FC = () => {
               {/* Remember Me & Forgot Password */}
               <div className="flex justify-between items-center text-xs pt-1">
                 <label className="flex items-center space-x-2 text-[#17202A] font-semibold cursor-pointer select-none">
-                  <input 
-                    type="checkbox" 
-                    className="w-4 h-4 rounded border-[#E1D9D2] text-[#D65336] focus:ring-[#D65336]/30 accent-[#D65336] cursor-pointer" 
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 rounded border-[#E1D9D2] text-[#D65336] focus:ring-[#D65336]/30 accent-[#D65336] cursor-pointer"
                   />
                   <span>Remember me</span>
                 </label>
-                <Link 
-                  to="/forgot-password" 
+                <Link
+                  to="/forgot-password"
                   className="text-[#D65336] hover:text-[#B9432D] font-bold hover:underline transition-colors"
                 >
                   Forgot password?
@@ -1178,17 +1114,6 @@ export const CustomerLogin: React.FC = () => {
         onClose={() => setLinkingModalState({ isOpen: false, email: '', credential: null })}
         onSuccess={async (linkedUser) => {
           setLinkingModalState({ isOpen: false, email: '', credential: null });
-          const staffUserSnap = await getDoc(doc(db, 'users', linkedUser.uid));
-          if (staffUserSnap.exists()) {
-            const staffData = staffUserSnap.data();
-            if (staffData.role && staffData.role !== 'customer') {
-              const destination = getDashboardRoute(staffData.role as TUserRole);
-              addToast(`Welcome back, ${staffData.displayName || staffData.fullName || 'User'}!`, 'success');
-              navigate(destination, { replace: true });
-              return;
-            }
-          }
-
           await authService.signInOrRegisterCustomerWithGoogle(linkedUser);
           addToast('Google account linked to your diner profile!', 'success');
           navigate(getSuccessRedirect(), { replace: true });
