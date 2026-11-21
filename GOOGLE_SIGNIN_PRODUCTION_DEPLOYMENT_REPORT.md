@@ -6,8 +6,8 @@
 **Secondary Production Domain:** [https://spiraldine-no-one-0.vercel.app](https://spiraldine-no-one-0.vercel.app)  
 **Authorized Firebase Project:** `spiral-restaurant-saas-v1`  
 **GitHub Branch:** `feature/google-signin-and-identity`  
-**Latest Production Deployment ID:** `dpl_GWVAHZwtC4cGNcUJghHAbjgfa8yh`  
-**Git Commit SHA:** `84bb37c`  
+**Latest Production Deployment ID:** `dpl_AZPwrd8VPwMbxwCCib5QEn4k7cjU`  
+**Git Commit SHA:** `a2afd03`  
 **Deployment Status:** **● READY & LIVE IN PRODUCTION**  
 
 ---
@@ -16,26 +16,30 @@
 
 The Google Sign-In and Single-Account Identity architecture is live in **Production** on Vercel at [https://dine.spiralworld.in](https://dine.spiralworld.in).
 
-An initial client-side Firebase Auth runtime exception (`auth/argument-error`) observed on `/customer/login` has been thoroughly analyzed, resolved, tested, and redeployed. The production CDN has been verified to serve the updated application bundle (`index-B0ZgNofN.js`), with all 129 test assertions passing.
+Two client-side lifecycle and routing issues observed during initial live testing have been resolved, verified, and deployed:
+1. `auth/argument-error`: Resolved by configuring `browserPopupRedirectResolver` in `initializeAuth` and all auth helper methods.
+2. Post-Login Redirect Loop: Resolved by converting `AuthContext` to a concurrent dual-snapshot listener (`customers/{uid}` and `users/{uid}`) and implementing smart role-based dashboard routing from the Diner Portal.
 
 ---
 
-## 1. Resolution of `auth/argument-error`
+## 1. Post-Login Redirect Loop & Role Routing Resolution
 
 ### 1.1 Root Cause Analysis
-- In Firebase Auth modular SDK (`firebase: ^10.12.2`), initializing authentication via `initializeAuth(app, { persistence: ... })` with custom persistence (such as `browserSessionPersistence`) omits the default popup/redirect resolver unless explicitly passed via `popupRedirectResolver`.
-- Whenever `getRedirectResult(auth)` was executed on initial component mount (or `signInWithPopup(auth, provider)` on user action), Firebase's internal method `_withDefaultResolver` asserted `auth._popupRedirectResolver`. Because this was `undefined`, it immediately threw `Firebase: Error (auth/argument-error).`
-- On `/customer/login` and other auth views, the component caught this uninitialized check error on mount and rendered the red alert banner before any user interaction took place.
+1. **One-Shot Listener Race in `AuthContext`:**
+   - Previously, `AuthContext` checked whether `customers/{uid}` existed at the exact moment `onAuthStateChanged` fired.
+   - For a user signing in via Google on `/customer/login`, the document `customers/{uid}` was created a few milliseconds later by the component.
+   - Because `customers/{uid}` did not exist at the initial check, `AuthContext` attached its real-time listener to `users/{uid}` instead. It never listened to `customers/{uid}`, leaving `AuthContext` in a `PROFILE_MISSING` state with `user === null`.
+   - When the component navigated to `/customer/home`, `CustomerGuard` saw `user === null` and immediately redirected back to `/customer/login`.
+2. **Owner/Staff Sign-Out on Diner Portal:**
+   - If an account with restaurant owner or staff clearance signed in on `/customer/login`, the handler previously executed `signOutUser()` and blocked them with an alert. This immediately destroyed their authenticated session and reset them to the login screen.
 
 ### 1.2 Implemented Fix
-1. **Config Initialization ([src/shared/firebase/config.ts](file:///c:/Users/Geetha%20Krishna/OneDrive/Desktop/Project%20Saas%20for%20all/src/shared/firebase/config.ts)):**
-   - Configured `initializeAuth` with `popupRedirectResolver: typeof window !== 'undefined' ? browserPopupRedirectResolver : undefined`.
-2. **Auth Service Resolver ([src/shared/firebase/auth.ts](file:///c:/Users/Geetha%20Krishna/OneDrive/Desktop/Project%20Saas%20for%20all/src/shared/firebase/auth.ts)):**
-   - Passed `browserPopupRedirectResolver` explicitly to `signInWithPopup()`, `linkWithPopup()`, `signInWithRedirect()`, and `getRedirectResult()`.
-   - Updated `getGoogleRedirectResult()` to safely return `null` on initial mount if no redirect operation was initiated.
-3. **Graceful UI Error Mapping ([CustomerLogin.tsx](file:///c:/Users/Geetha%20Krishna/OneDrive/Desktop/Project%20Saas%20for%20all/src/apps/customer/pages/CustomerLogin.tsx), [CustomerRegister.tsx](file:///c:/Users/Geetha%20Krishna/OneDrive/Desktop/Project%20Saas%20for%20all/src/apps/customer/pages/CustomerRegister.tsx), [LoginForm.tsx](file:///c:/Users/Geetha%20Krishna/OneDrive/Desktop/Project%20Saas%20for%20all/src/features/auth/components/LoginForm.tsx)):**
-   - Filtered passive mount errors so uninitialized redirect checks never surface error alerts on initial page load.
-   - Replaced raw Firebase error text with user-friendly actionable error messages.
+1. **Dual Snapshot Profile Resolution ([AuthContext.tsx](file:///c:/Users/Geetha%20Krishna/OneDrive/Desktop/Project%20Saas%20for%20all/src/shared/services/AuthContext.tsx)):**
+   - `AuthContext` now listens concurrently to both `users/{fUser.uid}` and `customers/{fUser.uid}` using live Firestore snapshots.
+   - As soon as `signInOrRegisterCustomerWithGoogle` creates or updates `customers/{uid}`, `AuthContext` immediately receives the profile and authorizes the session.
+2. **Smart Role Routing ([CustomerLogin.tsx](file:///c:/Users/Geetha%20Krishna/OneDrive/Desktop/Project%20Saas%20for%20all/src/apps/customer/pages/CustomerLogin.tsx) & [CustomerRegister.tsx](file:///c:/Users/Geetha%20Krishna/OneDrive/Desktop/Project%20Saas%20for%20all/src/apps/customer/pages/CustomerRegister.tsx)):**
+   - If a restaurant owner or staff member signs in with Google via the diner portal, SpiralDine no longer signs them out. Instead, it recognizes their role and seamlessly routes them to their dashboard (`/owner/dashboard` or staff workspace).
+   - If a diner signs in, they are smoothly routed to `/customer/home`.
 
 ---
 
@@ -44,15 +48,15 @@ An initial client-side Firebase Auth runtime exception (`auth/argument-error`) o
 | Deployment Parameter | Live Production Value |
 | :--- | :--- |
 | **Vercel Project** | `spiraldine` (Team: `no-one-0`) |
-| **Vercel Deployment ID** | `dpl_GWVAHZwtC4cGNcUJghHAbjgfa8yh` |
+| **Vercel Deployment ID** | `dpl_AZPwrd8VPwMbxwCCib5QEn4k7cjU` |
 | **Target Environment** | `Production` |
 | **Status** | **● Ready** |
 | **Primary Production URL** | [https://dine.spiralworld.in](https://dine.spiralworld.in) |
 | **Vercel Production Canonical** | [https://spiraldine-no-one-0.vercel.app](https://spiraldine-no-one-0.vercel.app) |
-| **Vercel Inspection Dashboard** | [https://vercel.com/no-one-0/spiraldine/GWVAHZwtC4cGNcUJghHAbjgfa8yh](https://vercel.com/no-one-0/spiraldine/GWVAHZwtC4cGNcUJghHAbjgfa8yh) |
+| **Vercel Inspection Dashboard** | [https://vercel.com/no-one-0/spiraldine/AZPwrd8VPwMbxwCCib5QEn4k7cjU](https://vercel.com/no-one-0/spiraldine/AZPwrd8VPwMbxwCCib5QEn4k7cjU) |
 | **Branch** | `feature/google-signin-and-identity` |
-| **Deployed Git Commit** | `84bb37c` |
-| **Active Live Bundle** | `https://dine.spiralworld.in/assets/index-B0ZgNofN.js` |
+| **Deployed Git Commit** | `a2afd03` |
+| **Active Live Bundle** | `https://dine.spiralworld.in/assets/index-C_5vm0si.js` |
 | **Serverless Functions** | 12 API functions deployed to AWS `iad1` (Washington, D.C., USA) |
 
 ---
@@ -70,15 +74,11 @@ Automated live audit script [scripts/verify-production-live.mjs](file:///c:/User
 - **Customer Registration (`/customer/register`):** `HTTP 200 OK`
 
 ### 3.2 Live Production Bundle Inspection
-The updated live bundle (`/assets/index-B0ZgNofN.js`) was fetched from the production CDN and verified:
+The updated live bundle (`/assets/index-C_5vm0si.js`) was fetched from the production CDN and verified:
 1. **Target Project Identity:** Bound to Firebase project `spiral-restaurant-saas-v1`.
-2. **Popup Resolver Wiring:** `browserPopupRedirectResolver` and `popupRedirectResolver` are active and initialized.
-3. **Google Sign-In Components:** `GoogleAuthProvider`, `signInWithPopup`, and Google UI branding elements active across all portals.
-4. **Account-Linking Logic:** `linkWithCredential` and `AccountLinkingModal` present for handling `auth/account-exists-with-different-credential`.
-
-### 3.3 Backend Serverless API Health
-- **Endpoint:** `https://dine.spiralworld.in/api/auth/send-password-reset`
-- **Response:** `HTTP 405 Method Not Allowed` on raw `GET` requests (verifying standard POST enforcement).
+2. **Dual-Snapshot Profile Wiring:** Live in `AuthContext`.
+3. **Google Sign-In Components:** Active and operational.
+4. **Account-Linking Logic:** Active for `auth/account-exists-with-different-credential`.
 
 ---
 
@@ -99,10 +99,8 @@ The updated live bundle (`/assets/index-B0ZgNofN.js`) was fetched from the produ
 ## 5. Live Testing Checklist
 
 1. **Diner Sign-In ([https://dine.spiralworld.in/customer/login](https://dine.spiralworld.in/customer/login)):**
-   - Refresh page: Confirm no red error banner appears on initial load.
-   - Click **"Sign in with Google"**: Confirm the standard Google authentication popup opens cleanly.
+   - Click **"Sign in with Google"** and select your Google account.
+   - If signing in with a customer account: You are authenticated and routed into `/customer/home`.
+   - If signing in with an owner/staff account: You are welcomed back and routed directly into `/owner/dashboard`.
 2. **Owner Login ([https://dine.spiralworld.in/login](https://dine.spiralworld.in/login)):**
-   - Click **"Continue with Google"**: Popup opens with `select_account` prompt.
-3. **Account Linking:**
-   - Sign in with a Google account matching an existing Email/Password user.
-   - The secure Account Linking modal prompts for password and merges credentials under the single Firebase UID.
+   - Click **"Continue with Google"**: Authenticates and routes into the merchant workspace.
