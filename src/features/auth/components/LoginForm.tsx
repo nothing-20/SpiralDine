@@ -177,7 +177,12 @@ export const LoginForm: React.FC = () => {
             } else {
               setGoogleError('An account already exists with this email address using another sign-in method. Please sign in using email and password.');
             }
-          } else if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+          } else if (
+            err.code !== 'auth/popup-closed-by-user' && 
+            err.code !== 'auth/cancelled-popup-request' &&
+            err.code !== 'auth/argument-error' &&
+            err.code !== 'auth/null-user'
+          ) {
             setGoogleError(err.message || 'Google sign-in failed. Please try again.');
           }
         }
@@ -313,7 +318,9 @@ export const LoginForm: React.FC = () => {
         setGoogleError(msg);
         addToast(msg, 'error');
       } else {
-        const msg = err.message || 'Failed to authenticate with Google. Please try again.';
+        const msg = err.code === 'auth/argument-error'
+          ? 'Unable to initialize Google Sign-In in this browser. Please try again or use email login.'
+          : (err.message || 'Failed to authenticate with Google. Please try again.');
         setGoogleError(msg);
         addToast(msg, 'error');
       }

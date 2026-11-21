@@ -79,7 +79,12 @@ export const MobileSplashLogin: React.FC = () => {
             } else {
               setErrorMessage('An account already exists with this email. Please sign in with password.');
             }
-          } else if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+          } else if (
+            err.code !== 'auth/popup-closed-by-user' && 
+            err.code !== 'auth/cancelled-popup-request' &&
+            err.code !== 'auth/argument-error' &&
+            err.code !== 'auth/null-user'
+          ) {
             setErrorMessage(err.message || 'Google sign-in failed.');
           }
         }

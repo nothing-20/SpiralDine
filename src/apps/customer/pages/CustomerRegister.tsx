@@ -87,7 +87,12 @@ export const CustomerRegister: React.FC = () => {
             } else {
               setErrorText('An account with this email already exists. Please sign in with email and password.');
             }
-          } else if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+          } else if (
+            e.code !== 'auth/popup-closed-by-user' && 
+            e.code !== 'auth/cancelled-popup-request' &&
+            e.code !== 'auth/argument-error' &&
+            e.code !== 'auth/null-user'
+          ) {
             setErrorText(e.message || 'Google registration failed.');
           }
         }
@@ -142,8 +147,15 @@ export const CustomerRegister: React.FC = () => {
         } else {
           setErrorText('An account with this email already exists using another sign-in method. Please sign in with email and password.');
         }
+      } else if (e.code === 'auth/unauthorized-domain') {
+        setErrorText('This domain is not authorized in Firebase Console for Google authentication. Please verify Authorized Domains in Firebase settings.');
+      } else if (e.code === 'auth/network-request-failed') {
+        setErrorText('Network connection error. Please check your internet connection.');
       } else {
-        setErrorText(e.message || 'Google registration failed.');
+        const friendlyMsg = e.code === 'auth/argument-error'
+          ? 'Unable to initialize Google Sign-In in this browser. Please try again or use email login.'
+          : (e.message || 'Google registration failed.');
+        setErrorText(friendlyMsg);
       }
     } finally {
       setIsLoadingGoogle(false);

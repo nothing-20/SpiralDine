@@ -1,5 +1,12 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { initializeAuth, getAuth, browserSessionPersistence, inMemoryPersistence, setPersistence } from 'firebase/auth';
+import { 
+  initializeAuth, 
+  getAuth, 
+  browserSessionPersistence, 
+  inMemoryPersistence, 
+  browserPopupRedirectResolver,
+  setPersistence 
+} from 'firebase/auth';
 import { initializeFirestore, getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
@@ -70,7 +77,8 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = (() => {
   try {
     return initializeAuth(app, {
-      persistence: [browserSessionPersistence, inMemoryPersistence]
+      persistence: [browserSessionPersistence, inMemoryPersistence],
+      popupRedirectResolver: typeof window !== 'undefined' ? browserPopupRedirectResolver : undefined
     });
   } catch (_err) {
     const existingAuth = getAuth(app);

@@ -28,6 +28,7 @@ import {
   signInWithRedirect,
   getRedirectResult,
   linkWithPopup,
+  browserPopupRedirectResolver,
   fetchSignInMethodsForEmail,
   AuthCredential
 } from 'firebase/auth';
@@ -368,21 +369,22 @@ export const signInWithGoogle = async (): Promise<UserCredential> => {
   }
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
+  const resolver = typeof window !== 'undefined' ? browserPopupRedirectResolver : undefined;
 
   // If user is currently an anonymous guest diner, link Google credential to preserve guest UID/session
   if (auth.currentUser && auth.currentUser.isAnonymous) {
     try {
-      return await linkWithPopup(auth.currentUser, provider);
+      return await linkWithPopup(auth.currentUser, provider, resolver);
     } catch (linkErr: any) {
       if (linkErr.code === 'auth/credential-already-in-use' || linkErr.code === 'auth/email-already-in-use') {
         // Sign in normally with popup if credential belongs to an existing account
-        return await signInWithPopup(auth, provider);
+        return await signInWithPopup(auth, provider, resolver);
       }
       throw linkErr;
     }
   }
 
-  return signInWithPopup(auth, provider);
+  return signInWithPopup(auth, provider, resolver);
 };
 
 /**
@@ -396,14 +398,25 @@ export const signInWithGoogleRedirect = async (): Promise<void> => {
   }
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
-  return signInWithRedirect(auth, provider);
+  const resolver = typeof window !== 'undefined' ? browserPopupRedirectResolver : undefined;
+  return signInWithRedirect(auth, provider, resolver);
 };
 
 /**
  * Retrieves the result of a Google redirect sign-in.
  */
 export const getGoogleRedirectResult = async (): Promise<UserCredential | null> => {
-  return getRedirectResult(auth);
+  if (typeof window === 'undefined') return null;
+  const resolver = typeof window !== 'undefined' ? browserPopupRedirectResolver : undefined;
+  try {
+    return await getRedirectResult(auth, resolver);
+  } catch (err: any) {
+    // If no redirect was initiated or internal argument check on mount, fail cleanly to null
+    if (err?.code === 'auth/argument-error' || err?.code === 'auth/null-user') {
+      return null;
+    }
+    throw err;
+  }
 };
 
 /**

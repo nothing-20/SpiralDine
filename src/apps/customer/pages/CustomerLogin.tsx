@@ -213,7 +213,12 @@ export const CustomerLogin: React.FC = () => {
             } else {
               setGoogleCustomerError('An account already exists with this email address. Please sign in with email/password.');
             }
-          } else if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+          } else if (
+            e.code !== 'auth/popup-closed-by-user' && 
+            e.code !== 'auth/cancelled-popup-request' &&
+            e.code !== 'auth/argument-error' &&
+            e.code !== 'auth/null-user'
+          ) {
             setGoogleCustomerError(e.message || 'Google sign-in failed.');
           }
         }
@@ -283,8 +288,15 @@ export const CustomerLogin: React.FC = () => {
         } else {
           setGoogleCustomerError('An account already exists with this email address using another sign-in method. Please sign in with email and password.');
         }
+      } else if (e.code === 'auth/unauthorized-domain') {
+        setGoogleCustomerError('This domain is not authorized in Firebase Console for Google authentication. Please verify Authorized Domains in Firebase settings.');
+      } else if (e.code === 'auth/network-request-failed') {
+        setGoogleCustomerError('Network connection error. Please check your internet connection.');
       } else {
-        setGoogleCustomerError(e.message || 'Google sign-in failed.');
+        const friendlyMsg = e.code === 'auth/argument-error'
+          ? 'Unable to initialize Google Sign-In in this browser. Please try again or use email login.'
+          : (e.message || 'Google sign-in failed.');
+        setGoogleCustomerError(friendlyMsg);
       }
     } finally {
       setIsLoadingGoogle(false);
