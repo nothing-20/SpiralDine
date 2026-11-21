@@ -1,4 +1,4 @@
-import { User, UserCredential, ConfirmationResult, ApplicationVerifier, RecaptchaVerifier } from 'firebase/auth';
+import { User, UserCredential, ConfirmationResult, ApplicationVerifier, RecaptchaVerifier, AuthCredential } from 'firebase/auth';
 import { TUserRole } from '../types';
 import * as firebaseAuth from '../firebase/auth';
 
@@ -81,6 +81,59 @@ export const authService = {
 
   async linkPhone(user: User, phoneNumber: string, appVerifier: ApplicationVerifier): Promise<ConfirmationResult> {
     return firebaseAuth.linkPhone(user, phoneNumber, appVerifier);
+  },
+
+  async signInWithGoogle(): Promise<UserCredential> {
+    return firebaseAuth.signInWithGoogle();
+  },
+
+  async signInWithGoogleRedirect(): Promise<void> {
+    return firebaseAuth.signInWithGoogleRedirect();
+  },
+
+  async getGoogleRedirectResult(): Promise<UserCredential | null> {
+    return firebaseAuth.getGoogleRedirectResult();
+  },
+
+  async signUpOwnerWithGoogle(
+    googleUser: User,
+    restaurantName: string,
+    country?: string,
+    currency?: string,
+    locale?: string
+  ): Promise<{ user: User; tenantId: string }> {
+    return firebaseAuth.signUpOwnerWithGoogle(googleUser, restaurantName, country, currency, locale);
+  },
+
+  async signInOrRegisterCustomerWithGoogle(
+    googleUser: User,
+    phoneNumber?: string
+  ): Promise<{ uid: string; role: TUserRole; isStaff?: boolean }> {
+    return firebaseAuth.signInOrRegisterCustomerWithGoogle(googleUser, phoneNumber);
+  },
+
+  getGoogleCredentialFromError(error: any): AuthCredential | null {
+    return firebaseAuth.getGoogleCredentialFromError(error);
+  },
+
+  async getExistingSignInMethods(email: string): Promise<string[]> {
+    return firebaseAuth.getExistingSignInMethods(email);
+  },
+
+  async linkGoogleCredential(user: User, credential: AuthCredential): Promise<UserCredential> {
+    return firebaseAuth.linkGoogleCredential(user, credential);
+  },
+
+  async verifyAndLinkGoogleAccount(
+    email: string,
+    password: string,
+    credential: AuthCredential
+  ): Promise<UserCredential> {
+    return firebaseAuth.verifyAndLinkGoogleAccount(email, password, credential);
+  },
+
+  async linkEmailPasswordCredential(user: User, password: string): Promise<UserCredential> {
+    return firebaseAuth.linkEmailPasswordCredential(user, password);
   }
 };
 export default authService;

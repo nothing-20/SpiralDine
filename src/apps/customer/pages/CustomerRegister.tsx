@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useNavigate, Link } from 'react-router-dom';
+import { AuthCredential } from 'firebase/auth';
 import { authService } from '../../../services/authService';
 import { zodResolver } from '../../../utils/zodResolver';
+import GoogleSignInButton from '../../../components/ui/GoogleSignInButton';
+import AccountLinkingModal from '../../../components/ui/AccountLinkingModal';
 
 // UI Kit components
 import Card from '../../../components/ui/Card/Card';
@@ -30,7 +33,17 @@ type TRegisterForm = z.infer<typeof registerSchema>;
 export const CustomerRegister: React.FC = () => {
   const navigate = useNavigate();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
   const [errorText, setErrorText] = useState<string | null>(null);
+  const [linkingModalState, setLinkingModalState] = useState<{
+    isOpen: boolean;
+    email: string;
+    credential: AuthCredential | null;
+  }>({
+    isOpen: false,
+    email: '',
+    credential: null
+  });
 
   const {
     register,
@@ -39,6 +52,103 @@ export const CustomerRegister: React.FC = () => {
   } = useForm<TRegisterForm>({
     resolver: zodResolver(registerSchema)
   });
+
+  // Handle Google Redirect Result on mount
+  useEffect(() => {
+    let isMounted = true;
+    const processGoogleRedirect = async () => {
+      try {
+        const result = await authService.getGoogleRedirectResult();
+        if (result?.user && isMounted) {
+          setIsLoadingGoogle(true);
+          const res = await authService.signInOrRegisterCustomerWithGoogle(result.user);
+          if (res.isStaff) {
+            await authService.signOutUser();
+            const msg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
+            setErrorText(msg);
+            toast.error(msg);
+            return;
+          }
+          toast.success('Account connected successfully! Welcome to Spiral Dine.');
+          navigate('/customer/restaurants');
+        }
+      } catch (e: any) {
+        console.error('[Customer Google Register Redirect Error]', e);
+        if (isMounted) {
+          if (e.code === 'auth/account-exists-with-different-credential') {
+            const pendingCred = authService.getGoogleCredentialFromError(e);
+            const collidingEmail = e.customData?.email || e.email || '';
+            if (pendingCred && collidingEmail) {
+              setLinkingModalState({
+                isOpen: true,
+                email: collidingEmail,
+                credential: pendingCred
+              });
+            } else {
+              setErrorText('An account with this email already exists. Please sign in with email and password.');
+            }
+          } else if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+            setErrorText(e.message || 'Google registration failed.');
+          }
+        }
+      } finally {
+        if (isMounted) setIsLoadingGoogle(false);
+      }
+    };
+    processGoogleRedirect();
+    return () => {
+      isMounted = false;
+    };
+  }, [navigate]);
+
+  const handleGoogleCustomerSignUp = async () => {
+    if (isLoadingGoogle || isSubmitting) return;
+
+    setIsLoadingGoogle(true);
+    setErrorText(null);
+
+    try {
+      const cred = await authService.signInWithGoogle();
+      const res = await authService.signInOrRegisterCustomerWithGoogle(cred.user);
+      if (res.isStaff) {
+        await authService.signOutUser();
+        const msg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
+        setErrorText(msg);
+        toast.error(msg);
+        return;
+      }
+      toast.success('Account connected successfully! Welcome to Spiral Dine.');
+      navigate('/customer/restaurants');
+    } catch (e: any) {
+      console.error('[Customer Google Sign-Up Error]', e);
+      if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
+        // Closed by user
+      } else if (e.code === 'auth/popup-blocked') {
+        try {
+          await authService.signInWithGoogleRedirect();
+          return;
+        } catch (_) {
+          setErrorText('Popup was blocked by your browser. Please allow popups.');
+        }
+      } else if (e.code === 'auth/account-exists-with-different-credential') {
+        const pendingCred = authService.getGoogleCredentialFromError(e);
+        const collidingEmail = e.customData?.email || e.email || '';
+        if (pendingCred && collidingEmail) {
+          setLinkingModalState({
+            isOpen: true,
+            email: collidingEmail,
+            credential: pendingCred
+          });
+        } else {
+          setErrorText('An account with this email already exists using another sign-in method. Please sign in with email and password.');
+        }
+      } else {
+        setErrorText(e.message || 'Google registration failed.');
+      }
+    } finally {
+      setIsLoadingGoogle(false);
+    }
+  };
 
   const onSubmit = async (data: TRegisterForm) => {
     setIsSubmitting(true);
@@ -51,7 +161,12 @@ export const CustomerRegister: React.FC = () => {
       console.error(e);
       let msg = e.message || 'Registration failed. Please try again.';
       if (e.code === 'auth/email-already-in-use') {
-        msg = 'Email already exists. If you have an account, please sign in.';
+        const methods: string[] = await authService.getExistingSignInMethods(data.email).catch(() => [] as string[]);
+        if (methods.includes('google.com') && !methods.includes('password')) {
+          msg = 'This email is registered with Google. Please sign in using Google.';
+        } else {
+          msg = 'Email already exists. If you have an account, please sign in.';
+        }
       } else if (e.code === 'auth/weak-password') {
         msg = 'Password is too weak.';
       } else if (e.code === 'auth/network-request-failed') {
@@ -81,6 +196,27 @@ export const CustomerRegister: React.FC = () => {
             <span>{errorText}</span>
           </div>
         )}
+
+        {/* Google Sign-Up Option */}
+        <div className="mb-4 space-y-3">
+          <GoogleSignInButton
+            id="btn-customer-google-signup"
+            onClick={handleGoogleCustomerSignUp}
+            isLoading={isLoadingGoogle}
+            disabled={isSubmitting}
+            text="Sign up with Google"
+            loadingText="Connecting to Google..."
+          />
+
+          <div className="relative my-3">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-[#E9DED6]" />
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="px-2 bg-white text-[#667085] font-semibold">or register with email</span>
+            </div>
+          </div>
+        </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <Input
@@ -158,6 +294,28 @@ export const CustomerRegister: React.FC = () => {
           </p>
         </div>
       </Card>
+
+      {/* Single Identity Account Linking Modal */}
+      <AccountLinkingModal
+        isOpen={linkingModalState.isOpen}
+        email={linkingModalState.email}
+        pendingCredential={linkingModalState.credential}
+        onClose={() => setLinkingModalState({ isOpen: false, email: '', credential: null })}
+        onSuccess={async (linkedUser) => {
+          setLinkingModalState({ isOpen: false, email: '', credential: null });
+          const res = await authService.signInOrRegisterCustomerWithGoogle(linkedUser);
+          if (res.isStaff) {
+            await authService.signOutUser();
+            const msg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
+            setErrorText(msg);
+            toast.error(msg);
+            return;
+          }
+          toast.success('Account connected successfully! Welcome to Spiral Dine.');
+          navigate('/customer/restaurants');
+        }}
+        portalName="SpiralDine Diner Registration"
+      />
     </div>
   );
 };

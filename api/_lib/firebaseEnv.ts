@@ -30,12 +30,13 @@ export function isValidServerEnvValue(val: unknown): val is string {
 export function resolveServerEnvironment(
   env: Record<string, string | undefined>
 ): string {
-  const raw = env.APP_ENV || env.VITE_APP_ENV || env.VERCEL_ENV || env.NODE_ENV || '';
+  const raw = env.APP_ENV || env.VITE_APP_ENV || env.NODE_ENV || '';
   const normalized = raw.trim().toLowerCase();
   if (normalized === 'production' || normalized === 'prod') return 'production';
-  if (normalized === 'staging' || normalized === 'stage' || normalized === 'preview') return 'staging';
+  if (normalized === 'staging' || normalized === 'stage') return 'staging';
   if (normalized === 'development' || normalized === 'dev' || normalized === 'test') return 'development';
-  return normalized;
+  if (env.VERCEL_ENV === 'production' || env.VERCEL_ENV === 'preview') return 'production';
+  return normalized || 'production';
 }
 
 export function assertServerProjectSafe(
@@ -60,7 +61,14 @@ export function assertServerProjectSafe(
     );
   }
 
-  if ((serverEnv === 'development' || serverEnv === 'staging') && targetsProduction) {
+  // Prevent accidental project switching in production:
+  if (serverEnv === 'production' && projectId && projectId.trim().toLowerCase() !== PRODUCTION_FIREBASE_PROJECT_ID) {
+    throw new Error(
+      `[firebaseEnv] Accidental project switching prevented: production environment strictly requires "${PRODUCTION_FIREBASE_PROJECT_ID}". Detected unauthorized project "${projectId}".`
+    );
+  }
+
+  if (serverEnv === 'staging' && targetsProduction) {
     throw new Error(
       `[firebaseEnv] Server environment "${serverEnv}" refuses to connect to production Firebase project "${PRODUCTION_FIREBASE_PROJECT_ID}". Configure an isolated ${serverEnv} Firebase project.`
     );

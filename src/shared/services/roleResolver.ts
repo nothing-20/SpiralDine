@@ -248,8 +248,10 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
     }
   } catch (_restErr) {}
 
-  // 5. Profile missing: Check employees collection by firebaseUid
-  console.warn(`[AUTH ROLE RESOLVER] Profile document missing at users/${fUser.uid}. Searching employees collection...`);
+  // 5. Profile missing: Check employees collection strictly by firebaseUid
+  // SECURITY REQUIREMENT: Email matching alone MUST NEVER grant an employee role.
+  // Google sign-in and unauthenticated accounts cannot bypass the staff invitation & token activation flow.
+  console.warn(`[AUTH ROLE RESOLVER] Profile document missing at users/${fUser.uid}. Searching employees collection by firebaseUid...`);
   let empData: any = null;
   try {
     const empRef = collection(db, 'employees');
@@ -258,29 +260,38 @@ export async function resolveAuthenticatedUser(fUser: User): Promise<IResolvedUs
 
     if (!snapUid.empty) {
       empData = snapUid.docs[0].data();
-    } else if (cleanEmail) {
-      const qEmail = query(empRef, where('email', '==', cleanEmail));
-      const snapEmail = await getDocs(qEmail);
-      if (!snapEmail.empty) {
-        empData = snapEmail.docs[0].data();
-      }
     }
   } catch (empErr: any) {
     console.warn('[AUTH ROLE RESOLVER] Employee lookup by UID failed:', empErr);
   }
 
+  // Validate employee record: must have an active status, must be explicitly activated, and must have valid tenantId
   if (empData && empData.role) {
-    console.log('[AUTH ROLE RESOLVER] Found matching employee record. Provisioning users/' + fUser.uid + '...');
+    const isStatusActive = empData.status === 'active';
+    const isActivated = empData.activationStatus === 'activated';
+    const hasTenant = Boolean(empData.tenantId && typeof empData.tenantId === 'string' && empData.tenantId.trim());
+
+    if (!isStatusActive || !isActivated || !hasTenant) {
+      console.warn('[AUTH ROLE RESOLVER] Employee record exists for UID but failed activation/status validation:', {
+        uid: fUser.uid,
+        status: empData.status,
+        activationStatus: empData.activationStatus,
+        hasTenant
+      });
+      return null;
+    }
+
+    console.log('[AUTH ROLE RESOLVER] Found valid, activated employee record. Provisioning users/' + fUser.uid + '...');
     const now = new Date().toISOString();
     const profileDoc: IResolvedUserProfile = {
       uid: fUser.uid,
       email: cleanEmail || empData.email || '',
       displayName: empData.fullName || empData.name || fUser.displayName || cleanEmail.split('@')[0] || 'Staff Member',
       role: empData.role as TUserRole,
-      tenantId: empData.tenantId || '',
+      tenantId: empData.tenantId,
       branchId: empData.branchId || '',
       department: empData.department || '',
-      status: empData.status || 'active',
+      status: 'active',
       phoneNumber: empData.phoneNumber || empData.phone || '',
       createdAt: now
     };

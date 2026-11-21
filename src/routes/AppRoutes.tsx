@@ -266,6 +266,11 @@ const NotFound: React.FC = () => (
 export const AppRoutes: React.FC = () => {
   const { profileError, logout } = useAuth();
   const isAuthAction = typeof window !== 'undefined' && (
+    window.location.pathname === '/login' ||
+    window.location.pathname === '/owner/login' ||
+    window.location.pathname === '/register' ||
+    window.location.pathname === '/customer/login' ||
+    window.location.pathname === '/customer/register' ||
     window.location.pathname.startsWith('/staff/activate') ||
     window.location.pathname.startsWith('/reset-password') ||
     window.location.pathname.startsWith('/auth/action') ||

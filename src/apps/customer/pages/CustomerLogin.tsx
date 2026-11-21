@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
-import { ConfirmationResult } from 'firebase/auth';
+import { ConfirmationResult, AuthCredential } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../../shared/firebase/config';
 import { authService } from '../../../services/authService';
@@ -11,6 +11,8 @@ import { zodResolver } from '../../../utils/zodResolver';
 import { useToastStore } from '../../../components/ui/Toast/Toast';
 import { cn } from '../../../utils/cn';
 import { resolveAuthenticatedUser } from '../../../shared/services/roleResolver';
+import GoogleSignInButton from '../../../components/ui/GoogleSignInButton';
+import AccountLinkingModal from '../../../components/ui/AccountLinkingModal';
 
 // Decorative food imagery
 import leftPlateImg from '../../../assets/left_food_plate.png';
@@ -89,6 +91,19 @@ export const CustomerLogin: React.FC = () => {
   // Primary authentication method is Mobile Number as requested
   const [authMethod, setAuthMethod] = useState<'phone' | 'email'>('phone');
 
+  // Google Authentication State
+  const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
+  const [googleCustomerError, setGoogleCustomerError] = useState<string | null>(null);
+  const [linkingModalState, setLinkingModalState] = useState<{
+    isOpen: boolean;
+    email: string;
+    credential: AuthCredential | null;
+  }>({
+    isOpen: false,
+    email: '',
+    credential: null
+  });
+
   // Option A: Phone Number + OTP State
   const [phoneStep, setPhoneStep] = useState<'input' | 'verify'>('input');
   const [countryCode, setCountryCode] = useState('+91');
@@ -154,6 +169,127 @@ export const CustomerLogin: React.FC = () => {
       }, 100);
     }
   }, [phoneStep]);
+
+  // Handle Google Redirect Result on mount
+  useEffect(() => {
+    let isMounted = true;
+    const processGoogleRedirect = async () => {
+      try {
+        const result = await authService.getGoogleRedirectResult();
+        if (result?.user && isMounted) {
+          setIsLoadingGoogle(true);
+          const fUser = result.user;
+
+          const staffUserSnap = await getDoc(doc(db, 'users', fUser.uid));
+          if (staffUserSnap.exists()) {
+            const staffData = staffUserSnap.data();
+            if (staffData.role && staffData.role !== 'customer') {
+              await authService.signOutUser();
+              if (isMounted) {
+                setGoogleCustomerError('This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.');
+              }
+              return;
+            }
+          }
+
+          await authService.signInOrRegisterCustomerWithGoogle(fUser);
+          if (isMounted) {
+            addToast('Signed in successfully with Google!', 'success');
+            navigate(getSuccessRedirect(), { replace: true });
+          }
+        }
+      } catch (e: any) {
+        console.error('[Customer Google Redirect Error]', e);
+        if (isMounted) {
+          if (e.code === 'auth/account-exists-with-different-credential') {
+            const pendingCred = authService.getGoogleCredentialFromError(e);
+            const collidingEmail = e.customData?.email || e.email || '';
+            if (pendingCred && collidingEmail) {
+              setLinkingModalState({
+                isOpen: true,
+                email: collidingEmail,
+                credential: pendingCred
+              });
+            } else {
+              setGoogleCustomerError('An account already exists with this email address. Please sign in with email/password.');
+            }
+          } else if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') {
+            setGoogleCustomerError(e.message || 'Google sign-in failed.');
+          }
+        }
+      } finally {
+        if (isMounted) setIsLoadingGoogle(false);
+      }
+    };
+    processGoogleRedirect();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleGoogleCustomerSignIn = async () => {
+    if (isLoadingGoogle || isSubmittingEmail || isSendingOtp || isVerifyingOtp) return;
+
+    setIsLoadingGoogle(true);
+    setGoogleCustomerError(null);
+
+    try {
+      const cred = await authService.signInWithGoogle();
+      const fUser = cred.user;
+
+      const staffUserSnap = await getDoc(doc(db, 'users', fUser.uid));
+      if (staffUserSnap.exists()) {
+        const staffData = staffUserSnap.data();
+        if (staffData.role && staffData.role !== 'customer') {
+          await authService.signOutUser();
+          const mismatchMsg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
+          setGoogleCustomerError(mismatchMsg);
+          addToast(mismatchMsg, 'error');
+          return;
+        }
+      }
+
+      const res = await authService.signInOrRegisterCustomerWithGoogle(fUser);
+      if (res.isStaff) {
+        await authService.signOutUser();
+        const mismatchMsg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
+        setGoogleCustomerError(mismatchMsg);
+        addToast(mismatchMsg, 'error');
+        return;
+      }
+
+      addToast('Signed in successfully with Google!', 'success');
+      navigate(getSuccessRedirect(), { replace: true });
+    } catch (e: any) {
+      console.error('[Customer Google Sign-In Error]', e);
+      if (e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request') {
+        // Closed by user
+      } else if (e.code === 'auth/popup-blocked') {
+        try {
+          await authService.signInWithGoogleRedirect();
+          return;
+        } catch (_) {
+          setGoogleCustomerError('Popup was blocked by your browser. Please allow popups.');
+        }
+      } else if (e.code === 'auth/account-exists-with-different-credential') {
+        const pendingCred = authService.getGoogleCredentialFromError(e);
+        const collidingEmail = e.customData?.email || e.email || '';
+        if (pendingCred && collidingEmail) {
+          setLinkingModalState({
+            isOpen: true,
+            email: collidingEmail,
+            credential: pendingCred
+          });
+        } else {
+          setGoogleCustomerError('An account already exists with this email address using another sign-in method. Please sign in with email and password.');
+        }
+      } else {
+        setGoogleCustomerError(e.message || 'Google sign-in failed.');
+      }
+    } finally {
+      setIsLoadingGoogle(false);
+    }
+  };
 
   // ---------------------------------------------------------------------------
   // PHONE AUTHENTICATION (DEFAULT/MAIN METHOD)
@@ -561,6 +697,34 @@ export const CustomerLogin: React.FC = () => {
             <p className="text-xs text-[#667085] font-normal leading-relaxed">
               Sign in to check recent orders, reservations, and saved dining profiles.
             </p>
+          </div>
+
+          {/* Google Sign-In Option */}
+          <div className="mb-6 space-y-3">
+            <GoogleSignInButton
+              id="btn-customer-google-signin"
+              onClick={handleGoogleCustomerSignIn}
+              isLoading={isLoadingGoogle}
+              disabled={isSubmittingEmail || isSendingOtp || isVerifyingOtp}
+              text="Sign in with Google"
+            />
+
+            {googleCustomerError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-2 text-xs text-red-700 font-semibold">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
+                <span>{googleCustomerError}</span>
+              </div>
+            )}
+
+            {/* Visual Divider */}
+            <div className="relative my-4">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-[#E8DED6]" />
+              </div>
+              <div className="relative flex justify-center text-xs">
+                <span className="px-3 bg-white text-[#8A817A] font-semibold">or sign in with</span>
+              </div>
+            </div>
           </div>
 
           {/* Login Method Switcher Tabs (Mobile Number is Primary) */}
@@ -991,6 +1155,31 @@ export const CustomerLogin: React.FC = () => {
           </div>
         </div>
       </footer>
+      {/* Single Identity Account Linking Modal */}
+      <AccountLinkingModal
+        isOpen={linkingModalState.isOpen}
+        email={linkingModalState.email}
+        pendingCredential={linkingModalState.credential}
+        onClose={() => setLinkingModalState({ isOpen: false, email: '', credential: null })}
+        onSuccess={async (linkedUser) => {
+          setLinkingModalState({ isOpen: false, email: '', credential: null });
+          const staffUserSnap = await getDoc(doc(db, 'users', linkedUser.uid));
+          if (staffUserSnap.exists()) {
+            const staffData = staffUserSnap.data();
+            if (staffData.role && staffData.role !== 'customer') {
+              await authService.signOutUser();
+              setGoogleCustomerError('This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.');
+              addToast('This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.', 'error');
+              return;
+            }
+          }
+
+          await authService.signInOrRegisterCustomerWithGoogle(linkedUser);
+          addToast('Google account linked to your diner profile!', 'success');
+          navigate(getSuccessRedirect(), { replace: true });
+        }}
+        portalName="SpiralDine Diner Portal"
+      />
     </div>
   );
 };

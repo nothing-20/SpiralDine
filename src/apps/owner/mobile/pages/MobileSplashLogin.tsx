@@ -1,19 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { AuthCredential } from 'firebase/auth';
 import { Utensils, Lock, Mail, Eye, EyeOff, AlertCircle, ArrowRight, ShieldCheck } from 'lucide-react';
 import { useAuth } from '../../../../context/AuthContext';
 import { authService } from '../../../../services/authService';
+import GoogleSignInButton from '../../../../components/ui/GoogleSignInButton';
+import AccountLinkingModal from '../../../../components/ui/AccountLinkingModal';
 
 export const MobileSplashLogin: React.FC = () => {
   const navigate = useNavigate();
   const { user, role, authStatus } = useAuth();
-  
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [loadingGoogle, setLoadingGoogle] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [linkingModalState, setLinkingModalState] = useState<{
+    isOpen: boolean;
+    email: string;
+    credential: AuthCredential | null;
+  }>({
+    isOpen: false,
+    email: '',
+    credential: null
+  });
 
   // If already logged in as owner/admin, redirect to mobile home
   useEffect(() => {
@@ -21,6 +34,121 @@ export const MobileSplashLogin: React.FC = () => {
       navigate('/owner/dashboard', { replace: true });
     }
   }, [user, role, navigate]);
+
+  // Handle Google Redirect Result on mount
+  useEffect(() => {
+    let isMounted = true;
+    const processGoogleRedirect = async () => {
+      try {
+        const result = await authService.getGoogleRedirectResult();
+        if (result?.user && isMounted) {
+          setLoadingGoogle(true);
+          const { resolveAuthenticatedUser } = await import('../../../../shared/services/roleResolver');
+          const profile = await resolveAuthenticatedUser(result.user);
+
+          if (!profile) {
+            await authService.signOutUser();
+            if (isMounted) {
+              setErrorMessage('No restaurant account is linked to this Google profile. Please register first.');
+            }
+            return;
+          }
+
+          if (profile.role === 'customer') {
+            await authService.signOutUser();
+            if (isMounted) {
+              setErrorMessage('This account is registered as a diner account. Please use Customer Portal.');
+            }
+            return;
+          }
+
+          navigate('/owner/dashboard', { replace: true });
+        }
+      } catch (err: any) {
+        console.error('[Mobile Google Redirect Error]', err);
+        if (isMounted) {
+          if (err.code === 'auth/account-exists-with-different-credential') {
+            const pendingCred = authService.getGoogleCredentialFromError(err);
+            const collidingEmail = err.customData?.email || err.email || '';
+            if (pendingCred && collidingEmail) {
+              setLinkingModalState({
+                isOpen: true,
+                email: collidingEmail,
+                credential: pendingCred
+              });
+            } else {
+              setErrorMessage('An account already exists with this email. Please sign in with password.');
+            }
+          } else if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+            setErrorMessage(err.message || 'Google sign-in failed.');
+          }
+        }
+      } finally {
+        if (isMounted) setLoadingGoogle(false);
+      }
+    };
+    processGoogleRedirect();
+    return () => {
+      isMounted = false;
+    };
+  }, [navigate]);
+
+  const handleGoogleSignIn = async () => {
+    if (loadingGoogle || loading) return;
+
+    setLoadingGoogle(true);
+    setErrorMessage(null);
+
+    try {
+      const cred = await authService.signInWithGoogle();
+      const user = cred.user;
+
+      const { resolveAuthenticatedUser } = await import('../../../../shared/services/roleResolver');
+      const profile = await resolveAuthenticatedUser(user);
+
+      if (!profile) {
+        await authService.signOutUser();
+        setErrorMessage('No restaurant account found for this Google account. Please register first.');
+        return;
+      }
+
+      if (profile.role === 'customer') {
+        await authService.signOutUser();
+        setErrorMessage('This account is registered as a diner account. Please use the Customer Portal.');
+        return;
+      }
+
+      navigate('/owner/dashboard', { replace: true });
+    } catch (err: any) {
+      console.error('[Mobile Google Sign-In Error]', err);
+      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+        // Closed by user, no error
+      } else if (err.code === 'auth/popup-blocked') {
+        try {
+          await authService.signInWithGoogleRedirect();
+          return;
+        } catch (redirErr: any) {
+          setErrorMessage('Popup blocked. Please check browser permissions.');
+        }
+      } else if (err.code === 'auth/account-exists-with-different-credential') {
+        const pendingCred = authService.getGoogleCredentialFromError(err);
+        const collidingEmail = err.customData?.email || err.email || '';
+        if (pendingCred && collidingEmail) {
+          setLinkingModalState({
+            isOpen: true,
+            email: collidingEmail,
+            credential: pendingCred
+          });
+        } else {
+          setErrorMessage('An account already exists with this email. Please sign in with password.');
+        }
+      } else {
+        setErrorMessage(err.message || 'Google sign-in failed.');
+      }
+    } finally {
+      setLoadingGoogle(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,6 +212,26 @@ export const MobileSplashLogin: React.FC = () => {
             <span className="leading-tight font-medium">{errorMessage}</span>
           </div>
         )}
+
+        {/* Google Sign-In Button */}
+        <div className="mb-4 space-y-3">
+          <GoogleSignInButton
+            id="btn-mobile-google-signin"
+            onClick={handleGoogleSignIn}
+            isLoading={loadingGoogle}
+            disabled={loading}
+            text="Continue with Google"
+          />
+
+          <div className="relative my-3">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-[#EBEBEB]" />
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="px-2 bg-white text-[#9E9E9E] font-medium">or continue with email</span>
+            </div>
+          </div>
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -170,6 +318,33 @@ export const MobileSplashLogin: React.FC = () => {
           <Link to="/help" className="hover:underline">Support</Link>
         </div>
       </div>
+      {/* Single Identity Account Linking Modal */}
+      <AccountLinkingModal
+        isOpen={linkingModalState.isOpen}
+        email={linkingModalState.email}
+        pendingCredential={linkingModalState.credential}
+        onClose={() => setLinkingModalState({ isOpen: false, email: '', credential: null })}
+        onSuccess={async (linkedUser) => {
+          setLinkingModalState({ isOpen: false, email: '', credential: null });
+          const { resolveAuthenticatedUser } = await import('../../../../shared/services/roleResolver');
+          const profile = await resolveAuthenticatedUser(linkedUser);
+
+          if (!profile) {
+            await authService.signOutUser();
+            setErrorMessage('No restaurant account found for this Google profile. Please register first.');
+            return;
+          }
+
+          if (profile.role === 'customer') {
+            await authService.signOutUser();
+            setErrorMessage('This account is registered as a diner account. Please use the Customer Portal.');
+            return;
+          }
+
+          navigate('/owner/dashboard', { replace: true });
+        }}
+        portalName="SpiralDine Mobile Portal"
+      />
     </div>
   );
 };

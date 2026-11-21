@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
+import { AuthCredential } from 'firebase/auth';
 import { authService } from '../../../services/authService';
 import { useToastStore } from '../../../components/ui/Toast/Toast';
 import { getDashboardRoute } from '../../../utils/navigation';
 import { cn } from '../../../utils/cn';
+import GoogleSignInButton from '../../../components/ui/GoogleSignInButton';
+import AccountLinkingModal from '../../../components/ui/AccountLinkingModal';
 import { 
   SUPPORTED_COUNTRIES, 
   SUPPORTED_CURRENCIES, 
@@ -30,12 +33,14 @@ import {
   TrendingUp, 
   Settings, 
   Heart, 
-  Leaf 
+  Leaf,
+  AlertCircle
 } from 'lucide-react';
 
 export const RegisterForm: React.FC = () => {
   const { addToast } = useToastStore();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const detected = detectDefaultCountryAndCurrency();
   const [restaurantName, setRestaurantName] = useState('');
@@ -46,12 +51,114 @@ export const RegisterForm: React.FC = () => {
   const [country, setCountry] = useState(detected.country);
   const [currency, setCurrency] = useState(detected.currency);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
+  const [linkingModalState, setLinkingModalState] = useState<{
+    isOpen: boolean;
+    email: string;
+    credential: AuthCredential | null;
+  }>({
+    isOpen: false,
+    email: '',
+    credential: null
+  });
   const [errors, setErrors] = useState<{
     restaurantName?: string;
     displayName?: string;
     email?: string;
     password?: string;
   }>({});
+
+  // Prefill details if forwarded from login
+  useEffect(() => {
+    const state = location.state as { prefillEmail?: string; prefillName?: string } | null;
+    if (state?.prefillEmail && !email) {
+      setEmail(state.prefillEmail);
+    }
+    if (state?.prefillName && !displayName) {
+      setDisplayName(state.prefillName);
+    }
+  }, [location.state]);
+
+  // Handle Google Redirect Result on mount (supporting mobile and popup-blocked browsers)
+  useEffect(() => {
+    let isMounted = true;
+    const processGoogleRedirect = async () => {
+      try {
+        const result = await authService.getGoogleRedirectResult();
+        if (result?.user && isMounted) {
+          setIsLoadingGoogle(true);
+          const { resolveAuthenticatedUser } = await import('../../../shared/services/roleResolver');
+          const existingProfile = await resolveAuthenticatedUser(result.user);
+
+          if (existingProfile && existingProfile.role && isMounted) {
+            console.log('[AUTH Google Register Redirect] Existing profile found:', existingProfile.role);
+            addToast(`Existing account found. Welcome back, ${existingProfile.displayName || 'Owner'}!`, 'success');
+            navigate(getDashboardRoute(existingProfile.role), { replace: true });
+            return;
+          }
+
+          // Check if pending restaurant name was stored prior to redirect
+          const savedData = sessionStorage.getItem('pending_google_reg');
+          let pendingRestName = restaurantName;
+          let pendingCountry = country;
+          let pendingCurrency = currency;
+          if (savedData) {
+            try {
+              const parsed = JSON.parse(savedData);
+              if (parsed.restaurantName) pendingRestName = parsed.restaurantName;
+              if (parsed.country) pendingCountry = parsed.country;
+              if (parsed.currency) pendingCurrency = parsed.currency;
+            } catch (_) {}
+            sessionStorage.removeItem('pending_google_reg');
+          }
+
+          if (pendingRestName && pendingRestName.trim()) {
+            const locale = SUPPORTED_CURRENCIES[pendingCurrency]?.locale || 'en-IN';
+            await authService.signUpOwnerWithGoogle(
+              result.user,
+              pendingRestName.trim(),
+              pendingCountry,
+              pendingCurrency,
+              locale
+            );
+            addToast('Restaurant registered successfully with Google!', 'success');
+            navigate(getDashboardRoute('owner'), { replace: true });
+          } else {
+            // Populate user information from Google and prompt for restaurant name
+            setDisplayName(result.user.displayName || '');
+            setEmail(result.user.email || '');
+            addToast('Google account connected! Please enter your restaurant name to complete setup.', 'info');
+          }
+        }
+      } catch (err: any) {
+        console.error('[AUTH Google Register Redirect Error]', err);
+        if (isMounted) {
+          if (err.code === 'auth/account-exists-with-different-credential') {
+            const pendingCred = authService.getGoogleCredentialFromError(err);
+            const collidingEmail = err.customData?.email || err.email || '';
+            if (pendingCred && collidingEmail) {
+              setLinkingModalState({
+                isOpen: true,
+                email: collidingEmail,
+                credential: pendingCred
+              });
+            } else {
+              setGoogleError('An account already exists with this email using another sign-in method. Please sign in with email/password.');
+            }
+          } else if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+            setGoogleError(err.message || 'Google registration failed. Please try again.');
+          }
+        }
+      } finally {
+        if (isMounted) setIsLoadingGoogle(false);
+      }
+    };
+    processGoogleRedirect();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const handleCountryChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const nextCountry = e.target.value;
@@ -84,6 +191,86 @@ export const RegisterForm: React.FC = () => {
     return Object.keys(nextErrors).length === 0;
   };
 
+  const handleGoogleSignUp = async () => {
+    if (isLoadingGoogle || isLoading) return;
+
+    if (!restaurantName.trim()) {
+      setErrors(prev => ({
+        ...prev,
+        restaurantName: 'Please enter your restaurant name before signing up with Google'
+      }));
+      addToast('Please enter your restaurant name first.', 'error');
+      const el = document.getElementById('reg-restaurant-name');
+      el?.focus();
+      return;
+    }
+
+    setIsLoadingGoogle(true);
+    setGoogleError(null);
+
+    try {
+      console.log('[AUTH Google Register] Initiating Google popup sign-in...');
+      const cred = await authService.signInWithGoogle();
+      const user = cred.user;
+
+      // Check if user already exists
+      const { resolveAuthenticatedUser } = await import('../../../shared/services/roleResolver');
+      const existingProfile = await resolveAuthenticatedUser(user);
+
+      if (existingProfile && existingProfile.role) {
+        console.log('[AUTH Google Register] Existing user profile found:', existingProfile.role);
+        addToast(`Existing account found. Welcome back, ${existingProfile.displayName || 'Owner'}!`, 'success');
+        navigate(getDashboardRoute(existingProfile.role), { replace: true });
+        return;
+      }
+
+      // User is new: register as owner
+      const locale = SUPPORTED_CURRENCIES[currency]?.locale || 'en-IN';
+      await authService.signUpOwnerWithGoogle(user, restaurantName.trim(), country, currency, locale);
+
+      addToast('Restaurant registered successfully with Google!', 'success');
+      navigate(getDashboardRoute('owner'), { replace: true });
+    } catch (err: any) {
+      console.error('[AUTH Google Register Error]', err);
+      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+        console.log('[AUTH Google Register] Popup closed by user');
+      } else if (err.code === 'auth/popup-blocked') {
+        console.warn('[AUTH Google Register] Popup blocked. Falling back to redirect...');
+        try {
+          sessionStorage.setItem('pending_google_reg', JSON.stringify({
+            restaurantName: restaurantName.trim(),
+            country,
+            currency
+          }));
+          await authService.signInWithGoogleRedirect();
+          return;
+        } catch (redirErr: any) {
+          console.error('[AUTH Google Redirect Fallback Error]', redirErr);
+          setGoogleError('Failed to initiate redirect sign-in. Please allow popups.');
+        }
+      } else if (err.code === 'auth/account-exists-with-different-credential') {
+        const pendingCred = authService.getGoogleCredentialFromError(err);
+        const collidingEmail = err.customData?.email || err.email || '';
+        if (pendingCred && collidingEmail) {
+          setLinkingModalState({
+            isOpen: true,
+            email: collidingEmail,
+            credential: pendingCred
+          });
+        } else {
+          setGoogleError('An account with this email already exists using another sign-in method. Please sign in with email/password.');
+          addToast('Account exists with a different method. Please sign in.', 'error');
+        }
+      } else {
+        const msg = err.message || 'Google registration failed. Please try again.';
+        setGoogleError(msg);
+        addToast(msg, 'error');
+      }
+    } finally {
+      setIsLoadingGoogle(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
@@ -109,7 +296,17 @@ export const RegisterForm: React.FC = () => {
       navigate(destination, { replace: true });
     } catch (err: any) {
       console.error(err);
-      addToast(err.message || 'Registration failed. Please check parameters.', 'error');
+      if (err.code === 'auth/email-already-in-use') {
+        const methods: string[] = await authService.getExistingSignInMethods(email).catch(() => [] as string[]);
+        if (methods.includes('google.com') && !methods.includes('password')) {
+          addToast('This email is registered with Google. Please use Google Sign-In.', 'info');
+          setGoogleError('This account was created using Google Sign-In. Please sign in with Google.');
+        } else {
+          addToast('An account already exists with this email address. Please sign in.', 'error');
+        }
+      } else {
+        addToast(err.message || 'Registration failed. Please check parameters.', 'error');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -220,6 +417,34 @@ export const RegisterForm: React.FC = () => {
             <p className="text-sm text-[#667085] font-normal leading-relaxed max-w-sm mx-auto">
               Join Spiral Dine and start managing your restaurant with ease.
             </p>
+          </div>
+
+          {/* Google Sign-Up Option */}
+          <div className="mb-6 space-y-3">
+            <GoogleSignInButton
+              id="btn-google-signup"
+              onClick={handleGoogleSignUp}
+              isLoading={isLoadingGoogle}
+              disabled={isLoading}
+              text="Sign up with Google"
+              loadingText="Creating account with Google..."
+            />
+
+            {googleError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-2 text-xs text-red-700 font-semibold">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
+                <span>{googleError}</span>
+              </div>
+            )}
+
+            <div className="relative my-4">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-[#E5E1DC]" />
+              </div>
+              <div className="relative flex justify-center text-xs">
+                <span className="px-3 bg-white text-[#667085] font-semibold">or register with email</span>
+              </div>
+            </div>
           </div>
 
           {/* Registration Form */}
@@ -485,6 +710,36 @@ export const RegisterForm: React.FC = () => {
           </div>
         </div>
       </footer>
+      {/* Single Identity Account Linking Modal */}
+      <AccountLinkingModal
+        isOpen={linkingModalState.isOpen}
+        email={linkingModalState.email}
+        pendingCredential={linkingModalState.credential}
+        onClose={() => setLinkingModalState({ isOpen: false, email: '', credential: null })}
+        onSuccess={async (linkedUser) => {
+          setLinkingModalState({ isOpen: false, email: '', credential: null });
+          const { resolveAuthenticatedUser } = await import('../../../shared/services/roleResolver');
+          const existingProfile = await resolveAuthenticatedUser(linkedUser);
+
+          if (existingProfile && existingProfile.role) {
+            addToast(`Google account linked! Welcome back, ${existingProfile.displayName || 'Owner'}!`, 'success');
+            navigate(getDashboardRoute(existingProfile.role), { replace: true });
+          } else {
+            // Linked user has no restaurant yet: register restaurant for this verified existing UID
+            const locale = SUPPORTED_CURRENCIES[currency]?.locale || 'en-IN';
+            await authService.signUpOwnerWithGoogle(
+              linkedUser,
+              restaurantName.trim() || `${linkedUser.displayName || 'My'} Restaurant`,
+              country,
+              currency,
+              locale
+            );
+            addToast('Google linked and restaurant registered!', 'success');
+            navigate(getDashboardRoute('owner'), { replace: true });
+          }
+        }}
+        portalName="SpiralDine Restaurant Registration"
+      />
     </div>
   );
 };

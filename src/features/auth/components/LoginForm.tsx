@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ConfirmationResult } from 'firebase/auth';
+import { ConfirmationResult, AuthCredential } from 'firebase/auth';
 import { RecaptchaManager } from '../../../shared/services/recaptchaManager';
 import { authService } from '../../../services/authService';
 import { useToastStore } from '../../../components/ui/Toast/Toast';
 import { getDashboardRoute } from '../../../utils/navigation';
 import { cn } from '../../../utils/cn';
 import { resolveAuthenticatedUser } from '../../../shared/services/roleResolver';
+import GoogleSignInButton from '../../../components/ui/GoogleSignInButton';
+import AccountLinkingModal from '../../../components/ui/AccountLinkingModal';
 
 // Decorative food imagery
 import leftPlateImg from '../../../assets/left_food_plate.png';
@@ -63,6 +65,20 @@ export const LoginForm: React.FC = () => {
 
   // Active authentication method
   const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
+
+  // Google Authentication State
+  const [isLoadingGoogle, setIsLoadingGoogle] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
+  const [unregisteredGoogleUser, setUnregisteredGoogleUser] = useState<{ email: string; displayName: string } | null>(null);
+  const [linkingModalState, setLinkingModalState] = useState<{
+    isOpen: boolean;
+    email: string;
+    credential: AuthCredential | null;
+  }>({
+    isOpen: false,
+    email: '',
+    credential: null
+  });
 
   // Option A: Email & Password state
   const [email, setEmail] = useState('');
@@ -125,8 +141,58 @@ export const LoginForm: React.FC = () => {
     }
   }, [phoneStep]);
 
+  // Handle Google Redirect Result on mount (supporting mobile and popup-blocked browsers)
+  useEffect(() => {
+    let isMounted = true;
+    const processGoogleRedirect = async () => {
+      try {
+        const result = await authService.getGoogleRedirectResult();
+        if (result?.user && isMounted) {
+          console.log('[AUTH Google Redirect] Processing returning user:', result.user.uid);
+          setIsLoadingGoogle(true);
+          const success = await handleAuthenticatedUser(result.user, 'google');
+          if (!success && isMounted) {
+            await authService.signOutUser();
+            setUnregisteredGoogleUser({
+              email: result.user.email || '',
+              displayName: result.user.displayName || ''
+            });
+            setGoogleError(
+              `No restaurant or staff account found for ${result.user.email || 'this Google account'}. If you are a restaurant owner, please register your restaurant first.`
+            );
+          }
+        }
+      } catch (err: any) {
+        console.error('[AUTH Google Redirect Error]', err);
+        if (isMounted) {
+          if (err.code === 'auth/account-exists-with-different-credential') {
+            const pendingCred = authService.getGoogleCredentialFromError(err);
+            const collidingEmail = err.customData?.email || err.email || '';
+            if (pendingCred && collidingEmail) {
+              setLinkingModalState({
+                isOpen: true,
+                email: collidingEmail,
+                credential: pendingCred
+              });
+            } else {
+              setGoogleError('An account already exists with this email address using another sign-in method. Please sign in using email and password.');
+            }
+          } else if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+            setGoogleError(err.message || 'Google sign-in failed. Please try again.');
+          }
+        }
+      } finally {
+        if (isMounted) setIsLoadingGoogle(false);
+      }
+    };
+    processGoogleRedirect();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   // Shared authoritative profile resolution and role routing
-  const handleAuthenticatedUser = async (user: any, method: 'email' | 'phone') => {
+  const handleAuthenticatedUser = async (user: any, method: 'email' | 'phone' | 'google') => {
     const profile = await resolveAuthenticatedUser(user);
 
     if (!profile) {
@@ -134,10 +200,14 @@ export const LoginForm: React.FC = () => {
       await authService.signOutUser();
       const msg = method === 'phone'
         ? 'This mobile number is verified, but no authorized business or staff account is linked to it. If you have an email account, please sign in with your email or contact your administrator.'
+        : method === 'google'
+        ? 'No restaurant or staff account found for this Google account. Please register your restaurant first or accept a staff invitation.'
         : `Profile is missing or not configured for this account. No profile document found for UID: ${user.uid}.`;
       addToast(msg, 'error');
       if (method === 'phone') {
         setPhoneError(msg);
+      } else if (method === 'google') {
+        setGoogleError(msg);
       }
       return false;
     }
@@ -149,6 +219,8 @@ export const LoginForm: React.FC = () => {
       addToast(msg, 'error');
       if (method === 'phone') {
         setPhoneError(msg);
+      } else if (method === 'google') {
+        setGoogleError(msg);
       }
       return false;
     }
@@ -160,6 +232,8 @@ export const LoginForm: React.FC = () => {
       addToast(msg, 'error');
       if (method === 'phone') {
         setPhoneError(msg);
+      } else if (method === 'google') {
+        setGoogleError(msg);
       }
       return false;
     }
@@ -175,6 +249,77 @@ export const LoginForm: React.FC = () => {
     addToast(`Welcome back, ${profile.displayName || 'User'}!`, 'success');
     navigate(destination, { replace: true });
     return true;
+  };
+
+  // ---------------------------------------------------------------------------
+  // GOOGLE SIGN-IN HANDLER (POPUP WITH REDIRECT FALLBACK)
+  // ---------------------------------------------------------------------------
+  const handleGoogleSignIn = async () => {
+    if (isLoadingGoogle || isLoadingEmail || isSendingOtp || isVerifyingOtp) return;
+
+    setIsLoadingGoogle(true);
+    setGoogleError(null);
+    setUnregisteredGoogleUser(null);
+
+    try {
+      console.log('[AUTH Google Login] Initiating Google popup sign-in...');
+      const cred = await authService.signInWithGoogle();
+      const user = cred.user;
+      console.log('[AUTH Google Login] Firebase Auth succeeded. UID:', user.uid);
+
+      const success = await handleAuthenticatedUser(user, 'google');
+      if (!success) {
+        console.warn('[AUTH Google Login] User has no authorized restaurant or staff profile.');
+        await authService.signOutUser();
+        setUnregisteredGoogleUser({
+          email: user.email || '',
+          displayName: user.displayName || ''
+        });
+        setGoogleError(
+          `No restaurant or staff account found for ${user.email || 'this Google account'}. If you are a restaurant owner, please register your restaurant first.`
+        );
+      }
+    } catch (err: any) {
+      console.error('[AUTH Google Login Error]', err);
+      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
+        console.log('[AUTH Google Login] Popup closed by user');
+      } else if (err.code === 'auth/popup-blocked') {
+        console.warn('[AUTH Google Login] Popup was blocked by browser. Falling back to redirect...');
+        addToast('Popup was blocked by your browser. Redirecting to Google Sign-In...', 'info');
+        try {
+          await authService.signInWithGoogleRedirect();
+          return;
+        } catch (redirErr: any) {
+          console.error('[AUTH Google Redirect Fallback Error]', redirErr);
+          setGoogleError('Unable to open Google sign-in. Please check your browser popup settings.');
+          addToast('Google Sign-In was blocked. Please allow popups or try again.', 'error');
+        }
+      } else if (err.code === 'auth/account-exists-with-different-credential') {
+        const pendingCred = authService.getGoogleCredentialFromError(err);
+        const collidingEmail = err.customData?.email || err.email || '';
+        if (pendingCred && collidingEmail) {
+          setLinkingModalState({
+            isOpen: true,
+            email: collidingEmail,
+            credential: pendingCred
+          });
+        } else {
+          const msg = 'An account already exists with this email address using another sign-in method. Please sign in with your email and password.';
+          setGoogleError(msg);
+          addToast(msg, 'error');
+        }
+      } else if (err.code === 'auth/unauthorized-domain') {
+        const msg = 'This domain is not authorized in Firebase Authentication. Please add it to Firebase Console -> Authorized Domains.';
+        setGoogleError(msg);
+        addToast(msg, 'error');
+      } else {
+        const msg = err.message || 'Failed to authenticate with Google. Please try again.';
+        setGoogleError(msg);
+        addToast(msg, 'error');
+      }
+    } finally {
+      setIsLoadingGoogle(false);
+    }
   };
 
   // ---------------------------------------------------------------------------
@@ -383,6 +528,7 @@ export const LoginForm: React.FC = () => {
     }
     setAuthMethod(method);
     setPhoneError(null);
+    setGoogleError(null);
     setEmailErrors({});
   };
 
@@ -491,6 +637,52 @@ export const LoginForm: React.FC = () => {
             <p className="text-sm text-[#657180] font-normal leading-relaxed max-w-sm mx-auto">
               Sign in to access your restaurant workspace and manage your business.
             </p>
+          </div>
+
+          {/* Google Sign-In Option */}
+          <div className="mb-6 space-y-3">
+            <GoogleSignInButton
+              id="btn-google-signin"
+              onClick={handleGoogleSignIn}
+              isLoading={isLoadingGoogle}
+              disabled={isLoadingEmail || isSendingOtp || isVerifyingOtp}
+              text="Sign in with Google"
+            />
+
+            {googleError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex flex-col space-y-2 text-xs text-red-700 font-semibold">
+                <div className="flex items-start space-x-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
+                  <span>{googleError}</span>
+                </div>
+                {unregisteredGoogleUser && (
+                  <div className="pt-2 border-t border-red-100 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => navigate('/register', { 
+                        state: { 
+                          prefillEmail: unregisteredGoogleUser.email, 
+                          prefillName: unregisteredGoogleUser.displayName 
+                        } 
+                      })}
+                      className="bg-[#D65336] hover:bg-[#B9432C] text-white text-[11px] py-1.5 px-3 font-bold rounded-lg transition-colors cursor-pointer"
+                    >
+                      Register Restaurant with Google →
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Visual Divider */}
+            <div className="relative my-4">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-[#E8DED6]" />
+              </div>
+              <div className="relative flex justify-center text-xs">
+                <span className="px-3 bg-white text-[#8A817A] font-semibold">or continue with</span>
+              </div>
+            </div>
           </div>
 
           {/* Login Method Switcher Tabs */}
@@ -907,6 +1099,18 @@ export const LoginForm: React.FC = () => {
           </div>
         </div>
       </footer>
+      {/* Single Identity Account Linking Modal */}
+      <AccountLinkingModal
+        isOpen={linkingModalState.isOpen}
+        email={linkingModalState.email}
+        pendingCredential={linkingModalState.credential}
+        onClose={() => setLinkingModalState({ isOpen: false, email: '', credential: null })}
+        onSuccess={async (linkedUser) => {
+          setLinkingModalState({ isOpen: false, email: '', credential: null });
+          await handleAuthenticatedUser(linkedUser, 'google');
+        }}
+        portalName="SpiralDine Business Portal"
+      />
     </div>
   );
 };
