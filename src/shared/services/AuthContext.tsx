@@ -74,118 +74,186 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         try {
-          // Check if customer profile exists at customers/{uid}
+          const userDocRef = doc(db, 'users', fUser.uid);
           const custDocRef = doc(db, 'customers', fUser.uid);
-          let isCustomerProfile = false;
-          try {
-            const custSnap = await getDoc(custDocRef);
-            if (custSnap.exists()) {
-              isCustomerProfile = true;
-            }
-          } catch (_err) {}
 
-          const profileDocRef = isCustomerProfile ? custDocRef : doc(db, 'users', fUser.uid);
+          let latestUserData: any = null;
+          let latestUserExists = false;
+          let latestCustData: any = null;
+          let latestCustExists = false;
 
-          // Real-time listener for user or customer profile updates
-          unsubscribeUserDoc = onSnapshot(
-            profileDocRef,
-            async (userDoc) => {
-              try {
-                if (userDoc.exists() && (userDoc.data().role || isCustomerProfile)) {
-                  const data = userDoc.data();
-                  let roleCandidate = data.role || (isCustomerProfile ? 'customer' : null);
-                  try {
-                    const tokenResult = await fUser.getIdTokenResult();
-                    if (tokenResult?.claims?.role === 'super_admin' || tokenResult?.claims?.role === 'super-admin' || tokenResult?.claims?.super_admin === true) {
-                      roleCandidate = 'super_admin';
-                    }
-                  } catch (_e) {}
-                  const resolvedRole = (roleCandidate === 'super-admin' ? 'super_admin' : roleCandidate) as TUserRole;
-                  const resolvedUser: IUser = {
-                    uid: fUser.uid,
-                    email: (fUser.email || data.email || '').toLowerCase(),
-                    displayName: data.fullName || data.displayName || fUser.displayName || (resolvedRole === 'customer' ? 'Customer' : 'User'),
-                    tenantId: data.tenantId || '',
-                    role: resolvedRole,
-                    status: (data.status === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
-                    phoneNumber: data.phoneNumber || data.phone || '',
-                    createdAt: data.createdAt || fUser.metadata.creationTime || new Date().toISOString()
-                  };
-
-                  console.log('[AUTH Context] Profile loaded via snapshot (' + (isCustomerProfile ? 'customers' : 'users') + '):', {
-                    uid: resolvedUser.uid,
-                    role: resolvedUser.role,
-                    tenantId: resolvedUser.tenantId
-                  });
-
-                  setUser(resolvedUser);
-                  setRole(resolvedUser.role);
-                  setTenantId(resolvedUser.tenantId);
-                  setProfileError(null);
-                  setIsLoading(false);
-                  setAuthStatus('AUTHORIZED');
-                } else {
-                  // Document missing or role missing — call authoritative roleResolver
-                  const profile = await resolveAuthenticatedUser(fUser);
-                  if (profile && profile.role) {
-                    const resolvedRole = (profile.role === 'super-admin' ? 'super_admin' : profile.role) as TUserRole;
-                    const resolvedUser: IUser = {
-                      uid: profile.uid,
-                      email: profile.email,
-                      displayName: profile.displayName,
-                      tenantId: profile.tenantId,
-                      role: resolvedRole,
-                      status: (profile.status === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
-                      phoneNumber: profile.phoneNumber || '',
-                      createdAt: profile.createdAt
-                    };
-
-                    console.log('[AUTH Context] Profile resolved via roleResolver:', {
-                      uid: resolvedUser.uid,
-                      role: resolvedUser.role,
-                      tenantId: resolvedUser.tenantId
-                    });
-
-                    setUser(resolvedUser);
-                    setRole(resolvedUser.role);
-                    setTenantId(resolvedUser.tenantId);
-                    setProfileError(null);
-                    setIsLoading(false);
-                    setAuthStatus('AUTHORIZED');
-                  } else {
-                    console.warn('[AUTH Context] Profile missing or unassigned role for UID:', fUser.uid);
-                    setUser(null);
-                    setRole(null);
-                    setTenantId(null);
-                    setProfileError(`User profile is missing or not configured for UID: ${fUser.uid}.`);
-                    setIsLoading(false);
-                    setAuthStatus('PROFILE_MISSING');
+          const applyProfileUpdate = async () => {
+            try {
+              // 1. Staff/Owner in users/{uid} takes precedence
+              if (latestUserExists && latestUserData?.role && latestUserData.role !== 'customer') {
+                const data = latestUserData;
+                let roleCandidate = data.role;
+                try {
+                  const tokenResult = await fUser.getIdTokenResult();
+                  if (tokenResult?.claims?.role === 'super_admin' || tokenResult?.claims?.role === 'super-admin' || tokenResult?.claims?.super_admin === true) {
+                    roleCandidate = 'super_admin';
                   }
-                }
-              } catch (snapErr: any) {
-                console.error('[AUTH Context] Error parsing snapshot data:', snapErr);
-                setUser(null);
-                setRole(null);
-                setTenantId(null);
-                setProfileError('Failed to load user session profile.');
+                } catch (_e) {}
+                const resolvedRole = (roleCandidate === 'super-admin' ? 'super_admin' : roleCandidate) as TUserRole;
+                const resolvedUser: IUser = {
+                  uid: fUser.uid,
+                  email: (fUser.email || data.email || '').toLowerCase(),
+                  displayName: data.fullName || data.displayName || fUser.displayName || 'User',
+                  tenantId: data.tenantId || '',
+                  role: resolvedRole,
+                  status: (data.status === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
+                  phoneNumber: data.phoneNumber || data.phone || '',
+                  createdAt: data.createdAt || fUser.metadata.creationTime || new Date().toISOString()
+                };
+
+                console.log('[AUTH Context] Profile loaded via users snapshot:', {
+                  uid: resolvedUser.uid,
+                  role: resolvedUser.role,
+                  tenantId: resolvedUser.tenantId
+                });
+
+                setUser(resolvedUser);
+                setRole(resolvedUser.role);
+                setTenantId(resolvedUser.tenantId);
+                setProfileError(null);
                 setIsLoading(false);
-                setAuthStatus('PROFILE_MISSING');
+                setAuthStatus('AUTHORIZED');
+                return;
               }
-            },
-            (error) => {
-              console.error('[AUTH Context] Database snapshot listener error:', error);
+
+              // 2. Customer in customers/{uid}
+              if (latestCustExists && latestCustData) {
+                const data = latestCustData;
+                const resolvedUser: IUser = {
+                  uid: fUser.uid,
+                  email: (fUser.email || data.email || '').toLowerCase(),
+                  displayName: data.fullName || data.displayName || fUser.displayName || 'Customer',
+                  tenantId: data.tenantId || '',
+                  role: 'customer' as TUserRole,
+                  status: (data.status === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
+                  phoneNumber: data.phoneNumber || data.phone || '',
+                  createdAt: data.createdAt || fUser.metadata.creationTime || new Date().toISOString()
+                };
+
+                console.log('[AUTH Context] Profile loaded via customers snapshot:', {
+                  uid: resolvedUser.uid,
+                  role: resolvedUser.role
+                });
+
+                setUser(resolvedUser);
+                setRole('customer');
+                setTenantId(resolvedUser.tenantId);
+                setProfileError(null);
+                setIsLoading(false);
+                setAuthStatus('AUTHORIZED');
+                return;
+              }
+
+              // 3. User doc exists with role customer (legacy migration compatibility)
+              if (latestUserExists && latestUserData?.role === 'customer') {
+                const data = latestUserData;
+                const resolvedUser: IUser = {
+                  uid: fUser.uid,
+                  email: (fUser.email || data.email || '').toLowerCase(),
+                  displayName: data.fullName || data.displayName || fUser.displayName || 'Customer',
+                  tenantId: data.tenantId || '',
+                  role: 'customer' as TUserRole,
+                  status: (data.status === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
+                  phoneNumber: data.phoneNumber || data.phone || '',
+                  createdAt: data.createdAt || fUser.metadata.creationTime || new Date().toISOString()
+                };
+
+                console.log('[AUTH Context] Profile loaded via legacy users customer snapshot:', {
+                  uid: resolvedUser.uid,
+                  role: resolvedUser.role
+                });
+
+                setUser(resolvedUser);
+                setRole('customer');
+                setTenantId(resolvedUser.tenantId);
+                setProfileError(null);
+                setIsLoading(false);
+                setAuthStatus('AUTHORIZED');
+                return;
+              }
+
+              // 4. Fallback to authoritative roleResolver (resolves owners via tenants/owners collection or claims)
+              const profile = await resolveAuthenticatedUser(fUser);
+              if (profile && profile.role) {
+                const resolvedRole = (profile.role === 'super-admin' ? 'super_admin' : profile.role) as TUserRole;
+                const resolvedUser: IUser = {
+                  uid: profile.uid,
+                  email: profile.email,
+                  displayName: profile.displayName,
+                  tenantId: profile.tenantId,
+                  role: resolvedRole,
+                  status: (profile.status === 'inactive' ? 'inactive' : 'active') as 'active' | 'inactive',
+                  phoneNumber: profile.phoneNumber || '',
+                  createdAt: profile.createdAt
+                };
+
+                console.log('[AUTH Context] Profile resolved via roleResolver:', {
+                  uid: resolvedUser.uid,
+                  role: resolvedUser.role,
+                  tenantId: resolvedUser.tenantId
+                });
+
+                setUser(resolvedUser);
+                setRole(resolvedUser.role);
+                setTenantId(resolvedUser.tenantId);
+                setProfileError(null);
+                setIsLoading(false);
+                setAuthStatus('AUTHORIZED');
+                return;
+              }
+
+              // Neither exists yet (registration in progress)
+              console.warn('[AUTH Context] Profile pending or missing for UID:', fUser.uid);
               setUser(null);
               setRole(null);
               setTenantId(null);
-              if (error.code === 'permission-denied') {
-                setProfileError('Permission denied reading your user profile.');
-              } else {
-                setProfileError('Database snapshot listener error.');
-              }
+              setProfileError(`User profile is missing or not configured for UID: ${fUser.uid}.`);
+              setIsLoading(false);
+              setAuthStatus('PROFILE_MISSING');
+            } catch (snapErr: any) {
+              console.error('[AUTH Context] Error resolving profile snapshot data:', snapErr);
+              setUser(null);
+              setRole(null);
+              setTenantId(null);
+              setProfileError('Failed to load user session profile.');
               setIsLoading(false);
               setAuthStatus('PROFILE_MISSING');
             }
+          };
+
+          const unsubUser = onSnapshot(
+            userDocRef,
+            (snap) => {
+              latestUserExists = snap.exists();
+              latestUserData = snap.exists() ? snap.data() : null;
+              applyProfileUpdate();
+            },
+            (error) => {
+              console.warn('[AUTH Context] userDoc snapshot warning:', error?.message);
+            }
           );
+
+          const unsubCust = onSnapshot(
+            custDocRef,
+            (snap) => {
+              latestCustExists = snap.exists();
+              latestCustData = snap.exists() ? snap.data() : null;
+              applyProfileUpdate();
+            },
+            (error) => {
+              console.warn('[AUTH Context] custDoc snapshot warning:', error?.message);
+            }
+          );
+
+          unsubscribeUserDoc = () => {
+            unsubUser();
+            unsubCust();
+          };
         } catch (e: any) {
           console.error('[AUTH Context] Auth initialization error:', e);
           setUser(null);

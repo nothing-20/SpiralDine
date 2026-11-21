@@ -5,6 +5,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { AuthCredential } from 'firebase/auth';
 import { authService } from '../../../services/authService';
 import { zodResolver } from '../../../utils/zodResolver';
+import { getDashboardRoute } from '../../../utils/navigation';
 import GoogleSignInButton from '../../../components/ui/GoogleSignInButton';
 import AccountLinkingModal from '../../../components/ui/AccountLinkingModal';
 
@@ -63,10 +64,9 @@ export const CustomerRegister: React.FC = () => {
           setIsLoadingGoogle(true);
           const res = await authService.signInOrRegisterCustomerWithGoogle(result.user);
           if (res.isStaff) {
-            await authService.signOutUser();
-            const msg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
-            setErrorText(msg);
-            toast.error(msg);
+            const destination = getDashboardRoute(res.role);
+            toast.success(`Welcome back, ${result.user.displayName || 'Owner'}!`);
+            navigate(destination, { replace: true });
             return;
           }
           toast.success('Account connected successfully! Welcome to Spiral Dine.');
@@ -116,10 +116,9 @@ export const CustomerRegister: React.FC = () => {
       const cred = await authService.signInWithGoogle();
       const res = await authService.signInOrRegisterCustomerWithGoogle(cred.user);
       if (res.isStaff) {
-        await authService.signOutUser();
-        const msg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
-        setErrorText(msg);
-        toast.error(msg);
+        const destination = getDashboardRoute(res.role);
+        toast.success(`Welcome back, ${cred.user.displayName || 'Owner'}!`);
+        navigate(destination, { replace: true });
         return;
       }
       toast.success('Account connected successfully! Welcome to Spiral Dine.');
@@ -317,10 +316,9 @@ export const CustomerRegister: React.FC = () => {
           setLinkingModalState({ isOpen: false, email: '', credential: null });
           const res = await authService.signInOrRegisterCustomerWithGoogle(linkedUser);
           if (res.isStaff) {
-            await authService.signOutUser();
-            const msg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
-            setErrorText(msg);
-            toast.error(msg);
+            const destination = getDashboardRoute(res.role);
+            toast.success(`Welcome back, ${linkedUser.displayName || 'Owner'}!`);
+            navigate(destination, { replace: true });
             return;
           }
           toast.success('Account connected successfully! Welcome to Spiral Dine.');

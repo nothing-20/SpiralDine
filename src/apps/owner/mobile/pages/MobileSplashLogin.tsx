@@ -55,10 +55,7 @@ export const MobileSplashLogin: React.FC = () => {
           }
 
           if (profile.role === 'customer') {
-            await authService.signOutUser();
-            if (isMounted) {
-              setErrorMessage('This account is registered as a diner account. Please use Customer Portal.');
-            }
+            navigate('/customer/home', { replace: true });
             return;
           }
 
@@ -118,8 +115,7 @@ export const MobileSplashLogin: React.FC = () => {
       }
 
       if (profile.role === 'customer') {
-        await authService.signOutUser();
-        setErrorMessage('This account is registered as a diner account. Please use the Customer Portal.');
+        navigate('/customer/home', { replace: true });
         return;
       }
 

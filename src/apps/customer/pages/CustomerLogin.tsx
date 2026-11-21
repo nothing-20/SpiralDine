@@ -11,6 +11,8 @@ import { zodResolver } from '../../../utils/zodResolver';
 import { useToastStore } from '../../../components/ui/Toast/Toast';
 import { cn } from '../../../utils/cn';
 import { resolveAuthenticatedUser } from '../../../shared/services/roleResolver';
+import { getDashboardRoute } from '../../../utils/navigation';
+import { TUserRole } from '../../../types';
 import GoogleSignInButton from '../../../components/ui/GoogleSignInButton';
 import AccountLinkingModal from '../../../components/ui/AccountLinkingModal';
 
@@ -184,15 +186,25 @@ export const CustomerLogin: React.FC = () => {
           if (staffUserSnap.exists()) {
             const staffData = staffUserSnap.data();
             if (staffData.role && staffData.role !== 'customer') {
-              await authService.signOutUser();
+              const destination = getDashboardRoute(staffData.role as TUserRole);
               if (isMounted) {
-                setGoogleCustomerError('This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.');
+                addToast(`Welcome back, ${staffData.displayName || staffData.fullName || 'User'}!`, 'success');
+                navigate(destination, { replace: true });
               }
               return;
             }
           }
 
-          await authService.signInOrRegisterCustomerWithGoogle(fUser);
+          const res = await authService.signInOrRegisterCustomerWithGoogle(fUser);
+          if (res.isStaff) {
+            const destination = getDashboardRoute(res.role);
+            if (isMounted) {
+              addToast('Welcome back!', 'success');
+              navigate(destination, { replace: true });
+            }
+            return;
+          }
+
           if (isMounted) {
             addToast('Signed in successfully with Google!', 'success');
             navigate(getSuccessRedirect(), { replace: true });
@@ -246,20 +258,18 @@ export const CustomerLogin: React.FC = () => {
       if (staffUserSnap.exists()) {
         const staffData = staffUserSnap.data();
         if (staffData.role && staffData.role !== 'customer') {
-          await authService.signOutUser();
-          const mismatchMsg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
-          setGoogleCustomerError(mismatchMsg);
-          addToast(mismatchMsg, 'error');
+          const destination = getDashboardRoute(staffData.role as TUserRole);
+          addToast(`Welcome back, ${staffData.displayName || staffData.fullName || 'User'}!`, 'success');
+          navigate(destination, { replace: true });
           return;
         }
       }
 
       const res = await authService.signInOrRegisterCustomerWithGoogle(fUser);
       if (res.isStaff) {
-        await authService.signOutUser();
-        const mismatchMsg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
-        setGoogleCustomerError(mismatchMsg);
-        addToast(mismatchMsg, 'error');
+        const destination = getDashboardRoute(res.role);
+        addToast('Welcome back!', 'success');
+        navigate(destination, { replace: true });
         return;
       }
 
@@ -442,11 +452,9 @@ export const CustomerLogin: React.FC = () => {
       if (staffUserSnap.exists()) {
         const staffData = staffUserSnap.data();
         if (staffData.role && staffData.role !== 'customer') {
-          console.warn('[AUTH Customer Login] Owner/Staff tried customer portal:', staffData.role);
-          await authService.signOutUser();
-          const mismatchMsg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
-          setPhoneError(mismatchMsg);
-          addToast(mismatchMsg, 'error');
+          const destination = getDashboardRoute(staffData.role as TUserRole);
+          addToast(`Welcome back, ${staffData.displayName || staffData.fullName || 'User'}!`, 'success');
+          navigate(destination, { replace: true });
           setIsVerifyingOtp(false);
           return;
         }
@@ -525,14 +533,9 @@ export const CustomerLogin: React.FC = () => {
       if (staffUserSnap.exists()) {
         const staffData = staffUserSnap.data();
         if (staffData.role && staffData.role !== 'customer') {
-          console.warn('[AUTH Customer Login] Owner/Staff tried customer portal:', staffData.role);
-          await authService.signOutUser();
-          const mismatchMsg = 'This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.';
-          setErrorState({
-            message: mismatchMsg,
-            showRegister: false
-          });
-          addToast(mismatchMsg, 'error');
+          const destination = getDashboardRoute(staffData.role as TUserRole);
+          addToast(`Welcome back, ${staffData.displayName || staffData.fullName || 'User'}!`, 'success');
+          navigate(destination, { replace: true });
           setIsSubmittingEmail(false);
           return;
         }
@@ -1179,9 +1182,9 @@ export const CustomerLogin: React.FC = () => {
           if (staffUserSnap.exists()) {
             const staffData = staffUserSnap.data();
             if (staffData.role && staffData.role !== 'customer') {
-              await authService.signOutUser();
-              setGoogleCustomerError('This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.');
-              addToast('This account has restaurant owner or staff clearance. Please sign in via the Owner or Staff portal.', 'error');
+              const destination = getDashboardRoute(staffData.role as TUserRole);
+              addToast(`Welcome back, ${staffData.displayName || staffData.fullName || 'User'}!`, 'success');
+              navigate(destination, { replace: true });
               return;
             }
           }
